@@ -1,0 +1,357 @@
+---
+title: API Reference
+sidebar_position: 4
+---
+
+# API Reference
+
+## Sandbox Class
+
+The main class for creating and managing sandboxes.
+
+### Class Methods
+
+#### `Sandbox.create()`
+
+Creates a new sandbox instance.
+
+```python
+@classmethod
+def create(
+    variant: str = "local-eval",
+    timeout: float | None = None,
+    environment: str | None = None,
+    gpu: str | None = None,
+    cpu: float | None = None,
+    memory: int | None = None,
+    env: dict[str, str] | None = None,
+    tags: dict[str, str] | None = None,
+    name: str | None = None,
+    snapshot_name: str | None = None,
+    config: SandboxConfig | None = None,
+) -> Sandbox
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `variant` | `str` | Sandbox type: `"local-eval"`, `"local-docker"`, or `"datalayer-runtime"` |
+| `timeout` | `float` | Execution timeout in seconds |
+| `environment` | `str` | Runtime environment name |
+| `gpu` | `str` | GPU type (e.g., `"T4"`, `"A100"`, `"H100"`) |
+| `cpu` | `float` | Number of CPU cores |
+| `memory` | `int` | Memory in MB |
+| `env` | `dict` | Environment variables |
+| `tags` | `dict` | Metadata tags |
+| `name` | `str` | Sandbox name |
+| `snapshot_name` | `str` | Snapshot to restore from |
+| `config` | `SandboxConfig` | Full configuration object |
+
+#### `Sandbox.from_id()`
+
+Reconnects to an existing sandbox.
+
+```python
+@classmethod
+def from_id(sandbox_id: str, variant: str = "datalayer-runtime") -> Sandbox
+```
+
+#### `Sandbox.list()`
+
+Lists all sandboxes.
+
+```python
+@classmethod
+def list(variant: str = "datalayer-runtime") -> list[SandboxInfo]
+```
+
+#### `Sandbox.list_environments()`
+
+Lists available environments for a sandbox variant.
+
+```python
+@classmethod
+def list_environments(
+    variant: str = "datalayer-runtime",
+    **kwargs,
+) -> list[SandboxEnvironment]
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `variant` | `str` | Sandbox type: `"local-eval"`, `"local-docker"`, or `"datalayer-runtime"` |
+| `**kwargs` | `dict` | Variant-specific arguments (e.g., credentials, run URL) |
+
+### Instance Methods
+
+#### `run_code()`
+
+Executes Python code in the sandbox.
+
+```python
+def run_code(
+    code: str,
+    on_stdout: Callable[[OutputMessage], None] | None = None,
+    on_stderr: Callable[[OutputMessage], None] | None = None,
+    on_result: Callable[[Result], None] | None = None,
+    timeout: float | None = None,
+) -> ExecutionResult
+```
+
+#### `start()`
+
+Starts the sandbox.
+
+```python
+def start() -> None
+```
+
+#### `stop()`
+
+Stops the sandbox gracefully.
+
+```python
+def stop() -> None
+```
+
+#### `terminate()`
+
+Terminates the sandbox.
+
+```python
+def terminate() -> None
+```
+
+#### `kill()`
+
+Force kills the sandbox.
+
+```python
+def kill() -> None
+```
+
+#### `set_timeout()`
+
+Updates the sandbox timeout.
+
+```python
+def set_timeout(timeout: float) -> None
+```
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `sandbox_id` | `str` | Unique sandbox identifier |
+| `files` | `SandboxFilesystem` | Filesystem interface |
+| `commands` | `SandboxCommands` | Command execution interface |
+| `tags` | `dict[str, str]` | Metadata tags |
+
+---
+
+## SandboxFilesystem
+
+File operations interface.
+
+### Methods
+
+#### `read()`
+
+```python
+def read(path: str) -> str
+```
+
+Reads file contents as a string.
+
+#### `read_bytes()`
+
+```python
+def read_bytes(path: str) -> bytes
+```
+
+Reads file contents as bytes.
+
+#### `write()`
+
+```python
+def write(path: str, content: str | bytes) -> None
+```
+
+Writes content to a file.
+
+#### `list()`
+
+```python
+def list(path: str) -> list[FileInfo]
+```
+
+Lists directory contents.
+
+#### `mkdir()`
+
+```python
+def mkdir(path: str, parents: bool = True) -> None
+```
+
+Creates a directory.
+
+#### `rm()`
+
+```python
+def rm(path: str, recursive: bool = False) -> None
+```
+
+Removes a file or directory.
+
+#### `upload()`
+
+```python
+def upload(local_path: str, remote_path: str) -> None
+```
+
+Uploads a local file to the sandbox.
+
+#### `download()`
+
+```python
+def download(remote_path: str, local_path: str) -> None
+```
+
+Downloads a file from the sandbox.
+
+---
+
+## SandboxCommands
+
+Command execution interface.
+
+### Methods
+
+#### `run()`
+
+```python
+def run(
+    command: str,
+    timeout: float | None = None,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+) -> CommandResult
+```
+
+Runs a command and waits for completion.
+
+#### `exec()`
+
+```python
+def exec(*args: str, **kwargs) -> ProcessHandle
+```
+
+Executes a command with streaming output.
+
+#### `spawn()`
+
+```python
+def spawn(command: str, **kwargs) -> ProcessHandle
+```
+
+Starts a background process.
+
+---
+
+## Data Classes
+
+### ExecutionResult
+
+```python
+@dataclass
+class ExecutionResult:
+    success: bool
+    stdout: str
+    stderr: str
+    text: str
+    results: list[Result]
+    error: ExecutionError | None
+```
+
+### SandboxEnvironment
+
+```python
+@dataclass
+class SandboxEnvironment:
+    name: str
+    title: str
+    language: str
+    owner: str
+    visibility: str
+    burning_rate: float
+    metadata: dict[str, Any] | None
+```
+
+### CommandResult
+
+```python
+@dataclass
+class CommandResult:
+    exit_code: int
+    stdout: str
+    stderr: str
+```
+
+### FileInfo
+
+```python
+@dataclass
+class FileInfo:
+    name: str
+    path: str
+    type: FileType
+    size: int
+    modified: datetime | None
+```
+
+### SandboxInfo
+
+```python
+@dataclass
+class SandboxInfo:
+    sandbox_id: str
+    status: SandboxStatus
+    environment: str
+    created_at: datetime
+    started_at: datetime | None
+    end_at: datetime | None
+```
+
+### SnapshotInfo
+
+```python
+@dataclass
+class SnapshotInfo:
+    id: str
+    name: str
+    sandbox_id: str
+    created_at: datetime
+    size: int
+```
+
+---
+
+## Exceptions
+
+| Exception | Description |
+|-----------|-------------|
+| `SandboxError` | Base exception for all sandbox errors |
+| `SandboxNotFoundError` | Sandbox not found |
+| `SandboxTimeoutError` | Execution timed out |
+| `SandboxExecutionError` | Code execution failed |
+| `SandboxConnectionError` | Connection to sandbox failed |
+| `SandboxNotRunningError` | Sandbox is not running |
+| `SandboxFilesystemError` | Filesystem operation failed |
+| `SandboxCommandError` | Command execution failed |
+| `SandboxSnapshotError` | Snapshot operation failed |
+| `SandboxResourceError` | Resource limit exceeded |
+| `SandboxAuthenticationError` | Authentication failed |
+| `SandboxQuotaExceededError` | Usage quota exceeded |

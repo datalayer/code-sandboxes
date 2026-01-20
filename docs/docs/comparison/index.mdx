@@ -1,0 +1,169 @@
+---
+title: Comparison
+sidebar_position: 3
+---
+
+# Comparison with Other Solutions
+
+This page compares Code Sandboxes with other popular code execution platforms: E2B and Modal.
+
+## Overview
+
+| Feature | Code Sandboxes | E2B | Modal |
+|---------|---------------|-----|-------|
+| **Open Source** | ✅ Yes (BSD-3) | ✅ Yes (Apache-2) | ❌ No |
+| **Self-hostable** | ✅ Yes | ✅ Yes | ❌ No |
+| **Cloud Offering** | ✅ Datalayer | ✅ E2B Cloud | ✅ Modal Cloud |
+| **Local Execution** | ✅ Yes | ❌ No | ❌ No |
+| **GPU Support** | ✅ Yes | ❌ No | ✅ Yes |
+| **Snapshots** | ✅ Yes | ✅ Yes | ✅ Yes |
+| **Jupyter Kernel** | ✅ Native | ✅ Yes | ❌ No |
+
+## Feature Comparison
+
+### Sandbox Creation
+
+| Operation | Code Sandboxes | E2B | Modal |
+|-----------|---------------|-----|-------|
+| Create sandbox | `Sandbox.create()` | `Sandbox()` | `Sandbox.create()` |
+| With timeout | `Sandbox.create(timeout=60)` | `Sandbox(timeout=60000)` | N/A |
+| With GPU | `Sandbox.create(gpu="T4")` | N/A | `Sandbox.create(gpu="T4")` |
+| From snapshot | `Sandbox.create(snapshot_name="...")` | `Sandbox(template="...")` | `Sandbox.from_id("...")` |
+| Reconnect | `Sandbox.from_id(id)` | `Sandbox.reconnect(id)` | `Sandbox.from_id(id)` |
+| List sandboxes | `Sandbox.list()` | N/A | `Sandbox.list()` |
+
+### Code Execution
+
+| Operation | Code Sandboxes | E2B | Modal |
+|-----------|---------------|-----|-------|
+| Run code | `sandbox.run_code(code)` | `sandbox.runCode(code)` | `sandbox.exec("python", "-c", code)` |
+| Streaming | `on_stdout=callback` | `onStdout=callback` | `for line in proc.stdout` |
+| Variables | `sandbox.get_variable(name)` | `sandbox.getVar(name)` | N/A |
+| Install packages | `sandbox.install_packages([...])` | `sandbox.installPackages([...])` | `sandbox.exec("pip", "install", ...)` |
+
+### Filesystem Operations
+
+| Operation | Code Sandboxes | E2B | Modal |
+|-----------|---------------|-----|-------|
+| Read file | `sandbox.files.read(path)` | `sandbox.files.read(path)` | `sandbox.read_file(path)` |
+| Write file | `sandbox.files.write(path, content)` | `sandbox.files.write(path, content)` | `sandbox.open(path, "w")` |
+| List directory | `sandbox.files.list(path)` | `sandbox.files.list(path)` | `sandbox.list_files(path)` |
+| Make directory | `sandbox.files.mkdir(path)` | `sandbox.files.makeDir(path)` | N/A |
+| Upload | `sandbox.files.upload(local, remote)` | `sandbox.files.upload(local, remote)` | N/A |
+| Download | `sandbox.files.download(remote, local)` | `sandbox.files.download(remote, local)` | N/A |
+
+### Command Execution
+
+| Operation | Code Sandboxes | E2B | Modal |
+|-----------|---------------|-----|-------|
+| Run command | `sandbox.commands.run(cmd)` | `sandbox.commands.run(cmd)` | `sandbox.exec(cmd)` |
+| Streaming exec | `sandbox.commands.exec(*args)` | N/A | `sandbox.exec(*args)` |
+| Background process | `sandbox.commands.spawn(cmd)` | `sandbox.process.start(cmd)` | N/A |
+| System packages | `sandbox.commands.install_system_packages([...])` | N/A | N/A |
+
+### Lifecycle Management
+
+| Operation | Code Sandboxes | E2B | Modal |
+|-----------|---------------|-----|-------|
+| Set timeout | `sandbox.set_timeout(seconds)` | `sandbox.setTimeout(ms)` | N/A |
+| Terminate | `sandbox.terminate()` | `sandbox.close()` | `sandbox.terminate()` |
+| Force kill | `sandbox.kill()` | `sandbox.kill()` | N/A |
+| Get info | `sandbox.get_info()` | N/A | N/A |
+
+### Snapshots
+
+| Operation | Code Sandboxes | E2B | Modal |
+|-----------|---------------|-----|-------|
+| Create snapshot | `sandbox.create_snapshot(name)` | `sandbox.pause()` | `sandbox.snapshot_filesystem()` |
+| List snapshots | `sandbox.list_snapshots()` | N/A | N/A |
+| Restore | `Sandbox.create(snapshot_name=...)` | `Sandbox(template=...)` | `Sandbox.from_id(...)` |
+
+## Architecture Comparison
+
+### E2B
+
+E2B focuses on cloud-based code interpretation, primarily designed for AI assistants. It uses microVMs for isolation and provides a JavaScript/TypeScript SDK.
+
+**Pros:**
+- Simple API
+- Good for AI chatbots
+- Fast cold starts
+
+**Cons:**
+- Cloud-only
+- No GPU support
+- JavaScript-first (Python SDK is secondary)
+
+### Modal
+
+Modal is a serverless platform for running Python code in the cloud. It's designed for ML workloads with strong GPU support.
+
+**Pros:**
+- Excellent GPU support
+- Powerful for ML workloads
+- Great parallelization
+
+**Cons:**
+- Cloud-only (no self-hosting)
+- Closed source
+- More complex API
+
+### Code Sandboxes
+
+Code Sandboxes provides a unified API for local and cloud execution, with native Jupyter kernel support.
+
+**Pros:**
+- Open source and self-hostable
+- Local and cloud execution
+- Native Jupyter integration
+- GPU support via Datalayer runtime
+- Simple, consistent API
+
+**Cons:**
+- Newer project
+- Smaller community
+
+## Migration Guides
+
+### From E2B
+
+```python
+# E2B
+from e2b_code_interpreter import Sandbox
+sandbox = Sandbox(timeout=60000)
+result = sandbox.runCode("print('hello')")
+sandbox.close()
+
+# Code Sandboxes
+from code_sandboxes import Sandbox
+with Sandbox.create(timeout=60) as sandbox:
+    result = sandbox.run_code("print('hello')")
+```
+
+### From Modal
+
+```python
+# Modal
+import modal
+sb = modal.Sandbox.create(gpu="T4")
+process = sb.exec("python", "-c", "print('hello')")
+print(process.stdout.read())
+sb.terminate()
+
+# Code Sandboxes
+from code_sandboxes import Sandbox
+with Sandbox.create(variant="datalayer-runtime", gpu="T4") as sandbox:
+    result = sandbox.run_code("print('hello')")
+    print(result.stdout)
+```
+
+## Choosing the Right Solution
+
+| Use Case | Recommended |
+|----------|-------------|
+| AI chatbot code execution | Code Sandboxes or E2B |
+| ML training with GPUs | Code Sandboxes or Modal |
+| Local development/testing | Code Sandboxes |
+| Self-hosted infrastructure | Code Sandboxes or E2B |
+| Jupyter notebook workflows | Code Sandboxes |
+| Serverless Python functions | Modal |

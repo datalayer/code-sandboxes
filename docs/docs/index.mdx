@@ -1,0 +1,107 @@
+---
+sidebar_position: 1
+title: Code Sandboxes
+slug: /
+---
+
+import DocCardList from '@theme/DocCardList';
+import { useDocsSidebar } from '@docusaurus/plugin-content-docs/client';
+
+# Code Sandboxes
+
+**Code Sandboxes** is a Python package for creating safe, isolated environments where AI systems can write, run, and test code without affecting the real world or the user's device.
+
+## Package Scope
+
+Code Sandboxes is the **execution layer** in the Datalayer AI stack:
+
+This section clarifies what the package owns versus what is delegated to adjacent layers.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     agent-runtimes                          │
+│            (Agent hosting, protocols, UI)                   │
+├──────────────────────────┬──────────────────────────────────┤
+│      mcp-codemode        │         agent-skills             │
+│  (discovery, codegen)    │     (skills management)          │
+├──────────────────────────┴──────────────────────────────────┤
+│                    code-sandboxes                           │  ◀── You are here
+│          (Safe code execution environment)                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Responsibilities:**
+- ✅ Execute Python/shell code safely in isolated environments
+- ✅ Provide filesystem operations (read, write, list, upload, download)
+- ✅ Run shell commands with streaming output
+- ✅ Manage sandbox lifecycle (start, stop, snapshot)
+- ✅ Support multiple isolation levels (local, Docker, cloud)
+
+**Not Responsible For:**
+- ❌ MCP tool discovery or binding generation (→ mcp-codemode)
+- ❌ Skill management and composition (→ agent-skills)
+- ❌ Agent protocols or UI components (→ agent-runtimes)
+
+## Key Features
+
+- **🔒 Secure Isolation**: Run untrusted code safely in sandboxed environments
+- **🐍 Python Code Execution**: Execute Python code with streaming output and rich results
+- **📁 Filesystem Operations**: Read, write, list, upload, and download files
+- **💻 Command Execution**: Run shell commands with streaming support
+- **📸 Snapshots**: Save and restore sandbox state
+- **🚀 GPU Support**: Access GPU compute for ML workloads
+
+## Sandbox Variants
+
+Code Sandboxes supports multiple execution backends:
+
+| Variant | Isolation Level | Best For |
+|---------|-----------------|----------|
+| `local-eval` | None (Python exec) | Development, testing |
+| `local-docker` | Container | Local isolated execution |
+| `datalayer-runtime` | Cloud VM | Production, GPU workloads |
+
+## Quick Start
+
+```bash
+pip install code-sandboxes
+```
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create() as sandbox:
+    result = sandbox.run_code("print('Hello from the sandbox!')")
+    print(result.stdout)  # Hello from the sandbox!
+```
+
+## Integration with Other Packages
+
+### With mcp-codemode
+
+Code Sandboxes is used by mcp-codemode to execute tool composition code:
+
+```python
+from code_sandboxes import Sandbox
+from mcp_codemode import CodeModeExecutor, ToolRegistry
+
+# mcp-codemode uses code-sandboxes internally
+executor = CodeModeExecutor(registry, sandbox_variant="datalayer-runtime")
+```
+
+### With agent-skills
+
+Agent Skills uses Code Sandboxes to execute skill scripts:
+
+```python
+from code_sandboxes import LocalEvalSandbox
+from agent_skills import SandboxExecutor
+
+sandbox = LocalEvalSandbox()
+executor = SandboxExecutor(sandbox)
+```
+
+## Learn More
+
+<DocCardList items={useDocsSidebar().items}/>
+

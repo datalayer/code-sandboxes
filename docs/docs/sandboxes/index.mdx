@@ -1,0 +1,300 @@
+---
+title: Sandboxes
+sidebar_position: 1
+---
+
+# Sandboxes
+
+A sandbox is an isolated environment where code can be executed safely. Code Sandboxes provides a unified API across different execution backends.
+
+## Creating a Sandbox
+
+Use `Sandbox.create()` to create a new sandbox:
+
+```python
+from code_sandboxes import Sandbox
+
+# Create with defaults (local-eval variant)
+sandbox = Sandbox.create()
+
+# Create with specific variant
+sandbox = Sandbox.create(variant="datalayer-runtime")
+
+# Create with timeout and environment
+sandbox = Sandbox.create(
+    variant="datalayer-runtime",
+    timeout=300,
+    environment="python-cpu-env",
+)
+
+# Create with GPU support
+sandbox = Sandbox.create(
+    variant="datalayer-runtime",
+    gpu="T4",
+    cpu=4.0,
+    memory=8192,
+)
+
+# Create with network policy
+sandbox = Sandbox.create(
+    variant="local-eval",
+    network_policy="none",  # block all outbound connections
+)
+```
+
+## Sandbox Variants
+
+### local-eval
+
+Uses Python's `exec()` for code execution. No isolation, but fast and simple for development.
+
+```python
+with Sandbox.create(variant="local-eval") as sandbox:
+    result = sandbox.run_code("x = 1 + 1")
+    result = sandbox.run_code("print(x)")  # prints 2
+```
+
+### local-docker
+
+Runs code in a Docker container for local isolated execution.
+
+This variant runs a Jupyter Server inside the container and connects using
+`jupyter-kernel-client`.
+
+```python
+with Sandbox.create(variant="local-docker", image="code-sandboxes-jupyter:latest") as sandbox:
+    result = sandbox.run_code("import sys; print(sys.version)")
+```
+
+Build the default image used by `LocalDockerSandbox`:
+
+```bash
+docker build -t code-sandboxes-jupyter:latest -f docker/Dockerfile .
+```
+
+### local-jupyter
+
+Runs code against a local Jupyter Server and connects using `jupyter-kernel-client`.
+This variant provides process isolation via the Jupyter kernel and persistent
+state across requests.
+
+Requirements: `jupyter_server` and `jupyter-kernel-client`.
+
+```python
+with Sandbox.create(variant="local-jupyter") as sandbox:
+    sandbox.run_code("x = 40")
+    result = sandbox.run_code("x + 2")
+    print(result.text)  # 42
+```
+
+### datalayer-runtime
+
+Cloud-based execution with full isolation, GPU support, and persistence.
+
+```python
+with Sandbox.create(
+    variant="datalayer-runtime",
+    gpu="A100",
+    environment="python-gpu-env",
+) as sandbox:
+    sandbox.run_code("import torch; print(torch.cuda.is_available())")
+```
+
+## Environments
+
+List available environments for a sandbox variant and pick one when creating a sandbox.
+
+```python
+from code_sandboxes import Sandbox
+
+environments = Sandbox.list_environments(variant="datalayer-runtime")
+for env in environments:
+    print(f"{env.name}: {env.title}")
+
+# Select the first environment
+if environments:
+    sandbox = Sandbox.create(
+        variant="datalayer-runtime",
+        environment=environments[0].name,
+    )
+    sandbox.start()
+    sandbox.terminate()
+```
+
+## Code Execution
+
+Execute Python code with `run_code()`:
+
+```python
+with Sandbox.create() as sandbox:
+    # Simple execution
+    result = sandbox.run_code("print('hello')")
+    print(result.stdout)  # "hello"
+    
+    # Check success
+    if result.success:
+        print("Code executed successfully")
+    else:
+        print(f"Error: {result.error}")
+
+    # Multi-statement blocks return the last expression
+    result = sandbox.run_code("""
+x = 10
+x * 2
+""")
+    print(result.text)
+```
+
+## State Persistence
+
+All sandbox variants keep state (variables, imports, and definitions)
+within the same sandbox instance. For example:
+
+```python
+with Sandbox.create() as sandbox:
+    sandbox.run_code("counter = 1")
+    sandbox.run_code("counter += 1")
+    result = sandbox.run_code("counter")
+    print(result.text)  # 2
+```
+
+### Streaming Output
+
+```python
+from code_sandboxes import OutputMessage
+
+def on_output(msg: OutputMessage):
+    print(f"[{msg.stream}] {msg.line}")
+
+with Sandbox.create() as sandbox:
+    result = sandbox.run_code(
+        "for i in range(5): print(f'Step {i}')",
+        on_stdout=on_output,
+    )
+```
+
+## Filesystem Operations
+
+Access files within the sandbox:
+
+```python
+with Sandbox.create() as sandbox:
+    # Write files
+    sandbox.files.write("/data/test.txt", "Hello World")
+    
+    # Read files
+    content = sandbox.files.read("/data/test.txt")
+    
+    # List directory
+    for f in sandbox.files.list("/data"):
+        print(f"{f.name} ({f.size} bytes)")
+    
+    # Create directories
+    sandbox.files.mkdir("/data/subdir")
+    
+    # Upload/download
+    sandbox.files.upload("local.txt", "/remote/file.txt")
+    sandbox.files.download("/remote/file.txt", "downloaded.txt")
+```
+
+## Command Execution
+
+Run shell commands in the sandbox:
+
+```python
+with Sandbox.create() as sandbox:
+    # Run command and wait
+    result = sandbox.commands.run("ls -la /")
+    print(result.stdout)
+    
+    # Execute with streaming output
+    process = sandbox.commands.exec("python", "-c", "print('hello')")
+    for line in process.stdout:
+        print(line, end="")
+    
+    # Install system packages
+    sandbox.commands.install_system_packages(["curl", "wget"])
+```
+
+## Lifecycle Management
+
+### Reconnecting to a Sandbox
+
+```python
+# Get sandbox ID for later
+sandbox = Sandbox.create(variant="datalayer-runtime")
+sandbox_id = sandbox.sandbox_id
+sandbox.start()
+
+# Later: reconnect
+sandbox = Sandbox.from_id(sandbox_id)
+result = sandbox.run_code("print('Still running!')")
+```
+
+### Listing Sandboxes
+
+```python
+# List all sandboxes
+sandboxes = Sandbox.list(variant="datalayer-runtime")
+for info in sandboxes:
+    print(f"{info.sandbox_id}: {info.status}")
+```
+
+### Termination
+
+```python
+sandbox = Sandbox.create()
+sandbox.start()
+
+# Graceful shutdown
+sandbox.terminate()
+
+# Force kill
+sandbox.kill()
+
+# Or use context manager for automatic cleanup
+with Sandbox.create() as sandbox:
+    sandbox.run_code("print('auto cleanup')")
+```
+
+## Snapshots
+
+Save and restore sandbox state (datalayer-runtime only):
+
+```python
+with Sandbox.create(variant="datalayer-runtime") as sandbox:
+    # Set up environment
+    sandbox.run_code("import pandas as pd")
+    sandbox.run_code("df = pd.DataFrame({'a': [1,2,3]})")
+    
+    # Create snapshot
+    snapshot = sandbox.create_snapshot("my-setup")
+    print(f"Snapshot: {snapshot.id}")
+
+# Later: restore from snapshot
+with Sandbox.create(
+    variant="datalayer-runtime",
+    snapshot_name="my-setup"
+) as sandbox:
+    result = sandbox.run_code("print(df)")  # State restored
+```
+
+## Timeout Management
+
+```python
+# Set timeout at creation
+sandbox = Sandbox.create(timeout=60)
+
+# Update timeout
+sandbox.set_timeout(120)
+```
+
+## Tags and Metadata
+
+```python
+# Create with tags
+sandbox = Sandbox.create(tags={"project": "demo", "env": "dev"})
+
+# Update tags
+sandbox.set_tags({"project": "demo", "env": "prod"})
+```

@@ -1,0 +1,71 @@
+---
+title: Installation
+sidebar_position: 3
+---
+
+# Installation
+
+## Basic Installation
+
+Install Code Sandboxes using pip:
+
+```bash
+pip install code-sandboxes
+```
+
+## Optional Dependencies
+
+Code Sandboxes supports different execution backends via extras:
+
+```bash
+# With Datalayer runtime support (cloud execution)
+pip install code-sandboxes[datalayer]
+
+# With Docker support (local containers)
+pip install code-sandboxes[docker]
+
+# All features
+pip install code-sandboxes[all]
+```
+
+## Requirements
+
+- Python 3.10 or higher
+- For Docker variant: Docker installed and running
+- For Datalayer variant: Valid API key
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `DATALAYER_API_KEY` | API key for Datalayer runtime authentication |
+| `DATALAYER_RUN_URL` | Custom Datalayer service URL (optional) |
+
+### Programmatic Configuration
+
+```python
+from code_sandboxes import Sandbox, SandboxConfig
+
+config = SandboxConfig(
+    timeout=30.0,
+    environment="python-cpu-env",
+    memory_limit=4 * 1024**3,  # 4GB
+    cpu_limit=2.0,
+    working_dir="/workspace",
+    env_vars={"DEBUG": "1"},
+)
+
+sandbox = Sandbox.create(config=config)
+```
+
+## Verifying Installation
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create() as sandbox:
+    result = sandbox.run_code("print('Installation successful!')")
+    print(result.stdout)
+```
