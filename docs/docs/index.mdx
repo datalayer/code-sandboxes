@@ -22,7 +22,7 @@ This section clarifies what the package owns versus what is delegated to adjacen
 │                     agent-runtimes                          │
 │            (Agent hosting, protocols, UI)                   │
 ├──────────────────────────┬──────────────────────────────────┤
-│      mcp-codemode        │         agent-skills             │
+│      agent-codemode      │         agent-skills             │
 │  (discovery, codegen)    │     (skills management)          │
 ├──────────────────────────┴──────────────────────────────────┤
 │                    code-sandboxes                           │  ◀── You are here
@@ -38,7 +38,7 @@ This section clarifies what the package owns versus what is delegated to adjacen
 - ✅ Support multiple isolation levels (local, Docker, cloud)
 
 **Not Responsible For:**
-- ❌ MCP tool discovery or binding generation (→ mcp-codemode)
+- ❌ MCP tool discovery or binding generation (→ agent-codemode)
 - ❌ Skill management and composition (→ agent-skills)
 - ❌ Agent protocols or UI components (→ agent-runtimes)
 
@@ -78,15 +78,15 @@ with Sandbox.create() as sandbox:
 
 ## Integration with Other Packages
 
-### With mcp-codemode
+### With agent-codemode
 
-Code Sandboxes is used by mcp-codemode to execute tool composition code:
+Code Sandboxes is used by agent-codemode to execute tool composition code:
 
 ```python
 from code_sandboxes import Sandbox
-from mcp_codemode import CodeModeExecutor, ToolRegistry
+from agent_codemode import CodeModeExecutor, ToolRegistry
 
-# mcp-codemode uses code-sandboxes internally
+# agent-codemode uses code-sandboxes internally
 executor = CodeModeExecutor(registry, sandbox_variant="datalayer-runtime")
 ```
 
