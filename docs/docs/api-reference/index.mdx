@@ -36,7 +36,7 @@ def create(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `variant` | `str` | Sandbox type: `"local-eval"`, `"local-docker"`, or `"datalayer-runtime"` |
+| `variant` | `str` | Sandbox type: `"local-eval"`, `"local-docker"`, `"local-jupyter"`, or `"datalayer-runtime"` |
 | `timeout` | `float` | Execution timeout in seconds |
 | `environment` | `str` | Runtime environment name |
 | `gpu` | `str` | GPU type (e.g., `"T4"`, `"A100"`, `"H100"`) |
@@ -82,7 +82,7 @@ def list_environments(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `variant` | `str` | Sandbox type: `"local-eval"`, `"local-docker"`, or `"datalayer-runtime"` |
+| `variant` | `str` | Sandbox type: `"local-eval"`, `"local-docker"`, `"local-jupyter"`, or `"datalayer-runtime"` |
 | `**kwargs` | `dict` | Variant-specific arguments (e.g., credentials, run URL) |
 
 ### Instance Methods

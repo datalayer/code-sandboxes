@@ -342,7 +342,7 @@ class SandboxInfo:
 
     Attributes:
         id: Unique identifier for the sandbox.
-        variant: The sandbox variant (local-eval, local-docker, datalayer-runtime).
+        variant: The sandbox variant (local-eval, local-docker, local-jupyter, datalayer-runtime).
         status: Current status of the sandbox.
         created_at: Unix timestamp when the sandbox was created.
         end_at: Unix timestamp when the sandbox will be terminated.

@@ -25,12 +25,13 @@ This package provides a unified API for code execution with features like:
 
 ## Sandbox Variants
 
-Three variants are available:
+Four variants are available:
 
 | Variant | Isolation | Use Case |
 |---------|-----------|----------|
 | `local-eval` | None (Python exec) | Development, testing |
 | `local-docker` | Container (Jupyter Server) | Local isolated execution |
+| `local-jupyter` | Process (Jupyter kernel) | Local persistent state |
 | `datalayer-runtime` | Cloud VM | Production, GPU workloads |
 
 ## Installation
