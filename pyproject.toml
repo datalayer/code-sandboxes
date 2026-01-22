@@ -22,7 +22,7 @@ classifiers = [
 ]
 dependencies = [
   "datalayer-core",
-  "jupyter-sever",
+  "jupyter-server",
   "jupyter-kernel-client",
 ]
 
