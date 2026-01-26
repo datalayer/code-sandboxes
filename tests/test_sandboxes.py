@@ -18,9 +18,9 @@ from code_sandboxes.base import Sandbox, SandboxVariant
 from code_sandboxes.local.eval_sandbox import LocalEvalSandbox
 from code_sandboxes.local.jupyter_sandbox import LocalJupyterSandbox
 from code_sandboxes.models import (
+    CodeError,
     Context,
-    Execution,
-    ExecutionError,
+    ExecutionResult,
     GPUType,
     Logs,
     MIMEType,
@@ -121,9 +121,9 @@ class TestModels:
         assert result.data["text/plain"] == "42"
         assert result.is_main_result is True
 
-    def test_execution_error(self):
-        """Test ExecutionError dataclass."""
-        error = ExecutionError(
+    def test_code_error(self):
+        """Test CodeError dataclass."""
+        error = CodeError(
             name="ValueError",
             value="Invalid input",
             traceback="Traceback...",
@@ -132,6 +132,61 @@ class TestModels:
         assert error.name == "ValueError"
         assert error.value == "Invalid input"
         assert error.traceback == "Traceback..."
+        
+    def test_execution_success_status(self):
+        """Test Execution with successful execution."""
+        execution = ExecutionResult(
+            results=[Result(data={"text/plain": "42"})],
+            execution_ok=True,
+            code_error=None,
+            started_at=1000.0,
+            completed_at=1001.5,
+        )
+        
+        assert execution.execution_ok is True
+        assert execution.execution_error is None
+        assert execution.code_error is None
+        assert execution.success is True
+        assert execution.duration == 1.5
+
+    def test_execution_code_error(self):
+        """Test Execution with code error (Python exception)."""
+        execution = ExecutionResult(
+            execution_ok=True,
+            code_error=CodeError(
+                name="ValueError",
+                value="Invalid value",
+                traceback="Traceback...",
+            ),
+        )
+        
+        assert execution.execution_ok is True
+        assert execution.code_error is not None
+        assert execution.code_error.name == "ValueError"
+        assert execution.success is False
+
+    def test_execution_infrastructure_failure(self):
+        """Test Execution with infrastructure failure."""
+        execution = ExecutionResult(
+            execution_ok=False,
+            execution_error="Connection timeout",
+        )
+        
+        assert execution.execution_ok is False
+        assert execution.execution_error == "Connection timeout"
+        assert execution.code_error is None
+        assert execution.success is False
+
+    def test_execution_interrupted(self):
+        """Test Execution that was interrupted."""
+        execution = ExecutionResult(
+            execution_ok=True,
+            interrupted=True,
+        )
+        
+        assert execution.execution_ok is True
+        assert execution.interrupted is True
+        assert execution.success is False
 
     def test_sandbox_config(self):
         """Test SandboxConfig dataclass."""
@@ -219,16 +274,16 @@ class TestLocalEvalSandbox:
         with LocalEvalSandbox() as sandbox:
             execution = sandbox.run_code("1 / 0")
 
-            assert execution.error is not None
-            assert execution.error.name == "ZeroDivisionError"
+            assert execution.code_error is not None
+            assert execution.code_error.name == "ZeroDivisionError"
 
     def test_run_code_syntax_error(self):
         """Test handling syntax errors."""
         with LocalEvalSandbox() as sandbox:
             execution = sandbox.run_code("if if if")
 
-            assert execution.error is not None
-            assert "Syntax" in execution.error.name
+            assert execution.code_error is not None
+            assert "Syntax" in execution.code_error.name
 
     def test_variable_persistence(self):
         """Test that variables persist between executions."""
@@ -299,7 +354,7 @@ print(f"Status: {result['status']}, Value: {result['value']}")
 result
 """)
             
-            assert not execution.error, f"Execution failed: {execution.error}"
+            assert execution.success, f"Execution failed: {execution.code_error}"
             assert "Status: success, Value: 42" in execution.stdout
             # The result should be returned
             if execution.results:
@@ -333,7 +388,7 @@ print(f"Final result: {final_result}")
 final_result
 """)
             
-            assert not execution.error, f"Execution failed: {execution.error}"
+            assert execution.success, f"Execution failed: {execution.code_error}"
             assert "Final result: 50" in execution.stdout
             # Check result if available
             if execution.results:
@@ -357,7 +412,7 @@ print(greeting)
 greeting
 """)
             
-            assert not execution.error, f"Execution failed: {execution.error}"
+            assert execution.success, f"Execution failed: {execution.code_error}"
             assert "Hello, World!" in execution.stdout
             # Check result if available  
             if execution.results:
@@ -383,7 +438,7 @@ async def __call_tool__(tool_name, arguments):
 print(f"__call_tool__ defined: {callable(__call_tool__)}")
 """)
             
-            assert not execution1.error
+            assert execution1.success, f"Execution failed: {execution1.code_error}"
             assert "defined: True" in execution1.stdout
             
             # Second execution: use the function with await
@@ -393,7 +448,7 @@ print(f"Result: {result}")
 result
 """)
             
-            assert not execution2.error, f"Execution failed: {execution2.error}"
+            assert execution2.success, f"Execution failed: {execution2.code_error}"
             assert "Called test_tool" in execution2.stdout
 
     def test_async_stdout_capture(self):
@@ -412,7 +467,7 @@ result = await print_messages()
 print(f"Result: {result}")
 """)
             
-            assert not execution.error, f"Execution failed: {execution.error}"
+            assert execution.success, f"Execution failed: {execution.code_error}"
             assert "First message" in execution.stdout, f"Expected 'First message' in stdout, got: {execution.stdout!r}"
             assert "Second message" in execution.stdout, f"Expected 'Second message' in stdout, got: {execution.stdout!r}"
             assert "Result: done" in execution.stdout, f"Expected 'Result: done' in stdout, got: {execution.stdout!r}"
@@ -433,7 +488,7 @@ async def print_errors():
 result = await print_errors()
 """)
             
-            assert not execution.error, f"Execution failed: {execution.error}"
+            assert execution.success, f"Execution failed: {execution.code_error}"
             assert "Error message" in execution.stderr, f"Expected 'Error message' in stderr, got: {execution.stderr!r}"
             assert "Another error" in execution.stderr, f"Expected 'Another error' in stderr, got: {execution.stderr!r}"
 
@@ -454,7 +509,7 @@ async def mixed_output():
 await mixed_output()
 """)
             
-            assert not execution.error, f"Execution failed: {execution.error}"
+            assert execution.success, f"Execution failed: {execution.code_error}"
             assert "stdout line 1" in execution.stdout
             assert "stdout line 2" in execution.stdout
             assert "stderr line 1" in execution.stderr
@@ -536,8 +591,8 @@ await mixed_output()
                 "import socket; socket.create_connection(('example.com', 80))"
             )
 
-            assert execution.error is not None
-            assert "Network access is disabled" in execution.error.value
+            assert execution.code_error is not None
+            assert "Network access is disabled" in execution.code_error.value
 
     def test_sandbox_id(self):
         """Test sandbox ID is assigned."""
@@ -729,7 +784,7 @@ result
 """
             execution = sandbox.run_code(code)
 
-            assert execution.error is None
+            assert execution.code_error is None
             assert len(execution.results) > 0
             assert "caught" in execution.results[0].data.get("text/plain", "")
 

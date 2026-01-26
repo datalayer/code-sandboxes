@@ -94,9 +94,13 @@ Executes Python code in the sandbox.
 ```python
 def run_code(
     code: str,
+    language: str = "python",
+    context: Context | None = None,
     on_stdout: Callable[[OutputMessage], None] | None = None,
     on_stderr: Callable[[OutputMessage], None] | None = None,
     on_result: Callable[[Result], None] | None = None,
+    on_error: Callable[[CodeError], None] | None = None,
+    envs: dict[str, str] | None = None,
     timeout: float | None = None,
 ) -> ExecutionResult
 ```
@@ -261,80 +265,200 @@ Starts a background process.
 
 ---
 
-## Data Classes
+## Data Models (Pydantic)
 
 ### ExecutionResult
 
+Complete result of a code execution with detailed status information.
+
 ```python
-@dataclass
-class ExecutionResult:
-    success: bool
-    stdout: str
-    stderr: str
-    text: str
+class ExecutionResult(BaseModel):
+    # Results and logs
     results: list[Result]
-    error: ExecutionError | None
+    logs: Logs
+    
+    # Execution-level (infrastructure) status
+    execution_ok: bool = True  # Did sandbox infrastructure work?
+    execution_error: str | None = None  # Infrastructure failure details
+    
+    # Code-level (user code) status
+    code_error: CodeError | None = None  # Python exception info
+    
+    # Metadata
+    execution_count: int = 0
+    context_id: str | None = None
+    started_at: float | None = None
+    completed_at: float | None = None
+    interrupted: bool = False
+    
+    # Properties
+    @property
+    def success(self) -> bool:
+        """True if execution_ok and no code_error and not interrupted"""
+    
+    @property
+    def duration(self) -> float | None:
+        """Execution duration in seconds"""
+    
+    @property
+    def text(self) -> str | None:
+        """Main text result"""
+    
+    @property
+    def stdout(self) -> str:
+        """All stdout as single string"""
+    
+    @property
+    def stderr(self) -> str:
+        """All stderr as single string"""
+    
+```
+
+**Usage:**
+
+```python
+result = sandbox.run_code("x = 1 + 1; print(x)")
+
+# Check infrastructure success
+if not result.execution_ok:
+    print(f"Sandbox failed: {result.execution_error}")
+    
+# Check code-level error
+elif result.code_error:
+    print(f"Python error: {result.code_error.name}: {result.code_error.value}")
+    
+# Success!
+else:
+    print(f"Result: {result.text}")
+    print(f"Duration: {result.duration:.2f}s")
+    
+# Or use convenience property
+if result.success:
+    print("Everything worked!")
+```
+
+### CodeError
+
+Error information when Python code raises an exception.
+
+```python
+class CodeError(BaseModel):
+    name: str          # Error class name (e.g., "ValueError")
+    value: str         # Error message
+    traceback: str     # Full traceback
 ```
 
 ### SandboxEnvironment
 
 ```python
-@dataclass
-class SandboxEnvironment:
+class SandboxEnvironment(BaseModel):
     name: str
     title: str
-    language: str
-    owner: str
-    visibility: str
-    burning_rate: float
-    metadata: dict[str, Any] | None
+    language: str = "python"
+    owner: str = "local"
+    visibility: str = "local"
+    burning_rate: float = 0.0
+    metadata: dict[str, Any] | None = None
 ```
 
-### CommandResult
+### Result
+
+A single execution result with multiple representations.
 
 ```python
-@dataclass
-class CommandResult:
-    exit_code: int
-    stdout: str
-    stderr: str
+class Result(BaseModel):
+    data: dict[str, Any]      # MIME type to content mapping
+    is_main_result: bool = False
+    extra: dict[str, Any]     # Additional metadata
+    
+    # Convenience properties
+    @property
+    def text(self) -> str | None: ...  # text/plain
+    @property
+    def html(self) -> str | None: ...  # text/html
+    @property
+    def json(self) -> Any: ...         # application/json
+    @property
+    def png(self) -> str | None: ...   # image/png (base64)
 ```
 
-### FileInfo
+### OutputMessage
 
 ```python
-@dataclass
-class FileInfo:
-    name: str
-    path: str
-    type: FileType
-    size: int
-    modified: datetime | None
+class OutputMessage(BaseModel):
+    line: str
+    timestamp: float = 0.0
+    error: bool = False       # True for stderr
+```
+
+### Logs
+
+```python
+class Logs(BaseModel):
+    stdout: list[OutputMessage]
+    stderr: list[OutputMessage]
+    
+    @property
+    def stdout_text(self) -> str: ...  # All stdout as string
+    @property
+    def stderr_text(self) -> str: ...  # All stderr as string
+```
+
+### Context
+
+```python
+class Context(BaseModel):
+    id: str
+    language: str = "python"
+    cwd: str | None = None
+    env: dict[str, str]
+```
+
+### SandboxConfig
+
+```python
+class SandboxConfig(BaseModel):
+    timeout: float = 30.0
+    memory_limit: int | None = None
+    cpu_limit: float | None = None
+    environment: str = "python-cpu-env"
+    working_dir: str | None = None
+    env_vars: dict[str, str]
+    gpu: str | None = None
+    name: str | None = None
+    network_policy: str = "inherit"  # "inherit", "none", "allowlist", "all"
+    allowed_hosts: list[str]
+    idle_timeout: float | None = None
+    max_lifetime: float = 86400.0  # 24 hours
 ```
 
 ### SandboxInfo
 
 ```python
-@dataclass
-class SandboxInfo:
-    sandbox_id: str
-    status: SandboxStatus
-    environment: str
-    created_at: datetime
-    started_at: datetime | None
-    end_at: datetime | None
+class SandboxInfo(BaseModel):
+    id: str
+    variant: str
+    status: SandboxStatus = SandboxStatus.RUNNING
+    created_at: float = 0.0
+    end_at: float | None = None
+    config: SandboxConfig | None = None
+    name: str | None = None
+    metadata: dict[str, Any]
+    resources: ResourceConfig | None = None
+    
+    @property
+    def remaining_time(self) -> float | None: ...  # Seconds until termination
 ```
 
-### SnapshotInfo
+### ResourceConfig
 
 ```python
-@dataclass
-class SnapshotInfo:
-    id: str
-    name: str
-    sandbox_id: str
-    created_at: datetime
-    size: int
+class ResourceConfig(BaseModel):
+    cpu: float | None = None         # CPU cores
+    memory: int | None = None        # Memory in MB
+    gpu: str | None = None           # GPU type ("T4", "A100", etc.)
+    gpu_count: int = 1               # Number of GPUs
+    disk: int | None = None          # Disk in GB
 ```
 
 ---

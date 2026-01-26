@@ -5,21 +5,29 @@
 """Models for code execution results and contexts.
 
 Inspired by E2B Code Interpreter and Modal Sandbox models.
+
+Uses Pydantic for:
+- Automatic validation and type coercion
+- JSON serialization/deserialization
+- Better integration with FastAPI and modern Python APIs
+- Clear schema definitions
 """
 
-from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Literal, Optional, TypeVar
+
+from pydantic import BaseModel, ConfigDict, Field
 
 T = TypeVar("T")
 
 
-@dataclass
-class SandboxEnvironment:
+class SandboxEnvironment(BaseModel):
     """Environment information exposed by the sandbox API.
 
     Mirrors the Datalayer environment fields where available.
     """
+
+    model_config = ConfigDict(extra="allow")
 
     name: str
     title: str
@@ -76,8 +84,7 @@ class GPUType(str, Enum):
     L4 = "L4"
 
 
-@dataclass
-class ResourceConfig:
+class ResourceConfig(BaseModel):
     """Resource configuration for sandbox.
 
     Similar to Modal's resource specification.
@@ -90,11 +97,13 @@ class ResourceConfig:
         disk: Disk size in GB.
     """
 
+    model_config = ConfigDict(extra="allow")
+
     cpu: Optional[float] = None
-    memory: Optional[int] = None  # MB
+    memory: Optional[int] = Field(default=None, description="Memory limit in MB")
     gpu: Optional[str] = None
     gpu_count: int = 1
-    disk: Optional[int] = None  # GB
+    disk: Optional[int] = Field(default=None, description="Disk size in GB")
 
     def __repr__(self) -> str:
         parts = []
@@ -107,9 +116,7 @@ class ResourceConfig:
         return f"ResourceConfig({', '.join(parts) or 'default'})"
 
 
-
-@dataclass
-class OutputMessage:
+class OutputMessage(BaseModel):
     """A single output message from code execution.
 
     Attributes:
@@ -118,13 +125,14 @@ class OutputMessage:
         error: Whether this is an error output (stderr).
     """
 
+    model_config = ConfigDict(extra="allow")
+
     line: str
     timestamp: float = 0.0
     error: bool = False
 
 
-@dataclass
-class Logs:
+class Logs(BaseModel):
     """Container for stdout and stderr logs.
 
     Attributes:
@@ -132,8 +140,10 @@ class Logs:
         stderr: List of stderr output messages.
     """
 
-    stdout: list[OutputMessage] = field(default_factory=list)
-    stderr: list[OutputMessage] = field(default_factory=list)
+    model_config = ConfigDict(extra="allow")
+
+    stdout: list[OutputMessage] = Field(default_factory=list)
+    stderr: list[OutputMessage] = Field(default_factory=list)
 
     @property
     def stdout_text(self) -> str:
@@ -146,8 +156,7 @@ class Logs:
         return "\n".join(msg.line for msg in self.stderr)
 
 
-@dataclass
-class Result:
+class Result(BaseModel):
     """A single result from code execution.
 
     Can contain multiple representations of the same data (e.g., text, HTML, image).
@@ -158,9 +167,11 @@ class Result:
         extra: Additional metadata about the result.
     """
 
-    data: dict[str, Any] = field(default_factory=dict)
+    model_config = ConfigDict(extra="allow")
+
+    data: dict[str, Any] = Field(default_factory=dict)
     is_main_result: bool = False
-    extra: dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def text(self) -> Optional[str]:
@@ -203,15 +214,18 @@ class Result:
         return f"Result(types={list(self.data.keys())})"
 
 
-@dataclass
-class ExecutionError:
-    """Error information from failed code execution.
+class CodeError(BaseModel):
+    """Error information from code that raised an exception.
+
+    This represents an error in the user's Python code, not an infrastructure failure.
 
     Attributes:
         name: The error class name (e.g., "ValueError", "SyntaxError").
         value: The error message.
         traceback: Full traceback as a string.
     """
+
+    model_config = ConfigDict(extra="allow")
 
     name: str
     value: str
@@ -223,11 +237,10 @@ class ExecutionError:
         return f"{self.name}: {self.value}"
 
     def __repr__(self) -> str:
-        return f"ExecutionError(name={self.name!r}, value={self.value!r})"
+        return f"CodeError(name={self.name!r}, value={self.value!r})"
 
 
-@dataclass
-class Context:
+class Context(BaseModel):
     """Execution context for maintaining state across code executions.
 
     A context represents an isolated execution environment where variables,
@@ -240,32 +253,89 @@ class Context:
         env: Environment variables for this context.
     """
 
+    model_config = ConfigDict(extra="allow")
+
     id: str
     language: str = "python"
     cwd: Optional[str] = None
-    env: dict[str, str] = field(default_factory=dict)
+    env: dict[str, str] = Field(default_factory=dict)
 
     def __repr__(self) -> str:
         return f"Context(id={self.id!r}, language={self.language!r})"
 
 
-@dataclass
-class Execution:
+class ExecutionResult(BaseModel):
     """Complete result of a code execution.
 
+    The execution result distinguishes between two levels of failure:
+
+    1. **Execution-level failure** (`execution_ok=False`): The sandbox infrastructure
+       failed to execute the code. This could be due to connection issues, timeout
+       waiting for kernel, resource exhaustion, etc. When `execution_ok` is False,
+       `execution_error` contains details about what went wrong.
+
+    2. **Code-level error** (`code_error` is not None): The sandbox successfully
+       executed the code, but the Python code itself raised an exception. This is
+       a normal execution result where the user's code encountered an error.
+
     Attributes:
-        results: List of results produced by the execution.
-        logs: Stdout and stderr logs.
-        error: Error information if execution failed.
+        results: List of results produced by the execution (display outputs, return values).
+        logs: Stdout and stderr logs from execution.
+
+        # Execution-level status (infrastructure)
+        execution_ok: Whether the sandbox infrastructure successfully executed the code.
+                      False means a sandbox/infrastructure failure occurred.
+        execution_error: Details about infrastructure failure when execution_ok=False.
+
+        # Code-level status (user's code)
+        code_error: Error information if the user's Python code raised an exception.
+                    This is populated when code ran but encountered a runtime error.
+
+        # Metadata
         execution_count: The execution counter (like Jupyter's In[n]).
         context_id: ID of the context where this was executed.
+        started_at: Unix timestamp when execution started.
+        completed_at: Unix timestamp when execution completed.
+        interrupted: Whether execution was cancelled/interrupted.
     """
 
-    results: list[Result] = field(default_factory=list)
-    logs: Logs = field(default_factory=Logs)
-    error: Optional[ExecutionError] = None
+    model_config = ConfigDict(extra="allow")
+
+    # Results and logs
+    results: list[Result] = Field(default_factory=list)
+    logs: Logs = Field(default_factory=Logs)
+
+    # Execution-level (infrastructure) status
+    execution_ok: bool = Field(
+        default=True,
+        description="Whether the sandbox infrastructure successfully executed the code"
+    )
+    execution_error: Optional[str] = Field(
+        default=None,
+        description="Details about infrastructure failure when execution_ok=False"
+    )
+
+    # Code-level (user code) status
+    code_error: Optional[CodeError] = Field(
+        default=None,
+        description="Error information if the user's Python code raised an exception"
+    )
+
+    # Metadata
     execution_count: int = 0
     context_id: Optional[str] = None
+    started_at: Optional[float] = Field(
+        default=None,
+        description="Unix timestamp when execution started"
+    )
+    completed_at: Optional[float] = Field(
+        default=None,
+        description="Unix timestamp when execution completed"
+    )
+    interrupted: bool = Field(
+        default=False,
+        description="Whether execution was cancelled/interrupted"
+    )
 
     @property
     def text(self) -> Optional[str]:
@@ -277,8 +347,21 @@ class Execution:
 
     @property
     def success(self) -> bool:
-        """Whether the execution completed without errors."""
-        return self.error is None
+        """Whether execution completed successfully with no errors.
+
+        Returns True only if:
+        - Infrastructure executed the code successfully (execution_ok=True)
+        - The code itself did not raise an exception (code_error=None)
+        - Execution was not interrupted
+        """
+        return self.execution_ok and self.code_error is None and not self.interrupted
+
+    @property
+    def duration(self) -> Optional[float]:
+        """Execution duration in seconds, if timing info available."""
+        if self.started_at is not None and self.completed_at is not None:
+            return self.completed_at - self.started_at
+        return None
 
     @property
     def stdout(self) -> str:
@@ -291,16 +374,18 @@ class Execution:
         return self.logs.stderr_text
 
     def __repr__(self) -> str:
-        status = "success" if self.success else f"error={self.error.name}"
-        return f"Execution({status}, results={len(self.results)}, execution_count={self.execution_count})"
+        if not self.execution_ok:
+            return f"ExecutionResult(execution_ok=False, execution_error={self.execution_error!r})"
+        status = "success" if self.success else f"code_error={self.code_error.name if self.code_error else 'None'}"
+        duration_str = f", duration={self.duration:.2f}s" if self.duration else ""
+        return f"ExecutionResult({status}, results={len(self.results)}, execution_count={self.execution_count}{duration_str})"
 
 
 # Type alias for output handlers (callbacks)
 OutputHandler = Callable[[T], None]
 
 
-@dataclass
-class SandboxConfig:
+class SandboxConfig(BaseModel):
     """Configuration for sandbox creation.
 
     Inspired by E2B and Modal configuration options.
@@ -320,22 +405,23 @@ class SandboxConfig:
         max_lifetime: Maximum lifetime in seconds.
     """
 
+    model_config = ConfigDict(extra="allow")
+
     timeout: float = 30.0
     memory_limit: Optional[int] = None
     cpu_limit: Optional[float] = None
     environment: str = "python-cpu-env"
     working_dir: Optional[str] = None
-    env_vars: dict[str, str] = field(default_factory=dict)
+    env_vars: dict[str, str] = Field(default_factory=dict)
     gpu: Optional[str] = None
     name: Optional[str] = None
     network_policy: Literal["inherit", "none", "allowlist", "all"] = "inherit"
-    allowed_hosts: list[str] = field(default_factory=list)
+    allowed_hosts: list[str] = Field(default_factory=list)
     idle_timeout: Optional[float] = None
     max_lifetime: float = 86400.0  # 24 hours default like Modal
 
 
-@dataclass
-class SandboxInfo:
+class SandboxInfo(BaseModel):
     """Information about a running sandbox.
 
     Inspired by E2B's getInfo() and Modal's sandbox info.
@@ -352,6 +438,8 @@ class SandboxInfo:
         resources: Resource configuration for the sandbox.
     """
 
+    model_config = ConfigDict(extra="allow")
+
     id: str
     variant: str
     status: SandboxStatus = SandboxStatus.RUNNING
@@ -359,7 +447,7 @@ class SandboxInfo:
     end_at: Optional[float] = None
     config: Optional[SandboxConfig] = None
     name: Optional[str] = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     resources: Optional[ResourceConfig] = None
 
     @property
@@ -374,8 +462,7 @@ class SandboxInfo:
         return f"SandboxInfo(id={self.id!r}, status={self.status.value}, variant={self.variant!r})"
 
 
-@dataclass
-class SnapshotInfo:
+class SnapshotInfo(BaseModel):
     """Information about a sandbox snapshot.
 
     Snapshots allow saving and restoring sandbox state.
@@ -390,6 +477,8 @@ class SnapshotInfo:
         description: Optional description.
     """
 
+    model_config = ConfigDict(extra="allow")
+
     id: str
     name: str
     sandbox_id: str
@@ -401,8 +490,7 @@ class SnapshotInfo:
         return f"SnapshotInfo(id={self.id!r}, name={self.name!r})"
 
 
-@dataclass
-class TunnelInfo:
+class TunnelInfo(BaseModel):
     """Information about a tunnel to a sandbox port.
 
     Similar to Modal's Tunnel interface.
@@ -412,6 +500,8 @@ class TunnelInfo:
         url: The external URL to access the port.
         protocol: The protocol (http, https, tcp).
     """
+
+    model_config = ConfigDict(extra="allow")
 
     port: int
     url: str

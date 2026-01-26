@@ -46,8 +46,13 @@ This section clarifies what the package owns versus what is delegated to adjacen
 
 - **🔒 Secure Isolation**: Run untrusted code safely in sandboxed environments
 - **🐍 Python Code Execution**: Execute Python code with streaming output and rich results
-- **📁 Filesystem Operations**: Read, write, list, upload, and download files
+- **📁 Filesystem Operations**: Read, write, list, upload, and download files  
 - **💻 Command Execution**: Run shell commands with streaming support
+- **📊 Detailed Status Reporting**: Distinguish between infrastructure and code-level failures
+- **🎯 Pydantic Models**: Type-safe models with automatic validation and JSON serialization
+- **⚡ Multiple Backends**: Local eval, Docker containers, Jupyter kernels, or cloud runtimes
+- **🔄 State Persistence**: Maintain variables and context between executions
+- **📊 Rich Output**: Support for text, HTML, images, and structured data
 - **📸 Snapshots**: Save and restore sandbox state
 - **🚀 GPU Support**: Access GPU compute for ML workloads
 
@@ -68,12 +73,40 @@ Code Sandboxes supports multiple execution backends:
 pip install code-sandboxes
 ```
 
+### Basic Usage
+
 ```python
 from code_sandboxes import Sandbox
 
 with Sandbox.create() as sandbox:
     result = sandbox.run_code("print('Hello from the sandbox!')")
     print(result.stdout)  # Hello from the sandbox!
+```
+
+### Execution Status Reporting
+
+Code Sandboxes provides detailed status information for each execution:
+
+```python
+result = sandbox.run_code("x = 1 / 0")
+
+# Check infrastructure-level success
+if not result.execution_ok:
+    print(f"Sandbox failed: {result.execution_error}")
+    
+# Check code-level error (Python exception)  
+elif result.code_error:
+    print(f"Python error: {result.code_error.name}: {result.code_error.value}")
+    print(f"Traceback: {result.code_error.traceback}")
+    
+# Success!
+else:
+    print(f"Result: {result.text}")
+    print(f"Duration: {result.duration:.2f}s")
+
+# Convenience property
+if result.success:
+    print("Everything worked perfectly!")
 ```
 
 ## Integration with Other Packages

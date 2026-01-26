@@ -134,8 +134,10 @@ with Sandbox.create() as sandbox:
     # Check success
     if result.success:
         print("Code executed successfully")
+    elif not result.execution_ok:
+        print(f"Execution error: {result.execution_error}")
     else:
-        print(f"Error: {result.error}")
+        print(f"Code error: {result.code_error}")
 
     # Multi-statement blocks return the last expression
     result = sandbox.run_code("""
@@ -143,6 +145,31 @@ x = 10
 x * 2
 """)
     print(result.text)
+
+## Async Execution
+
+Use `await` directly in `run_code()` when the sandbox supports async execution
+(local-eval, local-jupyter, and datalayer-runtime). The last expression is
+returned in `results` just like sync code.
+
+```python
+with Sandbox.create(variant="local-eval") as sandbox:
+    result = sandbox.run_code("""
+import asyncio
+
+async def fetch_value():
+    await asyncio.sleep(0.01)
+    return 21
+
+value = await fetch_value()
+print(f"value: {value}")
+value * 2
+""")
+
+    assert result.success
+    print(result.stdout)  # "value: 21"
+    print(result.text)    # "42"
+```
 ```
 
 ## State Persistence

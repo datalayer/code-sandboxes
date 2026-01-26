@@ -22,9 +22,9 @@ from ..exceptions import (
     SandboxSnapshotError,
 )
 from ..models import (
+    CodeError,
     Context,
-    Execution,
-    ExecutionError,
+    ExecutionResult,
     Logs,
     OutputHandler,
     OutputMessage,
@@ -418,10 +418,10 @@ class DatalayerSandbox(Sandbox):
         on_stdout: Optional[OutputHandler[OutputMessage]] = None,
         on_stderr: Optional[OutputHandler[OutputMessage]] = None,
         on_result: Optional[OutputHandler[Result]] = None,
-        on_error: Optional[OutputHandler[ExecutionError]] = None,
+        on_error: Optional[OutputHandler[CodeError]] = None,
         envs: Optional[dict[str, str]] = None,
         timeout: Optional[float] = None,
-    ) -> Execution:
+    ) -> ExecutionResult:
         """Execute code in the Datalayer runtime.
 
         Args:
@@ -431,7 +431,7 @@ class DatalayerSandbox(Sandbox):
             on_stdout: Callback for stdout messages.
             on_stderr: Callback for stderr messages.
             on_result: Callback for results.
-            on_error: Callback for errors.
+            on_error: Callback for code errors (Python exceptions).
             envs: Environment variables (set before execution).
             timeout: Timeout in seconds.
 
@@ -443,6 +443,8 @@ class DatalayerSandbox(Sandbox):
         """
         if not self._started or not self._runtime:
             raise SandboxNotStartedError()
+
+        started_at = time.time()
 
         # Set environment variables if provided
         if envs:
@@ -456,26 +458,23 @@ class DatalayerSandbox(Sandbox):
         try:
             response = self._runtime.execute(code, timeout=execution_timeout)
         except Exception as e:
-            error = ExecutionError(
-                name=type(e).__name__,
-                value=str(e),
-                traceback="",
-            )
-            if on_error:
-                on_error(error)
-            return Execution(
+            # Infrastructure failure - couldn't execute the code
+            return ExecutionResult(
                 results=[],
                 logs=Logs(),
-                error=error,
+                execution_ok=False,
+                execution_error=f"Failed to execute code: {e}",
                 execution_count=0,
                 context_id=context.id if context else "default",
+                started_at=started_at,
+                completed_at=time.time(),
             )
 
         # Parse the response
         stdout_messages: list[OutputMessage] = []
         stderr_messages: list[OutputMessage] = []
         results: list[Result] = []
-        error: Optional[ExecutionError] = None
+        code_error: Optional[CodeError] = None
 
         current_time = time.time()
 
@@ -517,22 +516,25 @@ class DatalayerSandbox(Sandbox):
                 if on_result:
                     on_result(result)
 
-        # Process errors
+        # Process errors (code exceptions)
         if hasattr(response, "error") and response.error:
-            error = ExecutionError(
+            code_error = CodeError(
                 name=response.error.get("ename", "Error"),
                 value=response.error.get("evalue", ""),
                 traceback="\n".join(response.error.get("traceback", [])),
             )
             if on_error:
-                on_error(error)
+                on_error(code_error)
 
-        return Execution(
+        return ExecutionResult(
             results=results,
             logs=Logs(stdout=stdout_messages, stderr=stderr_messages),
-            error=error,
+            execution_ok=True,
+            code_error=code_error,
             execution_count=getattr(response, "execution_count", 0),
             context_id=context.id if context else "default",
+            started_at=started_at,
+            completed_at=time.time(),
         )
 
     def _get_internal_variable(self, name: str, context: Optional[Context] = None) -> Any:
@@ -627,7 +629,7 @@ class DatalayerSandbox(Sandbox):
 
     def install_packages(
         self, packages: list[str], timeout: Optional[float] = None
-    ) -> Execution:
+    ) -> ExecutionResult:
         """Install Python packages in the runtime.
 
         Uses pip to install packages. Similar to E2B's package installation.
@@ -648,7 +650,7 @@ class DatalayerSandbox(Sandbox):
 
     def install_requirements(
         self, requirements_path: str, timeout: Optional[float] = None
-    ) -> Execution:
+    ) -> ExecutionResult:
         """Install packages from a requirements file.
 
         Args:

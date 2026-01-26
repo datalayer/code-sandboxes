@@ -13,9 +13,9 @@ import uuid
 from .commands import SandboxCommands
 from .filesystem import SandboxFilesystem
 from .models import (
+    CodeError,
     Context,
-    Execution,
-    ExecutionError,
+    ExecutionResult,
     OutputHandler,
     OutputMessage,
     Result,
@@ -375,10 +375,10 @@ class Sandbox(ABC):
         on_stdout: Optional[OutputHandler[OutputMessage]] = None,
         on_stderr: Optional[OutputHandler[OutputMessage]] = None,
         on_result: Optional[OutputHandler[Result]] = None,
-        on_error: Optional[OutputHandler[ExecutionError]] = None,
+        on_error: Optional[OutputHandler[CodeError]] = None,
         envs: Optional[dict[str, str]] = None,
         timeout: Optional[float] = None,
-    ) -> Execution:
+    ) -> ExecutionResult:
         """Execute code in the sandbox.
 
         Args:
@@ -389,7 +389,7 @@ class Sandbox(ABC):
             on_stdout: Callback for stdout messages.
             on_stderr: Callback for stderr messages.
             on_result: Callback for results.
-            on_error: Callback for errors.
+            on_error: Callback for code errors (Python exceptions).
             envs: Additional environment variables for this execution.
             timeout: Timeout in seconds. Uses config default if not provided.
 
@@ -406,10 +406,10 @@ class Sandbox(ABC):
         on_stdout: Optional[OutputHandler[OutputMessage]] = None,
         on_stderr: Optional[OutputHandler[OutputMessage]] = None,
         on_result: Optional[OutputHandler[Result]] = None,
-        on_error: Optional[OutputHandler[ExecutionError]] = None,
+        on_error: Optional[OutputHandler[CodeError]] = None,
         envs: Optional[dict[str, str]] = None,
         timeout: Optional[float] = None,
-    ) -> Execution:
+    ) -> ExecutionResult:
         """Async version of run_code(). Default implementation calls sync version."""
         return self.run_code(
             code=code,
@@ -430,7 +430,7 @@ class Sandbox(ABC):
         context: Optional[Context] = None,
         envs: Optional[dict[str, str]] = None,
         timeout: Optional[float] = None,
-    ) -> Iterator[Union[OutputMessage, Result, ExecutionError]]:
+    ) -> Iterator[Union[OutputMessage, Result, CodeError]]:
         """Execute code with streaming output.
 
         Yields output messages, results, and errors as they are produced.
@@ -443,7 +443,7 @@ class Sandbox(ABC):
             timeout: Timeout in seconds.
 
         Yields:
-            OutputMessage, Result, or ExecutionError objects.
+            OutputMessage, Result, or CodeError objects.
         """
         # Default implementation: run and yield all at once
         execution = self.run_code(
@@ -459,8 +459,10 @@ class Sandbox(ABC):
             yield msg
         for result in execution.results:
             yield result
-        if execution.error:
-            yield execution.error
+        if not execution.execution_ok and execution.execution_error:
+            yield CodeError(name="SandboxExecutionError", value=execution.execution_error, traceback="")
+        if execution.code_error:
+            yield execution.code_error
 
     async def run_code_streaming_async(
         self,
@@ -469,7 +471,7 @@ class Sandbox(ABC):
         context: Optional[Context] = None,
         envs: Optional[dict[str, str]] = None,
         timeout: Optional[float] = None,
-    ) -> AsyncIterator[Union[OutputMessage, Result, ExecutionError]]:
+    ) -> AsyncIterator[Union[OutputMessage, Result, CodeError]]:
         """Async version of run_code_streaming()."""
         execution = await self.run_code_async(
             code=code,
@@ -484,8 +486,10 @@ class Sandbox(ABC):
             yield msg
         for result in execution.results:
             yield result
-        if execution.error:
-            yield execution.error
+        if not execution.execution_ok and execution.execution_error:
+            yield CodeError(name="SandboxExecutionError", value=execution.execution_error, traceback="")
+        if execution.code_error:
+            yield execution.code_error
 
     def create_context(self, name: Optional[str] = None) -> Context:
         """Create a new execution context.
@@ -516,7 +520,11 @@ class Sandbox(ABC):
         """
         # Default implementation using code execution
         execution = self.run_code(f"__result__ = {name}", context=context)
-        if execution.error:
+        if not execution.execution_ok:
+            from .exceptions import SandboxExecutionError
+
+            raise SandboxExecutionError(execution.execution_error or "Sandbox execution failed")
+        if execution.code_error:
             from .exceptions import VariableNotFoundError
 
             raise VariableNotFoundError(name)
@@ -558,7 +566,7 @@ class Sandbox(ABC):
 
     def install_packages(
         self, packages: list[str], timeout: Optional[float] = None
-    ) -> Execution:
+    ) -> ExecutionResult:
         """Install Python packages in the sandbox.
 
         Args:

@@ -27,9 +27,9 @@ from typing import Any, Optional
 from ..base import Sandbox
 from ..exceptions import SandboxNotStartedError
 from ..models import (
+    CodeError,
     Context,
-    Execution,
-    ExecutionError,
+    ExecutionResult,
     Logs,
     OutputHandler,
     OutputMessage,
@@ -132,10 +132,10 @@ class LocalEvalSandbox(Sandbox):
         on_stdout: Optional[OutputHandler[OutputMessage]] = None,
         on_stderr: Optional[OutputHandler[OutputMessage]] = None,
         on_result: Optional[OutputHandler[Result]] = None,
-        on_error: Optional[OutputHandler[ExecutionError]] = None,
+        on_error: Optional[OutputHandler[CodeError]] = None,
         envs: Optional[dict[str, str]] = None,
         timeout: Optional[float] = None,
-    ) -> Execution:
+    ) -> ExecutionResult:
         """Execute Python code using exec().
 
         Args:
@@ -175,6 +175,8 @@ class LocalEvalSandbox(Sandbox):
         self._execution_count[ctx.id] += 1
         execution_count = self._execution_count[ctx.id]
 
+        started_at = time.time()
+
         # Set up environment variables temporarily
         old_env = {}
         if envs:
@@ -190,7 +192,7 @@ class LocalEvalSandbox(Sandbox):
         stdout_messages: list[OutputMessage] = []
         stderr_messages: list[OutputMessage] = []
         results: list[Result] = []
-        error: Optional[ExecutionError] = None
+        code_error: Optional[CodeError] = None
 
         def _run_coroutine_sync(coro):
             try:
@@ -290,13 +292,13 @@ async def __user_code__():
         except Exception as e:
             # Capture the error
             tb = traceback.format_exc()
-            error = ExecutionError(
+            code_error = CodeError(
                 name=type(e).__name__,
                 value=str(e),
                 traceback=tb,
             )
             if on_error:
-                on_error(error)
+                on_error(code_error)
 
         finally:
             # Restore environment variables
@@ -329,12 +331,15 @@ async def __user_code__():
                 if on_stderr:
                     on_stderr(msg)
 
-        return Execution(
+        return ExecutionResult(
             results=results,
             logs=Logs(stdout=stdout_messages, stderr=stderr_messages),
-            error=error,
+            execution_ok=True,
+            code_error=code_error,
             execution_count=execution_count,
             context_id=ctx.id,
+            started_at=started_at,
+            completed_at=time.time(),
         )
 
     @contextmanager

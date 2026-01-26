@@ -211,7 +211,17 @@ result.stdout     # str: Standard output
 result.stderr     # str: Standard error
 result.text       # str: Main result text
 result.results    # list[Result]: Rich results (HTML, images, etc.)
-result.error      # ExecutionError: Error details if failed
+result.code_error # CodeError: Error details if failed
+result.execution_ok     # bool: Infrastructure execution status
+result.execution_error  # str | None: Infrastructure error details
+
+# Error handling
+if not result.execution_ok:
+    print(f"Sandbox failed: {result.execution_error}")
+elif result.code_error:
+    print(f"Python error: {result.code_error.name}: {result.code_error.value}")
+else:
+    print(result.text)
 ```
 
 ### Core Methods

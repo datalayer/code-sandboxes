@@ -21,9 +21,9 @@ import requests
 from ..base import Sandbox
 from ..exceptions import SandboxConfigurationError, SandboxNotStartedError
 from ..models import (
+    CodeError,
     Context,
-    Execution,
-    ExecutionError,
+    ExecutionResult,
     Logs,
     OutputHandler,
     OutputMessage,
@@ -226,15 +226,17 @@ class LocalDockerSandbox(Sandbox):
         on_stdout: Optional[OutputHandler[OutputMessage]] = None,
         on_stderr: Optional[OutputHandler[OutputMessage]] = None,
         on_result: Optional[OutputHandler[Result]] = None,
-        on_error: Optional[OutputHandler[ExecutionError]] = None,
+        on_error: Optional[OutputHandler[CodeError]] = None,
         envs: Optional[dict[str, str]] = None,
         timeout: Optional[float] = None,
-    ) -> Execution:
+    ) -> ExecutionResult:
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
 
         if language != "python":
             raise ValueError(f"LocalDockerSandbox only supports Python, got: {language}")
+
+        started_at = time.time()
 
         if envs:
             env_code = "\n".join(
@@ -242,12 +244,22 @@ class LocalDockerSandbox(Sandbox):
             )
             code = f"{env_code}\n{code}"
 
-        reply = self._client.execute(code, timeout=timeout or self.config.timeout)
+        try:
+            reply = self._client.execute(code, timeout=timeout or self.config.timeout)
+        except Exception as e:
+            # Infrastructure failure - couldn't execute the code
+            return ExecutionResult(
+                execution_ok=False,
+                execution_error=f"Failed to execute code: {e}",
+                started_at=started_at,
+                completed_at=time.time(),
+                context_id=context.id if context else "default",
+            )
 
         stdout_messages: list[OutputMessage] = []
         stderr_messages: list[OutputMessage] = []
         results: list[Result] = []
-        error: Optional[ExecutionError] = None
+        code_error: Optional[CodeError] = None
 
         current_time = time.time()
         for output in reply.get("outputs", []):
@@ -275,20 +287,23 @@ class LocalDockerSandbox(Sandbox):
                 if on_result:
                     on_result(result)
             elif output_type == "error":
-                error = ExecutionError(
+                code_error = CodeError(
                     name=output.get("ename", "Error"),
                     value=output.get("evalue", ""),
                     traceback="\n".join(output.get("traceback", [])),
                 )
                 if on_error:
-                    on_error(error)
+                    on_error(code_error)
 
-        return Execution(
+        return ExecutionResult(
             results=results,
             logs=Logs(stdout=stdout_messages, stderr=stderr_messages),
-            error=error,
+            execution_ok=True,
+            code_error=code_error,
             execution_count=reply.get("execution_count", 0),
             context_id=context.id if context else "default",
+            started_at=started_at,
+            completed_at=time.time(),
         )
 
     def _get_internal_variable(self, name: str, context: Optional[Context] = None):

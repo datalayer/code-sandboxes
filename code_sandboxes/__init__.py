@@ -76,9 +76,9 @@ from .local.eval_sandbox import LocalEvalSandbox
 from .local.docker_sandbox import LocalDockerSandbox
 from .local.jupyter_sandbox import LocalJupyterSandbox
 from .models import (
+    CodeError,
     Context,
-    Execution,
-    ExecutionError,
+    ExecutionResult,
     GPUType,
     Logs,
     MIMEType,
@@ -87,6 +87,7 @@ from .models import (
     ResourceConfig,
     Result,
     SandboxConfig,
+    SandboxEnvironment,
     SandboxInfo,
     SandboxStatus,
     SandboxVariant,
@@ -116,15 +117,16 @@ __all__ = [
     "CommandResult",
     "ProcessHandle",
     # Models
+    "CodeError",
     "Context",
-    "Execution",
-    "ExecutionError",
+    "ExecutionResult",
     "Logs",
     "MIMEType",
     "OutputHandler",
     "OutputMessage",
     "Result",
     "SandboxConfig",
+    "SandboxEnvironment",
     "SandboxInfo",
     "SandboxStatus",
     "SandboxVariant",
