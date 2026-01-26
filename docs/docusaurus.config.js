@@ -50,6 +50,12 @@ module.exports = {
         },
         {
           type: 'doc',
+          docId: 'examples/index',
+          position: 'left',
+          label: 'Examples',
+        },
+        {
+          type: 'doc',
           docId: 'comparison/index',
           position: 'left',
           label: 'Comparison',
@@ -59,12 +65,6 @@ module.exports = {
           docId: 'api-reference/index',
           position: 'left',
           label: 'API Reference',
-        },
-        {
-          type: 'doc',
-          docId: 'examples/index',
-          position: 'left',
-          label: 'Examples',
         },
         {
           href: 'https://discord.gg/YQFwvmSSuR',
