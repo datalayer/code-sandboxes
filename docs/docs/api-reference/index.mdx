@@ -283,6 +283,9 @@ class ExecutionResult(BaseModel):
     
     # Code-level (user code) status
     code_error: CodeError | None = None  # Python exception info
+
+    # Process exit status (sys.exit)
+    exit_code: int | None = None  # Exit code if code calls sys.exit()
     
     # Metadata
     execution_count: int = 0
@@ -294,7 +297,7 @@ class ExecutionResult(BaseModel):
     # Properties
     @property
     def success(self) -> bool:
-        """True if execution_ok and no code_error and not interrupted"""
+        """True if execution_ok and no code_error and not interrupted and exit_code is 0 or None"""
     
     @property
     def duration(self) -> float | None:
@@ -322,7 +325,10 @@ result = sandbox.run_code("x = 1 + 1; print(x)")
 # Check infrastructure success
 if not result.execution_ok:
     print(f"Sandbox failed: {result.execution_error}")
-    
+# Check explicit process exit
+elif result.exit_code not in (None, 0):
+    print(f"Process exited with code: {result.exit_code}")
+
 # Check code-level error
 elif result.code_error:
     print(f"Python error: {result.code_error.name}: {result.code_error.value}")

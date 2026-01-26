@@ -136,6 +136,8 @@ with Sandbox.create() as sandbox:
         print("Code executed successfully")
     elif not result.execution_ok:
         print(f"Execution error: {result.execution_error}")
+    elif result.exit_code not in (None, 0):
+        print(f"Process exited with code: {result.exit_code}")
     else:
         print(f"Code error: {result.code_error}")
 

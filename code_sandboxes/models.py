@@ -336,6 +336,10 @@ class ExecutionResult(BaseModel):
         default=False,
         description="Whether execution was cancelled/interrupted"
     )
+    exit_code: Optional[int] = Field(
+        default=None,
+        description="Exit code when code calls sys.exit() or script terminates. None means no explicit exit."
+    )
 
     @property
     def text(self) -> Optional[str]:
@@ -353,8 +357,14 @@ class ExecutionResult(BaseModel):
         - Infrastructure executed the code successfully (execution_ok=True)
         - The code itself did not raise an exception (code_error=None)
         - Execution was not interrupted
+        - Exit code is 0 or not set (None means normal completion without explicit exit)
         """
-        return self.execution_ok and self.code_error is None and not self.interrupted
+        return (
+            self.execution_ok
+            and self.code_error is None
+            and not self.interrupted
+            and (self.exit_code is None or self.exit_code == 0)
+        )
 
     @property
     def duration(self) -> Optional[float]:
@@ -376,7 +386,14 @@ class ExecutionResult(BaseModel):
     def __repr__(self) -> str:
         if not self.execution_ok:
             return f"ExecutionResult(execution_ok=False, execution_error={self.execution_error!r})"
-        status = "success" if self.success else f"code_error={self.code_error.name if self.code_error else 'None'}"
+        if self.success:
+            status = "success"
+        elif self.code_error:
+            status = f"code_error={self.code_error.name}"
+        elif self.exit_code is not None and self.exit_code != 0:
+            status = f"exit_code={self.exit_code}"
+        else:
+            status = "failed"
         duration_str = f", duration={self.duration:.2f}s" if self.duration else ""
         return f"ExecutionResult({status}, results={len(self.results)}, execution_count={self.execution_count}{duration_str})"
 

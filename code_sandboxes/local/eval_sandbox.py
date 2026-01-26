@@ -193,6 +193,7 @@ class LocalEvalSandbox(Sandbox):
         stderr_messages: list[OutputMessage] = []
         results: list[Result] = []
         code_error: Optional[CodeError] = None
+        exit_code: Optional[int] = None
 
         def _run_coroutine_sync(coro):
             try:
@@ -289,8 +290,16 @@ async def __user_code__():
                         except Exception:
                             exec(code, namespace)
 
+        except SystemExit as e:
+            # Handle sys.exit() calls - capture the exit code
+            exit_code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
+            if exit_code != 0:
+                # Non-zero exit is a failure, but not a code error (it's intentional)
+                pass  # exit_code will be set below
+
         except Exception as e:
             # Capture the error
+            exit_code = None  # Reset - this is a code error, not an exit
             tb = traceback.format_exc()
             code_error = CodeError(
                 name=type(e).__name__,
@@ -336,6 +345,7 @@ async def __user_code__():
             logs=Logs(stdout=stdout_messages, stderr=stderr_messages),
             execution_ok=True,
             code_error=code_error,
+            exit_code=exit_code,
             execution_count=execution_count,
             context_id=ctx.id,
             started_at=started_at,

@@ -214,10 +214,13 @@ result.results    # list[Result]: Rich results (HTML, images, etc.)
 result.code_error # CodeError: Error details if failed
 result.execution_ok     # bool: Infrastructure execution status
 result.execution_error  # str | None: Infrastructure error details
+result.exit_code        # int | None: Exit code if code called sys.exit()
 
 # Error handling
 if not result.execution_ok:
     print(f"Sandbox failed: {result.execution_error}")
+elif result.exit_code not in (None, 0):
+    print(f"Process exited with code: {result.exit_code}")
 elif result.code_error:
     print(f"Python error: {result.code_error.name}: {result.code_error.value}")
 else:

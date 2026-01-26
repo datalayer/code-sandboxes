@@ -93,7 +93,10 @@ result = sandbox.run_code("x = 1 / 0")
 # Check infrastructure-level success
 if not result.execution_ok:
     print(f"Sandbox failed: {result.execution_error}")
-    
+# Check explicit process exit (sys.exit)
+elif result.exit_code not in (None, 0):
+    print(f"Process exited with code: {result.exit_code}")
+
 # Check code-level error (Python exception)  
 elif result.code_error:
     print(f"Python error: {result.code_error.name}: {result.code_error.value}")

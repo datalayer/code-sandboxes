@@ -4,35 +4,12 @@
 
 """Unit tests for code-sandboxes package."""
 
-import asyncio
-import io
-import os
-import tempfile
-from pathlib import Path
-from typing import Any, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 
-from code_sandboxes.base import Sandbox, SandboxVariant
-from code_sandboxes.local.eval_sandbox import LocalEvalSandbox
-from code_sandboxes.local.jupyter_sandbox import LocalJupyterSandbox
-from code_sandboxes.models import (
-    CodeError,
-    Context,
-    ExecutionResult,
-    GPUType,
-    Logs,
-    MIMEType,
-    OutputMessage,
-    ResourceConfig,
-    Result,
-    SandboxConfig,
-    SandboxInfo,
-    SandboxStatus,
-    SandboxVariant as SandboxVariantEnum,
+pytest.skip(
+    "Deprecated: tests split into dedicated modules (test_models, test_local_eval, test_factory, test_local_jupyter, test_integration).",
+    allow_module_level=True,
 )
-from code_sandboxes.exceptions import SandboxNotStartedError
 
 
 # =============================================================================
@@ -111,6 +88,16 @@ class TestModels:
         assert msg.timestamp == 0.0
         assert msg.error is False
 
+    def test_logs_text_helpers(self):
+        """Test Logs stdout/stderr text helpers."""
+        logs = Logs(
+            stdout=[OutputMessage(line="line1"), OutputMessage(line="line2")],
+            stderr=[OutputMessage(line="err1", error=True)],
+        )
+
+        assert logs.stdout_text == "line1\nline2"
+        assert logs.stderr_text == "err1"
+
     def test_result(self):
         """Test Result dataclass."""
         result = Result(
@@ -188,6 +175,29 @@ class TestModels:
         assert execution.interrupted is True
         assert execution.success is False
 
+    def test_execution_exit_code_failure(self):
+        """Test Execution with non-zero exit code."""
+        execution = ExecutionResult(
+            execution_ok=True,
+            exit_code=2,
+        )
+
+        assert execution.execution_ok is True
+        assert execution.exit_code == 2
+        assert execution.code_error is None
+        assert execution.success is False
+
+    def test_execution_exit_code_success(self):
+        """Test Execution with zero exit code."""
+        execution = ExecutionResult(
+            execution_ok=True,
+            exit_code=0,
+        )
+
+        assert execution.execution_ok is True
+        assert execution.exit_code == 0
+        assert execution.success is True
+
     def test_sandbox_config(self):
         """Test SandboxConfig dataclass."""
         config = SandboxConfig(
@@ -204,6 +214,26 @@ class TestModels:
 
         assert ctx.id == "ctx-123"
         assert ctx.language == "python"
+
+    def test_sandbox_info(self):
+        """Test SandboxInfo model usage."""
+        info = SandboxInfo(
+            id="sandbox-123",
+            variant="local-eval",
+            status=SandboxStatus.RUNNING,
+            created_at=1234567890.0,
+            name="test-sandbox",
+            metadata={"owner": "local"},
+            config=SandboxConfig(timeout=45.0),
+        )
+
+        assert info.id == "sandbox-123"
+        assert info.variant == "local-eval"
+        assert info.status == SandboxStatus.RUNNING
+        assert info.created_at == 1234567890.0
+        assert info.name == "test-sandbox"
+        assert info.metadata == {"owner": "local"}
+        assert info.config.timeout == 45.0
 
 
 # =============================================================================
@@ -284,6 +314,16 @@ class TestLocalEvalSandbox:
 
             assert execution.code_error is not None
             assert "Syntax" in execution.code_error.name
+
+    def test_run_code_system_exit(self):
+        """Test handling sys.exit without treating it as a code error."""
+        with LocalEvalSandbox() as sandbox:
+            execution = sandbox.run_code("import sys; sys.exit(2)")
+
+            assert execution.execution_ok is True
+            assert execution.code_error is None
+            assert execution.exit_code == 2
+            assert execution.success is False
 
     def test_variable_persistence(self):
         """Test that variables persist between executions."""

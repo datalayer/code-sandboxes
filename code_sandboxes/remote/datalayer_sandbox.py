@@ -475,6 +475,7 @@ class DatalayerSandbox(Sandbox):
         stderr_messages: list[OutputMessage] = []
         results: list[Result] = []
         code_error: Optional[CodeError] = None
+        exit_code: Optional[int] = None
 
         current_time = time.time()
 
@@ -518,19 +519,30 @@ class DatalayerSandbox(Sandbox):
 
         # Process errors (code exceptions)
         if hasattr(response, "error") and response.error:
-            code_error = CodeError(
-                name=response.error.get("ename", "Error"),
-                value=response.error.get("evalue", ""),
-                traceback="\n".join(response.error.get("traceback", [])),
-            )
-            if on_error:
-                on_error(code_error)
+            ename = response.error.get("ename", "Error")
+            evalue = response.error.get("evalue", "")
+            
+            # Handle SystemExit specially - extract exit code
+            if ename == "SystemExit":
+                try:
+                    exit_code = int(evalue) if evalue else 0
+                except (ValueError, TypeError):
+                    exit_code = 1 if evalue else 0
+            else:
+                code_error = CodeError(
+                    name=ename,
+                    value=evalue,
+                    traceback="\n".join(response.error.get("traceback", [])),
+                )
+                if on_error:
+                    on_error(code_error)
 
         return ExecutionResult(
             results=results,
             logs=Logs(stdout=stdout_messages, stderr=stderr_messages),
             execution_ok=True,
             code_error=code_error,
+            exit_code=exit_code,
             execution_count=getattr(response, "execution_count", 0),
             context_id=context.id if context else "default",
             started_at=started_at,
