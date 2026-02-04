@@ -80,6 +80,7 @@ class Sandbox(ABC):
         self._commands: Optional[SandboxCommands] = None
         self._tags: dict[str, str] = {}
         self._created_at: float = 0.0
+        self._tool_caller: Optional[Any] = None  # Tool caller function for MCP tools
 
     @property
     def info(self) -> Optional[SandboxInfo]:
@@ -551,6 +552,37 @@ class Sandbox(ABC):
         """
         for name, value in variables.items():
             self.set_variable(name, value, context)
+
+    def register_tool_caller(self, tool_caller: Any) -> None:
+        """Register a tool caller function for MCP tool invocations.
+
+        The tool caller will be available to code running in the sandbox
+        as `__call_tool__(tool_name, arguments)`. This allows sandbox code
+        to invoke MCP tools through the provided caller.
+
+        The tool caller is stored on the client side (sandbox object) and
+        made available to sandbox code through the appropriate mechanism
+        for each sandbox type.
+
+        Args:
+            tool_caller: An async function with signature:
+                async def tool_caller(tool_name: str, arguments: dict) -> Any
+        """
+        self._tool_caller = tool_caller
+        self._setup_tool_caller()
+
+    def _setup_tool_caller(self) -> None:
+        """Set up the tool caller in the sandbox environment.
+
+        This method is called after registering a tool caller and should
+        make `__call_tool__` available to sandbox code. Subclasses may
+        override this for custom behavior.
+
+        The default implementation injects the tool caller directly,
+        which works for in-process sandboxes like local-eval.
+        """
+        if self._tool_caller is not None and self._started:
+            self._set_internal_variable("__call_tool__", self._tool_caller)
 
     @abstractmethod
     def _get_internal_variable(self, name: str, context: Optional[Context] = None) -> Any:

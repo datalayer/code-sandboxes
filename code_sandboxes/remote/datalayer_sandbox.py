@@ -398,6 +398,10 @@ class DatalayerSandbox(Sandbox):
         # Currently just a placeholder
         pass
 
+    def _setup_tool_caller(self) -> None:
+        """Keep tool calling on the client side for remote sandboxes."""
+        return
+
     def poll(self) -> Optional[int]:
         """Check if the sandbox has finished running.
 

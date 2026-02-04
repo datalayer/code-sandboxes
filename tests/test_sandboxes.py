@@ -461,27 +461,21 @@ greeting
     def test_async_function_defined_in_separate_execution(self):
         """Test calling async function defined in a separate run_code call."""
         with LocalEvalSandbox() as sandbox:
-            # Set up an external object that will be called
-            class MockExecutor:
-                async def call_tool(self, name, args):
-                    return f"Called {name} with {args}"
-            
-            sandbox.set_variable("__executor__", MockExecutor())
-            
-            # First execution: define the async wrapper function
-            execution1 = sandbox.run_code("""
-async def __call_tool__(tool_name, arguments):
-    '''Call a tool through the executor.'''
-    return await __executor__.call_tool(tool_name, arguments)
+            # Register a tool caller function
+            async def my_tool_caller(tool_name, arguments):
+                return f"Called {tool_name} with {arguments}"
 
-# Test that it's defined
+            sandbox.register_tool_caller(my_tool_caller)
+            
+            # Verify __call_tool__ is available
+            execution1 = sandbox.run_code("""
 print(f"__call_tool__ defined: {callable(__call_tool__)}")
 """)
             
             assert execution1.success, f"Execution failed: {execution1.code_error}"
             assert "defined: True" in execution1.stdout
             
-            # Second execution: use the function with await
+            # Use the function with await
             execution2 = sandbox.run_code("""
 result = await __call_tool__("test_tool", {"arg": "value"})
 print(f"Result: {result}")

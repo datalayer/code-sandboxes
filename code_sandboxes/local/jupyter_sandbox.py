@@ -196,6 +196,10 @@ class LocalJupyterSandbox(Sandbox):
         )
         self._started = True
 
+    def _setup_tool_caller(self) -> None:
+        """Keep tool calling on the client side for Jupyter sandboxes."""
+        return
+
     def stop(self) -> None:
         if not self._started:
             return
