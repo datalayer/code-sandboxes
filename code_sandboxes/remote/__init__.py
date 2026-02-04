@@ -5,5 +5,7 @@
 """Remote sandbox implementations."""
 
 from .datalayer_sandbox import DatalayerSandbox
+from .docker_sandbox import LocalDockerSandbox
+from .jupyter_sandbox import LocalJupyterSandbox
 
-__all__ = ["DatalayerSandbox"]
+__all__ = ["DatalayerSandbox", "LocalDockerSandbox", "LocalJupyterSandbox"]

@@ -44,7 +44,13 @@ sandbox = Sandbox.create(
 
 ## Sandbox Variants
 
-### local-eval
+Code Sandboxes provides two categories of execution backends:
+
+### Local Sandboxes
+
+Local sandboxes execute code in-process, sharing memory with the host Python process.
+
+#### local-eval
 
 Uses Python's `exec()` for code execution. No isolation, but fast and simple for development.
 
@@ -54,7 +60,12 @@ with Sandbox.create(variant="local-eval") as sandbox:
     result = sandbox.run_code("print(x)")  # prints 2
 ```
 
-### local-docker
+### Remote Sandboxes
+
+Remote sandboxes execute code out-of-process via the Jupyter kernel protocol, providing 
+better isolation and persistent kernel state.
+
+#### local-docker
 
 Runs code in a Docker container for local isolated execution.
 
@@ -72,7 +83,7 @@ Build the default image used by `LocalDockerSandbox`:
 docker build -t code-sandboxes-jupyter:latest -f docker/Dockerfile .
 ```
 
-### local-jupyter
+#### local-jupyter
 
 Runs code against a local Jupyter Server and connects using `jupyter-kernel-client`.
 This variant provides process isolation via the Jupyter kernel and persistent
@@ -87,7 +98,7 @@ with Sandbox.create(variant="local-jupyter") as sandbox:
     print(result.text)  # 42
 ```
 
-### datalayer-runtime
+#### datalayer-runtime
 
 Cloud-based execution with full isolation, GPU support, and persistence.
 
