@@ -7,9 +7,12 @@
 This package provides different sandbox implementations for executing
 code safely, inspired by E2B and Modal:
 
+Local sandboxes (in-process execution):
     - LocalEvalSandbox: Simple Python exec() based, for development/testing
+
+Remote sandboxes (out-of-process execution via Jupyter kernel protocol):
     - LocalDockerSandbox: Docker container based, good isolation
-    - LocalJupyterSandbox: Local Jupyter Server with persistent kernel state
+    - LocalJupyterSandbox: Jupyter Server with persistent kernel state
     - DatalayerSandbox: Cloud-based Datalayer runtime, full isolation
 
 Features:
@@ -73,8 +76,8 @@ from .filesystem import (
     SandboxFilesystem,
 )
 from .local.eval_sandbox import LocalEvalSandbox
-from .local.docker_sandbox import LocalDockerSandbox
-from .local.jupyter_sandbox import LocalJupyterSandbox
+from .remote.docker_sandbox import LocalDockerSandbox
+from .remote.jupyter_sandbox import LocalJupyterSandbox
 from .models import (
     CodeError,
     Context,

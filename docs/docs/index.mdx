@@ -58,11 +58,20 @@ This section clarifies what the package owns versus what is delegated to adjacen
 
 ## Sandbox Variants
 
-Code Sandboxes supports multiple execution backends:
+Code Sandboxes supports multiple execution backends organized into two categories:
+
+### Local Sandboxes
+Execute code in-process, sharing memory with the host Python process.
 
 | Variant | Isolation Level | Best For |
 |---------|-----------------|----------|
 | `local-eval` | None (Python exec) | Development, testing |
+
+### Remote Sandboxes
+Execute code out-of-process via Jupyter kernel protocol, providing better isolation.
+
+| Variant | Isolation Level | Best For |
+|---------|-----------------|----------|
 | `local-docker` | Container | Local isolated execution |
 | `local-jupyter` | Process (Jupyter kernel) | Local persistent state |
 | `datalayer-runtime` | Cloud VM | Production, GPU workloads |
