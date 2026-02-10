@@ -21,6 +21,8 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 
 import requests
 
+import logging
+
 from ..base import Sandbox
 from ..exceptions import SandboxConfigurationError, SandboxNotStartedError
 from ..models import (
@@ -40,6 +42,8 @@ from ..models import (
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 0
 DEFAULT_STARTUP_TIMEOUT = 30.0
+
+logger = logging.getLogger(__name__)
 
 
 class LocalJupyterSandbox(Sandbox):
@@ -164,6 +168,56 @@ class LocalJupyterSandbox(Sandbox):
                 time.sleep(0.5)
         raise SandboxConfigurationError("Timed out waiting for Jupyter Server")
 
+    def _find_existing_kernel(self) -> str | None:
+        """Find an existing pre-warmed kernel to reuse.
+
+        Uses jupyter-server-client to list running kernels on the Jupyter server.
+        If a pre-warmed kernel exists (idle, with 0 connections), returns its ID
+        so we can connect to it instead of creating a new one.
+
+        Returns:
+            The kernel ID to reuse, or None if no suitable kernel is found.
+        """
+        try:
+            from jupyter_server_client import JupyterServerClient
+        except ImportError:
+            logger.debug(
+                "jupyter-server-client not available, will create a new kernel"
+            )
+            return None
+
+        try:
+            jsc = JupyterServerClient(
+                base_url=self._server_url, token=self._token
+            )
+            kernels = jsc.kernels.list_kernels()
+            if not kernels:
+                logger.info("No existing kernels found, will create a new one")
+                return None
+
+            # Prefer a kernel with 0 connections (pre-warmed, not yet in use)
+            for kernel in kernels:
+                if kernel.connections == 0:
+                    logger.info(
+                        "Found pre-warmed kernel %s (connections=0, state=%s), reusing it",
+                        kernel.id,
+                        kernel.execution_state,
+                    )
+                    return kernel.id
+
+            # Fall back to the first kernel if all have connections
+            logger.info(
+                "No idle kernel found, reusing first kernel %s (connections=%d)",
+                kernels[0].id,
+                kernels[0].connections,
+            )
+            return kernels[0].id
+        except Exception as e:
+            logger.warning(
+                "Failed to list existing kernels: %s, will create a new one", e
+            )
+            return None
+
     def start(self) -> None:
         if self._started:
             return
@@ -181,7 +235,14 @@ class LocalJupyterSandbox(Sandbox):
 
         self._wait_for_server(timeout=self.config.timeout or DEFAULT_STARTUP_TIMEOUT)
 
-        self._client = KernelClient(server_url=self._server_url, token=self._token)
+        # Try to reuse an existing pre-warmed kernel instead of creating a new one.
+        # Jupyter runtimes pre-warm a kernel at startup; connecting to it avoids
+        # unnecessary kernel proliferation (3 kernels → 2, or 2 → 1).
+        kernel_id = self._find_existing_kernel()
+
+        self._client = KernelClient(
+            server_url=self._server_url, token=self._token, kernel_id=kernel_id
+        )
         self._client.start()
 
         self._default_context = self.create_context("default")
