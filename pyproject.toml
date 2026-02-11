@@ -25,6 +25,7 @@ dependencies = [
   "datalayer-core",
   "jupyter-server",
   "jupyter-kernel-client",
+  "jupyter-server-client",
 ]
 
 [project.optional-dependencies]
