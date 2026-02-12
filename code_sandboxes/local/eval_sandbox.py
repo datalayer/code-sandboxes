@@ -13,6 +13,7 @@ for executing untrusted code.
 
 import ast
 import asyncio
+import ctypes
 import io
 import socket
 import threading
@@ -65,6 +66,7 @@ class LocalEvalSandbox(Sandbox):
         self._namespaces: dict[str, dict[str, Any]] = {}
         self._execution_count: dict[str, int] = {}
         self._sandbox_id = str(uuid.uuid4())
+        self._exec_thread_id: int | None = None  # thread id of current execution
 
     @classmethod
     def list_environments(cls) -> list[SandboxEnvironment]:
@@ -108,6 +110,20 @@ class LocalEvalSandbox(Sandbox):
         self._started = False
         if self._info:
             self._info.status = "stopped"
+
+    def _do_interrupt(self) -> bool:
+        """Interrupt code by raising KeyboardInterrupt in the executing thread."""
+        tid = self._exec_thread_id
+        if tid is None:
+            # Execution runs on the calling thread — set the flag so
+            # the next Python bytecode check raises.
+            tid = threading.current_thread().ident
+        if tid is not None:
+            res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                ctypes.c_ulong(tid), ctypes.py_object(KeyboardInterrupt)
+            )
+            return res >= 1
+        return False
 
     def create_context(self, name: Optional[str] = None) -> Context:
         """Create a new execution context with its own namespace.
@@ -176,6 +192,11 @@ class LocalEvalSandbox(Sandbox):
         execution_count = self._execution_count[ctx.id]
 
         started_at = time.time()
+
+        # Track execution state for interrupt support
+        self._interrupt_requested.clear()
+        self._executing_event.set()
+        self._exec_thread_id = threading.current_thread().ident
 
         # Set up environment variables temporarily
         old_env = {}
@@ -297,6 +318,16 @@ async def __user_code__():
                 # Non-zero exit is a failure, but not a code error (it's intentional)
                 pass  # exit_code will be set below
 
+        except KeyboardInterrupt:
+            # Interruption (from interrupt() call or user Ctrl-C)
+            code_error = CodeError(
+                name="KeyboardInterrupt",
+                value="Execution was interrupted",
+                traceback="",
+            )
+            if on_error:
+                on_error(code_error)
+
         except Exception as e:
             # Capture the error
             exit_code = None  # Reset - this is a code error, not an exit
@@ -310,6 +341,10 @@ async def __user_code__():
                 on_error(code_error)
 
         finally:
+            # Clear execution tracking
+            self._executing_event.clear()
+            self._exec_thread_id = None
+
             # Restore environment variables
             if envs:
                 import os
@@ -319,6 +354,10 @@ async def __user_code__():
                         os.environ.pop(key, None)
                     else:
                         os.environ[key] = old_value
+
+        # Check if this was an interrupt
+        was_interrupted = self._interrupt_requested.is_set()
+        self._interrupt_requested.clear()
 
         # Process stdout
         stdout_content = stdout_buffer.getvalue()
@@ -350,6 +389,7 @@ async def __user_code__():
             context_id=ctx.id,
             started_at=started_at,
             completed_at=time.time(),
+            interrupted=was_interrupted,
         )
 
     @contextmanager

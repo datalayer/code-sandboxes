@@ -302,6 +302,25 @@ class LocalJupyterSandbox(Sandbox):
         if self._info:
             self._info.status = SandboxStatus.STOPPED
 
+    def _do_interrupt(self) -> bool:
+        """Interrupt the Jupyter kernel via the REST API."""
+        if not self._server_url or not self._client:
+            return False
+        try:
+            # KernelClient exposes the kernel ID as the `.id` property
+            kernel_id = getattr(self._client, 'id', None)
+            if kernel_id:
+                resp = requests.post(
+                    f"{self._server_url}/api/kernels/{kernel_id}/interrupt",
+                    params={"token": self._token},
+                    timeout=5,
+                )
+                return resp.ok
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to interrupt Jupyter kernel: {e}")
+            return False
+
     def run_code(
         self,
         code: str,
@@ -322,6 +341,10 @@ class LocalJupyterSandbox(Sandbox):
 
         started_at = time.time()
 
+        # Track execution state for interrupt support
+        self._interrupt_requested.clear()
+        self._executing_event.set()
+
         if envs:
             env_code = "\n".join(
                 f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items()
@@ -331,13 +354,22 @@ class LocalJupyterSandbox(Sandbox):
         try:
             reply = self._client.execute(code, timeout=timeout or self.config.timeout)
         except Exception as e:
-            # Infrastructure failure - couldn't execute the code
+            # Infrastructure failure or interruption
+            self._executing_event.clear()
+            was_interrupted = self._interrupt_requested.is_set()
+            self._interrupt_requested.clear()
             return ExecutionResult(
-                execution_ok=False,
-                execution_error=f"Failed to execute code: {e}",
+                execution_ok=not was_interrupted,
+                execution_error=f"Failed to execute code: {e}" if not was_interrupted else None,
                 started_at=started_at,
                 completed_at=time.time(),
                 context_id=context.id if context else "default",
+                interrupted=was_interrupted,
+                code_error=CodeError(
+                    name="KeyboardInterrupt",
+                    value="Execution was interrupted",
+                    traceback="",
+                ) if was_interrupted else None,
             )
 
         stdout_messages: list[OutputMessage] = []
@@ -390,6 +422,11 @@ class LocalJupyterSandbox(Sandbox):
                     if on_error:
                         on_error(code_error)
 
+        # Clear execution tracking
+        self._executing_event.clear()
+        was_interrupted = self._interrupt_requested.is_set()
+        self._interrupt_requested.clear()
+
         return ExecutionResult(
             results=results,
             logs=Logs(stdout=stdout_messages, stderr=stderr_messages),
@@ -400,6 +437,7 @@ class LocalJupyterSandbox(Sandbox):
             context_id=context.id if context else "default",
             started_at=started_at,
             completed_at=time.time(),
+            interrupted=was_interrupted,
         )
 
     def _get_internal_variable(self, name: str, context: Optional[Context] = None):
