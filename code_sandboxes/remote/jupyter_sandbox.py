@@ -11,6 +11,7 @@ one) and uses ``jupyter-kernel-client`` to execute code in a persistent kernel.
 from __future__ import annotations
 
 import os
+import socket
 import tempfile
 import threading
 import time
@@ -110,6 +111,58 @@ class LocalJupyterSandbox(Sandbox):
         self._workdir = self._workdir_tmp
         return self._workdir
 
+    @staticmethod
+    def _is_port_available(host: str, port: int) -> bool:
+        """Check if a port is available for binding.
+
+        Args:
+            host: The host address to check.
+            port: The port number to check.
+
+        Returns:
+            True if the port is free, False otherwise.
+        """
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind((host, port))
+                return True
+        except OSError:
+            return False
+
+    def _find_free_port(self) -> int:
+        """Find a free port on the host by binding to port 0.
+
+        The OS assigns an available random port.  The socket is closed
+        immediately and the port number is returned.  A second check is
+        performed to guard against the (unlikely) race where the port
+        is grabbed between close and the Jupyter server bind.
+
+        Returns:
+            An available port number.
+
+        Raises:
+            SandboxConfigurationError: If no free port could be found.
+        """
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind((self._host, 0))
+                port = sock.getsockname()[1]
+        except OSError as exc:
+            raise SandboxConfigurationError(
+                f"Could not find a free port on {self._host}: {exc}"
+            ) from exc
+
+        # Double-check that the port is still available after releasing
+        if not self._is_port_available(self._host, port):
+            raise SandboxConfigurationError(
+                f"Port {port} was free but became unavailable immediately"
+            )
+
+        logger.info("Found free port %d on %s for Jupyter server", port, self._host)
+        return port
+
     def _start_local_server(self) -> None:
         workdir = self._resolve_workdir()
         try:
@@ -120,13 +173,19 @@ class LocalJupyterSandbox(Sandbox):
                 "Install it with: pip install code-sandboxes[test]"
             ) from exc
 
+        # If port is 0, find a verified-free random port before starting.
+        port = self._port
+        if port == 0:
+            port = self._find_free_port()
+            self._port = port
+
         ServerApp.clear_instance()
         app = ServerApp.instance()
         app.initialize(
             argv=[
                 "--no-browser",
                 f"--ServerApp.token={self._token}",
-                f"--ServerApp.port={self._port}",
+                f"--ServerApp.port={port}",
                 "--ServerApp.port_retries=0",
                 "--ServerApp.allow_origin=*",
                 f"--ServerApp.root_dir={workdir}",
