@@ -428,3 +428,99 @@ await mixed_output()
             assert sandbox.info is not None
             assert sandbox.info.variant == "local-eval"
             assert sandbox.info.status == "running"
+
+
+class TestInterruptAndExecutionState:
+    """Tests for is_executing and interrupt() on LocalEvalSandbox."""
+
+    def test_is_executing_false_when_idle(self):
+        """is_executing is False when no code is running."""
+        with LocalEvalSandbox() as sandbox:
+            assert sandbox.is_executing is False
+
+    def test_is_executing_true_during_run(self):
+        """is_executing is True while code is running."""
+        import threading
+
+        started = threading.Event()
+        proceed = threading.Event()
+        observed_executing = []
+
+        def run_in_thread():
+            # Execute code that waits for the proceed event
+            sandbox.run_code(
+                "import time\n"
+                "started.set()\n"
+                "proceed.wait(5)\n"
+            )
+
+        with LocalEvalSandbox() as sandbox:
+            sandbox.set_variable("started", started)
+            sandbox.set_variable("proceed", proceed)
+
+            thread = threading.Thread(target=run_in_thread)
+            thread.start()
+
+            # Wait until the sandbox code is running
+            started.wait(5)
+            observed_executing.append(sandbox.is_executing)
+
+            # Release the code
+            proceed.set()
+            thread.join(5)
+
+        assert observed_executing == [True]
+        # After execution, should be False
+        assert sandbox.is_executing is False
+
+    def test_interrupt_when_not_executing(self):
+        """interrupt() returns False when nothing is running."""
+        with LocalEvalSandbox() as sandbox:
+            assert sandbox.interrupt() is False
+
+    def test_interrupt_stops_running_code(self):
+        """interrupt() sends KeyboardInterrupt to running code."""
+        import threading
+        import time
+
+        started = threading.Event()
+
+        def run_in_thread():
+            return sandbox.run_code(
+                "import time\n"
+                "started.set()\n"
+                "while True:\n"
+                "    time.sleep(0.01)\n"
+            )
+
+        with LocalEvalSandbox() as sandbox:
+            sandbox.set_variable("started", started)
+
+            results = [None]
+
+            def run_and_capture():
+                results[0] = sandbox.run_code(
+                    "import time\n"
+                    "started.set()\n"
+                    "while True:\n"
+                    "    time.sleep(0.01)\n"
+                )
+
+            thread = threading.Thread(target=run_and_capture)
+            thread.start()
+
+            # Wait until the sandbox code is running
+            started.wait(5)
+            time.sleep(0.05)  # Give it a moment to enter the loop
+
+            # Interrupt
+            success = sandbox.interrupt()
+            assert success is True
+
+            thread.join(5)
+
+            result = results[0]
+            assert result is not None
+            assert result.interrupted is True
+            assert result.code_error is not None
+            assert result.code_error.name == "KeyboardInterrupt"

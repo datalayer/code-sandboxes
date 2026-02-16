@@ -11,6 +11,10 @@ one) and uses ``jupyter-kernel-client`` to execute code in a persistent kernel.
 from __future__ import annotations
 
 import os
+import signal
+import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -57,6 +61,7 @@ class LocalJupyterSandbox(Sandbox):
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
         python_executable: Optional[str] = None,
+        separate_process: bool = True,
         **kwargs,
     ):
         super().__init__(config)
@@ -77,8 +82,10 @@ class LocalJupyterSandbox(Sandbox):
         self._host = host
         self._port = port
         self._python_executable = python_executable or os.environ.get("PYTHON", "python")
+        self._separate_process = separate_process
         self._server_app = None
         self._server_thread: Optional[threading.Thread] = None
+        self._server_process: Optional[subprocess.Popen] = None
         self._client = None
         self._sandbox_id = str(uuid.uuid4())
         self._workdir: Optional[str] = None
@@ -110,8 +117,109 @@ class LocalJupyterSandbox(Sandbox):
         self._workdir = self._workdir_tmp
         return self._workdir
 
+    @staticmethod
+    def _is_port_available(host: str, port: int) -> bool:
+        """Check if a port is available for binding.
+
+        Args:
+            host: The host address to check.
+            port: The port number to check.
+
+        Returns:
+            True if the port is free, False otherwise.
+        """
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind((host, port))
+                return True
+        except OSError:
+            return False
+
+    def _find_free_port(self) -> int:
+        """Find a free port on the host by binding to port 0.
+
+        The OS assigns an available random port.  The socket is closed
+        immediately and the port number is returned.  A second check is
+        performed to guard against the (unlikely) race where the port
+        is grabbed between close and the Jupyter server bind.
+
+        Returns:
+            An available port number.
+
+        Raises:
+            SandboxConfigurationError: If no free port could be found.
+        """
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind((self._host, 0))
+                port = sock.getsockname()[1]
+        except OSError as exc:
+            raise SandboxConfigurationError(
+                f"Could not find a free port on {self._host}: {exc}"
+            ) from exc
+
+        # Double-check that the port is still available after releasing
+        if not self._is_port_available(self._host, port):
+            raise SandboxConfigurationError(
+                f"Port {port} was free but became unavailable immediately"
+            )
+
+        logger.info("Found free port %d on %s for Jupyter server", port, self._host)
+        return port
+
     def _start_local_server(self) -> None:
         workdir = self._resolve_workdir()
+
+        # If port is 0, find a verified-free random port before starting.
+        port = self._port
+        if port == 0:
+            port = self._find_free_port()
+            self._port = port
+
+        if self._separate_process:
+            self._start_local_server_subprocess(workdir, port)
+        else:
+            self._start_local_server_inprocess(workdir, port)
+
+    def _start_local_server_subprocess(self, workdir: str, port: int) -> None:
+        """Start the Jupyter server as a separate subprocess.
+
+        This is the default mode.  It avoids event-loop conflicts when the
+        caller already runs inside an async loop (e.g. uvicorn / uvloop).
+        """
+        cmd = [
+            sys.executable, "-m", "jupyter_server",
+            "--no-browser",
+            f"--ServerApp.token={self._token}",
+            f"--ServerApp.port={port}",
+            "--ServerApp.port_retries=0",
+            "--ServerApp.allow_origin=*",
+            f"--ServerApp.root_dir={workdir}",
+        ]
+
+        logger.info(
+            "Starting Jupyter server subprocess on %s:%d (workdir=%s)",
+            self._host, port, workdir,
+        )
+
+        self._server_process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            # Start in its own process group so we can kill the tree.
+            preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+        )
+
+        self._server_url = f"http://{self._host}:{port}"
+
+    def _start_local_server_inprocess(self, workdir: str, port: int) -> None:
+        """Start the Jupyter server in a daemon thread (legacy mode).
+
+        Kept for environments where subprocess spawning is not desirable
+        (e.g. unit tests, single-process setups).
+        """
         try:
             from jupyter_server.serverapp import ServerApp
         except Exception as exc:
@@ -126,7 +234,7 @@ class LocalJupyterSandbox(Sandbox):
             argv=[
                 "--no-browser",
                 f"--ServerApp.token={self._token}",
-                f"--ServerApp.port={self._port}",
+                f"--ServerApp.port={port}",
                 "--ServerApp.port_retries=0",
                 "--ServerApp.allow_origin=*",
                 f"--ServerApp.root_dir={workdir}",
@@ -272,6 +380,23 @@ class LocalJupyterSandbox(Sandbox):
                 pass
             self._client = None
 
+        # Terminate subprocess-based server
+        if self._server_process is not None and self._owns_server:
+            try:
+                # Kill the entire process group (server + any children)
+                if hasattr(os, "killpg"):
+                    os.killpg(os.getpgid(self._server_process.pid), signal.SIGTERM)
+                else:
+                    self._server_process.terminate()
+                self._server_process.wait(timeout=5)
+            except Exception:
+                try:
+                    self._server_process.kill()
+                except Exception:
+                    pass
+            self._server_process = None
+
+        # Terminate in-process server (legacy mode)
         if self._server_app is not None and self._owns_server:
             try:
                 if getattr(self._server_app, "io_loop", None):
@@ -302,6 +427,25 @@ class LocalJupyterSandbox(Sandbox):
         if self._info:
             self._info.status = SandboxStatus.STOPPED
 
+    def _do_interrupt(self) -> bool:
+        """Interrupt the Jupyter kernel via the REST API."""
+        if not self._server_url or not self._client:
+            return False
+        try:
+            # KernelClient exposes the kernel ID as the `.id` property
+            kernel_id = getattr(self._client, 'id', None)
+            if kernel_id:
+                resp = requests.post(
+                    f"{self._server_url}/api/kernels/{kernel_id}/interrupt",
+                    params={"token": self._token},
+                    timeout=5,
+                )
+                return resp.ok
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to interrupt Jupyter kernel: {e}")
+            return False
+
     def run_code(
         self,
         code: str,
@@ -322,6 +466,10 @@ class LocalJupyterSandbox(Sandbox):
 
         started_at = time.time()
 
+        # Track execution state for interrupt support
+        self._interrupt_requested.clear()
+        self._executing_event.set()
+
         if envs:
             env_code = "\n".join(
                 f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items()
@@ -331,13 +479,22 @@ class LocalJupyterSandbox(Sandbox):
         try:
             reply = self._client.execute(code, timeout=timeout or self.config.timeout)
         except Exception as e:
-            # Infrastructure failure - couldn't execute the code
+            # Infrastructure failure or interruption
+            self._executing_event.clear()
+            was_interrupted = self._interrupt_requested.is_set()
+            self._interrupt_requested.clear()
             return ExecutionResult(
-                execution_ok=False,
-                execution_error=f"Failed to execute code: {e}",
+                execution_ok=not was_interrupted,
+                execution_error=f"Failed to execute code: {e}" if not was_interrupted else None,
                 started_at=started_at,
                 completed_at=time.time(),
                 context_id=context.id if context else "default",
+                interrupted=was_interrupted,
+                code_error=CodeError(
+                    name="KeyboardInterrupt",
+                    value="Execution was interrupted",
+                    traceback="",
+                ) if was_interrupted else None,
             )
 
         stdout_messages: list[OutputMessage] = []
@@ -390,6 +547,11 @@ class LocalJupyterSandbox(Sandbox):
                     if on_error:
                         on_error(code_error)
 
+        # Clear execution tracking
+        self._executing_event.clear()
+        was_interrupted = self._interrupt_requested.is_set()
+        self._interrupt_requested.clear()
+
         return ExecutionResult(
             results=results,
             logs=Logs(stdout=stdout_messages, stderr=stderr_messages),
@@ -400,6 +562,7 @@ class LocalJupyterSandbox(Sandbox):
             context_id=context.id if context else "default",
             started_at=started_at,
             completed_at=time.time(),
+            interrupted=was_interrupted,
         )
 
     def _get_internal_variable(self, name: str, context: Optional[Context] = None):

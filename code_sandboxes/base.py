@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import threading
 from typing import Any, AsyncIterator, Iterator, Optional, Union
 import uuid
 
@@ -81,6 +82,8 @@ class Sandbox(ABC):
         self._tags: dict[str, str] = {}
         self._created_at: float = 0.0
         self._tool_caller: Optional[Any] = None  # Tool caller function for MCP tools
+        self._executing_event = threading.Event()  # Set while code is running
+        self._interrupt_requested = threading.Event()  # Set to request interruption
 
     @property
     def info(self) -> Optional[SandboxInfo]:
@@ -91,6 +94,35 @@ class Sandbox(ABC):
     def is_started(self) -> bool:
         """Check if sandbox has been started."""
         return self._started
+
+    @property
+    def is_executing(self) -> bool:
+        """Check if the sandbox is currently executing code."""
+        return self._executing_event.is_set()
+
+    def interrupt(self) -> bool:
+        """Request interruption of the currently running code.
+
+        Returns:
+            True if an interruption was requested (code was running),
+            False if no code was running.
+        """
+        if not self._executing_event.is_set():
+            return False
+        self._interrupt_requested.set()
+        return self._do_interrupt()
+
+    def _do_interrupt(self) -> bool:
+        """Perform the actual interrupt.  Subclasses should override this.
+
+        The default implementation simply sets the interrupt flag.
+        Subclasses can send kernel interrupt signals, raise async
+        exceptions in threads, etc.
+
+        Returns:
+            True if the interrupt signal was delivered.
+        """
+        return True
 
     @property
     def sandbox_id(self) -> Optional[str]:
