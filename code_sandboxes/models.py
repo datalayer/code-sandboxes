@@ -67,9 +67,9 @@ class SandboxStatus(str, Enum):
 class SandboxVariant(str, Enum):
     """Supported sandbox variants."""
 
-    LOCAL_EVAL = "local-eval"
+    EVAL = "eval"
     LOCAL_DOCKER = "local-docker"
-    LOCAL_JUPYTER = "local-jupyter"
+    JUPYTER = "jupyter"
     DATALAYER_RUNTIME = "datalayer-runtime"
 
 
@@ -445,7 +445,7 @@ class SandboxInfo(BaseModel):
 
     Attributes:
         id: Unique identifier for the sandbox.
-        variant: The sandbox variant (local-eval, local-docker, local-jupyter, datalayer-runtime).
+        variant: The sandbox variant (eval, local-docker, jupyter, datalayer-runtime).
         status: Current status of the sandbox.
         created_at: Unix timestamp when the sandbox was created.
         end_at: Unix timestamp when the sandbox will be terminated.

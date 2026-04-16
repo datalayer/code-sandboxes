@@ -33,9 +33,9 @@ class Sandbox(ABC):
 
     A sandbox provides a safe, isolated environment for executing code.
     Different implementations provide different isolation levels:
-    - local-eval: Simple Python exec() based, minimal isolation
+    - eval: Simple Python exec() based, minimal isolation
     - local-docker: Docker container based, good isolation
-    - local-jupyter: Local Jupyter Server with persistent kernel state
+    - jupyter: Local Jupyter Server with persistent kernel state
     - datalayer-runtime: Cloud-based Datalayer runtime, full isolation
 
     Features inspired by E2B and Modal:
@@ -193,9 +193,9 @@ class Sandbox(ABC):
 
         Args:
             variant: The type of sandbox to create.
-                - "local-eval": Simple Python exec() based, minimal isolation
+                - "eval": Simple Python exec() based, minimal isolation
                 - "local-docker": Docker container based (requires Docker)
-                - "local-jupyter": Local Jupyter Server with persistent kernel state
+                - "jupyter": Local Jupyter Server with persistent kernel state
                 - "datalayer-runtime": Cloud-based Datalayer runtime (default)
             config: Optional full configuration object (overrides individual params).
             timeout: Default timeout for code execution in seconds.
@@ -227,7 +227,7 @@ class Sandbox(ABC):
             sandbox = Sandbox.create(gpu="T4", environment="python-gpu-env")
 
             # Local development
-            sandbox = Sandbox.create(variant="local-eval")
+            sandbox = Sandbox.create(variant="eval")
         """
         # Build config from individual parameters if not provided
         if config is None:
@@ -243,29 +243,29 @@ class Sandbox(ABC):
                 allowed_hosts=allowed_hosts or [],
             )
 
-        from .local.eval_sandbox import LocalEvalSandbox
+        from .eval_sandbox import LocalEvalSandbox
 
         variant_value = variant.value if isinstance(variant, SandboxVariant) else variant
 
-        if variant_value == "local-eval":
+        if variant_value == "eval":
             sandbox = LocalEvalSandbox(config=config, **kwargs)
         elif variant_value == "local-docker":
             # Import here to avoid circular imports
-            from .local.docker_sandbox import LocalDockerSandbox
+            from .docker_sandbox import LocalDockerSandbox
 
             sandbox = LocalDockerSandbox(config=config, **kwargs)
-        elif variant_value == "local-jupyter":
-            from .local.jupyter_sandbox import LocalJupyterSandbox
+        elif variant_value == "jupyter":
+            from .jupyter_sandbox import LocalJupyterSandbox
 
             sandbox = LocalJupyterSandbox(config=config, **kwargs)
         elif variant_value == "datalayer-runtime":
-            from .remote.datalayer_sandbox import DatalayerSandbox
+            from .datalayer_sandbox import DatalayerSandbox
 
             sandbox = DatalayerSandbox(config=config, **kwargs)
         else:
             raise ValueError(
                 f"Unknown sandbox variant: {variant}. "
-                "Supported variants: local-eval, local-docker, local-jupyter, "
+                "Supported variants: eval, local-docker, jupyter, "
                 "datalayer-runtime"
             )
 
@@ -292,7 +292,7 @@ class Sandbox(ABC):
             SandboxNotFoundError: If no sandbox with the given ID exists.
         """
         # This is primarily for datalayer-runtime
-        from .remote.datalayer_sandbox import DatalayerSandbox
+        from .datalayer_sandbox import DatalayerSandbox
 
         return DatalayerSandbox.from_id(sandbox_id, **kwargs)
 
@@ -311,27 +311,27 @@ class Sandbox(ABC):
         Returns:
             List of SandboxEnvironment entries.
         """
-        from .local.eval_sandbox import LocalEvalSandbox
+        from .eval_sandbox import LocalEvalSandbox
 
         variant_value = variant.value if isinstance(variant, SandboxVariant) else variant
 
-        if variant_value == "local-eval":
+        if variant_value == "eval":
             return LocalEvalSandbox.list_environments()
         if variant_value == "local-docker":
-            from .local.docker_sandbox import LocalDockerSandbox
+            from .docker_sandbox import LocalDockerSandbox
 
             return LocalDockerSandbox.list_environments()
-        if variant_value == "local-jupyter":
-            from .local.jupyter_sandbox import LocalJupyterSandbox
+        if variant_value == "jupyter":
+            from .jupyter_sandbox import LocalJupyterSandbox
 
             return LocalJupyterSandbox.list_environments()
         if variant_value == "datalayer-runtime":
-            from .remote.datalayer_sandbox import DatalayerSandbox
+            from .datalayer_sandbox import DatalayerSandbox
 
             return DatalayerSandbox.list_environments(**kwargs)
         raise ValueError(
             f"Unknown sandbox variant: {variant}. "
-            "Supported variants: local-eval, local-docker, local-jupyter, "
+            "Supported variants: eval, local-docker, jupyter, "
             "datalayer-runtime"
         )
 
@@ -352,7 +352,7 @@ class Sandbox(ABC):
         Yields:
             Sandbox instances.
         """
-        from .remote.datalayer_sandbox import DatalayerSandbox
+        from .datalayer_sandbox import DatalayerSandbox
 
         yield from DatalayerSandbox.list_all(tags=tags, **kwargs)
 
@@ -611,7 +611,7 @@ class Sandbox(ABC):
         override this for custom behavior.
 
         The default implementation injects the tool caller directly,
-        which works for in-process sandboxes like local-eval.
+        which works for in-process sandboxes like eval.
         """
         if self._tool_caller is not None and self._started:
             self._set_internal_variable("__call_tool__", self._tool_caller)

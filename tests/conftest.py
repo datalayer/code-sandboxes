@@ -7,7 +7,7 @@
 import pytest
 from pathlib import Path
 
-from code_sandboxes.local.eval_sandbox import LocalEvalSandbox
+from code_sandboxes.eval_sandbox import LocalEvalSandbox
 from code_sandboxes.models import SandboxConfig
 
 

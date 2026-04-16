@@ -7,7 +7,7 @@
 import pytest
 
 from code_sandboxes.exceptions import SandboxNotStartedError
-from code_sandboxes.local.eval_sandbox import LocalEvalSandbox
+from code_sandboxes.eval_sandbox import LocalEvalSandbox
 from code_sandboxes.models import SandboxConfig
 
 
@@ -426,7 +426,7 @@ await mixed_output()
         """Test sandbox info."""
         with LocalEvalSandbox() as sandbox:
             assert sandbox.info is not None
-            assert sandbox.info.variant == "local-eval"
+            assert sandbox.info.variant == "eval"
             assert sandbox.info.status == "running"
 
 

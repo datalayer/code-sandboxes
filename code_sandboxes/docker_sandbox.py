@@ -18,9 +18,9 @@ import uuid
 
 import requests
 
-from ..base import Sandbox
-from ..exceptions import SandboxConfigurationError, SandboxNotStartedError
-from ..models import (
+from .base import Sandbox
+from .exceptions import SandboxConfigurationError, SandboxNotStartedError
+from .models import (
     CodeError,
     Context,
     ExecutionResult,

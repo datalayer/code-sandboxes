@@ -27,7 +27,7 @@ Example:
     from code_sandboxes import Sandbox
 
     # Create a sandbox (defaults to datalayer-runtime)
-    with Sandbox.create(variant="local-eval") as sandbox:
+    with Sandbox.create(variant="eval") as sandbox:
         # Execute code
         result = sandbox.run_code("x = 1 + 1")
         result = sandbox.run_code("print(x)")  # prints 2
@@ -75,9 +75,9 @@ from .filesystem import (
     SandboxFileHandle,
     SandboxFilesystem,
 )
-from .local.eval_sandbox import LocalEvalSandbox
-from .remote.docker_sandbox import LocalDockerSandbox
-from .remote.jupyter_sandbox import LocalJupyterSandbox
+from .eval_sandbox import LocalEvalSandbox
+from .docker_sandbox import LocalDockerSandbox
+from .jupyter_sandbox import LocalJupyterSandbox
 from .models import (
     CodeError,
     Context,
@@ -97,7 +97,7 @@ from .models import (
     SnapshotInfo,
     TunnelInfo,
 )
-from .remote.datalayer_sandbox import DatalayerSandbox
+from .datalayer_sandbox import DatalayerSandbox
 
 __all__ = [
     # Main sandbox class

@@ -2,17 +2,17 @@
 
 PYTHON ?= python
 
-.PHONY: all local-eval local-docker local-jupyter datalayer-runtime
+.PHONY: all eval local-docker jupyter datalayer-runtime
 
-all: local-eval local-docker local-jupyter datalayer-runtime
+all: eval local-docker jupyter datalayer-runtime
 
-local-eval:
+eval:
 	$(PYTHON) local_eval_example.py
 
 local-docker:
 	$(PYTHON) local_docker_example.py
 
-local-jupyter:
+jupyter:
 	$(PYTHON) local_jupyter_example.py
 
 datalayer-runtime:

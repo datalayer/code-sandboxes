@@ -29,10 +29,28 @@ Four variants are available:
 
 | Variant | Isolation | Use Case |
 |---------|-----------|----------|
-| `local-eval` | None (Python exec) | Development, testing |
+| `eval` | None (Python exec) | Development, testing |
 | `local-docker` | Container (Jupyter Server) | Local isolated execution |
-| `local-jupyter` | Process (Jupyter kernel) | Local persistent state |
+| `jupyter` | Process (Jupyter kernel) | Local persistent state |
 | `datalayer-runtime` | Cloud VM | Production, GPU workloads |
+
+## Module Layout
+
+Sandbox implementations are exposed as top-level modules:
+
+- `code_sandboxes.eval_sandbox`
+- `code_sandboxes.jupyter_sandbox`
+- `code_sandboxes.docker_sandbox`
+- `code_sandboxes.datalayer_sandbox`
+
+Example direct imports:
+
+```python
+from code_sandboxes.eval_sandbox import LocalEvalSandbox
+from code_sandboxes.jupyter_sandbox import LocalJupyterSandbox
+from code_sandboxes.docker_sandbox import LocalDockerSandbox
+from code_sandboxes.datalayer_sandbox import DatalayerSandbox
+```
 
 ## Installation
 
@@ -69,7 +87,7 @@ docker build -t code-sandboxes-jupyter:latest -f docker/Dockerfile .
 from code_sandboxes import Sandbox
 
 # Create a sandbox with timeout
-with Sandbox.create(variant="local-eval", timeout=60) as sandbox:
+with Sandbox.create(variant="eval", timeout=60) as sandbox:
     # Execute code
     result = sandbox.run_code("x = 1 + 1")
     result = sandbox.run_code("print(x)")  # prints 2

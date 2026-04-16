@@ -14,7 +14,7 @@ Use `Sandbox.create()` to create a new sandbox:
 ```python
 from code_sandboxes import Sandbox
 
-# Create with defaults (local-eval variant)
+# Create with defaults (eval variant)
 sandbox = Sandbox.create()
 
 # Create with specific variant
@@ -37,12 +37,21 @@ sandbox = Sandbox.create(
 
 # Create with network policy
 sandbox = Sandbox.create(
-    variant="local-eval",
+    variant="eval",
     network_policy="none",  # block all outbound connections
 )
 ```
 
 ## Sandbox Variants
+
+Concrete implementations are available from top-level modules:
+
+```python
+from code_sandboxes.eval_sandbox import LocalEvalSandbox
+from code_sandboxes.jupyter_sandbox import LocalJupyterSandbox
+from code_sandboxes.docker_sandbox import LocalDockerSandbox
+from code_sandboxes.datalayer_sandbox import DatalayerSandbox
+```
 
 Code Sandboxes provides two categories of execution backends:
 
@@ -50,12 +59,12 @@ Code Sandboxes provides two categories of execution backends:
 
 Local sandboxes execute code in-process, sharing memory with the host Python process.
 
-#### local-eval
+#### eval
 
 Uses Python's `exec()` for code execution. No isolation, but fast and simple for development.
 
 ```python
-with Sandbox.create(variant="local-eval") as sandbox:
+with Sandbox.create(variant="eval") as sandbox:
     result = sandbox.run_code("x = 1 + 1")
     result = sandbox.run_code("print(x)")  # prints 2
 ```
@@ -83,7 +92,7 @@ Build the default image used by `LocalDockerSandbox`:
 docker build -t code-sandboxes-jupyter:latest -f docker/Dockerfile .
 ```
 
-#### local-jupyter
+#### jupyter
 
 Runs code against a local Jupyter Server and connects using `jupyter-kernel-client`.
 This variant provides process isolation via the Jupyter kernel and persistent
@@ -92,7 +101,7 @@ state across requests.
 Requirements: `jupyter_server` and `jupyter-kernel-client`.
 
 ```python
-with Sandbox.create(variant="local-jupyter") as sandbox:
+with Sandbox.create(variant="jupyter") as sandbox:
     sandbox.run_code("x = 40")
     result = sandbox.run_code("x + 2")
     print(result.text)  # 42
@@ -162,11 +171,11 @@ x * 2
 ## Async Execution
 
 Use `await` directly in `run_code()` when the sandbox supports async execution
-(local-eval, local-jupyter, and datalayer-runtime). The last expression is
+(eval, jupyter, and datalayer-runtime). The last expression is
 returned in `results` just like sync code.
 
 ```python
-with Sandbox.create(variant="local-eval") as sandbox:
+with Sandbox.create(variant="eval") as sandbox:
     result = sandbox.run_code("""
 import asyncio
 

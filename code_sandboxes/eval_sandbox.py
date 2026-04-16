@@ -25,9 +25,9 @@ from contextlib import redirect_stderr, redirect_stdout
 from contextlib import contextmanager
 from typing import Any, Optional
 
-from ..base import Sandbox
-from ..exceptions import SandboxNotStartedError
-from ..models import (
+from .base import Sandbox
+from .exceptions import SandboxNotStartedError
+from .models import (
     CodeError,
     Context,
     ExecutionResult,
@@ -72,13 +72,13 @@ class LocalEvalSandbox(Sandbox):
     def list_environments(cls) -> list[SandboxEnvironment]:
         return [
             SandboxEnvironment(
-                name="local-eval",
+                name="eval",
                 title="Local Eval",
                 language="python",
                 owner="local",
                 visibility="local",
                 burning_rate=0.0,
-                metadata={"variant": "local-eval"},
+                metadata={"variant": "eval"},
             )
         ]
 
@@ -93,7 +93,7 @@ class LocalEvalSandbox(Sandbox):
 
         self._info = SandboxInfo(
             id=self._sandbox_id,
-            variant="local-eval",
+            variant="eval",
             status="running",
             created_at=time.time(),
             config=self.config,
@@ -458,13 +458,13 @@ async def __user_code__():
         """
         ctx = context or self._default_context
         if ctx.id not in self._namespaces:
-            from ..exceptions import VariableNotFoundError
+            from .exceptions import VariableNotFoundError
 
             raise VariableNotFoundError(name)
 
         namespace = self._namespaces[ctx.id]
         if name not in namespace:
-            from ..exceptions import VariableNotFoundError
+            from .exceptions import VariableNotFoundError
 
             raise VariableNotFoundError(name)
 

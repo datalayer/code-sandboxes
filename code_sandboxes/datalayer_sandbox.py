@@ -14,14 +14,14 @@ import time
 import uuid
 from typing import Any, Iterator, Optional
 
-from ..base import Sandbox
-from ..exceptions import (
+from .base import Sandbox
+from .exceptions import (
     SandboxConfigurationError,
     SandboxConnectionError,
     SandboxNotStartedError,
     SandboxSnapshotError,
 )
-from ..models import (
+from .models import (
     CodeError,
     Context,
     ExecutionResult,
@@ -691,5 +691,5 @@ class DatalayerSandbox(Sandbox):
         Returns:
             SandboxFileHandle for file operations.
         """
-        from ..filesystem import SandboxFileHandle
+        from .filesystem import SandboxFileHandle
         return SandboxFileHandle(self, path, mode)

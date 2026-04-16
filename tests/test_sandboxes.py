@@ -34,9 +34,9 @@ class TestModels:
 
     def test_sandbox_variant_enum(self):
         """Test SandboxVariant enum values."""
-        assert SandboxVariantEnum.LOCAL_EVAL.value == "local-eval"
+        assert SandboxVariantEnum.EVAL.value == "eval"
         assert SandboxVariantEnum.LOCAL_DOCKER.value == "local-docker"
-        assert SandboxVariantEnum.LOCAL_JUPYTER.value == "local-jupyter"
+        assert SandboxVariantEnum.JUPYTER.value == "jupyter"
         assert SandboxVariantEnum.DATALAYER_RUNTIME.value == "datalayer-runtime"
 
     def test_gpu_type_enum(self):
@@ -219,7 +219,7 @@ class TestModels:
         """Test SandboxInfo model usage."""
         info = SandboxInfo(
             id="sandbox-123",
-            variant="local-eval",
+            variant="eval",
             status=SandboxStatus.RUNNING,
             created_at=1234567890.0,
             name="test-sandbox",
@@ -228,7 +228,7 @@ class TestModels:
         )
 
         assert info.id == "sandbox-123"
-        assert info.variant == "local-eval"
+        assert info.variant == "eval"
         assert info.status == SandboxStatus.RUNNING
         assert info.created_at == 1234567890.0
         assert info.name == "test-sandbox"
@@ -638,7 +638,7 @@ await mixed_output()
         """Test sandbox info."""
         with LocalEvalSandbox() as sandbox:
             assert sandbox.info is not None
-            assert sandbox.info.variant == "local-eval"
+            assert sandbox.info.variant == "eval"
             assert sandbox.info.status == "running"
 
 
@@ -650,15 +650,15 @@ class TestSandboxFactory:
     """Tests for Sandbox.create factory method."""
 
     def test_create_local_eval(self):
-        """Test creating local-eval sandbox."""
-        sandbox = Sandbox.create(variant="local-eval")
+        """Test creating eval sandbox."""
+        sandbox = Sandbox.create(variant="eval")
 
         assert sandbox is not None
         assert isinstance(sandbox, LocalEvalSandbox)
 
     def test_create_local_jupyter(self):
-        """Test creating local-jupyter sandbox."""
-        sandbox = Sandbox.create(variant=SandboxVariant.LOCAL_JUPYTER)
+        """Test creating jupyter sandbox."""
+        sandbox = Sandbox.create(variant=SandboxVariant.JUPYTER)
 
         assert sandbox is not None
         assert isinstance(sandbox, LocalJupyterSandbox)
@@ -666,13 +666,13 @@ class TestSandboxFactory:
     def test_create_with_config(self):
         """Test creating sandbox with config."""
         config = SandboxConfig(timeout=120.0)
-        sandbox = Sandbox.create(variant="local-eval", config=config)
+        sandbox = Sandbox.create(variant="eval", config=config)
 
         assert sandbox.config.timeout == 120.0
 
     def test_create_with_timeout(self):
         """Test creating sandbox with timeout parameter."""
-        sandbox = Sandbox.create(variant="local-eval", timeout=90.0)
+        sandbox = Sandbox.create(variant="eval", timeout=90.0)
 
         assert sandbox.config.timeout == 90.0
 
@@ -680,7 +680,7 @@ class TestSandboxFactory:
         """Test creating sandbox with environment variables."""
         config = SandboxConfig(env_vars={"MY_VAR": "my_value"})
         sandbox = Sandbox.create(
-            variant="local-eval",
+            variant="eval",
             config=config,
         )
 
@@ -700,9 +700,9 @@ class TestLocalJupyterSandbox:
     """Tests for LocalJupyterSandbox."""
 
     def test_local_jupyter_persistence(self, tmp_path: Path):
-        """Test persistence across requests in local-jupyter sandbox."""
-        if os.environ.get("RUN_LOCAL_JUPYTER_TESTS") != "1":
-            pytest.skip("Set RUN_LOCAL_JUPYTER_TESTS=1 to enable local-jupyter tests")
+        """Test persistence across requests in jupyter sandbox."""
+        if os.environ.get("RUN_JUPYTER_TESTS") != "1":
+            pytest.skip("Set RUN_JUPYTER_TESTS=1 to enable jupyter tests")
         try:
             import jupyter_server  # noqa: F401
         except Exception:
@@ -712,7 +712,7 @@ class TestLocalJupyterSandbox:
         try:
             sandbox.start()
         except Exception as exc:
-            pytest.skip(f"local-jupyter sandbox not available: {exc}")
+            pytest.skip(f"jupyter sandbox not available: {exc}")
 
         try:
             sandbox.run_code("x = 7")

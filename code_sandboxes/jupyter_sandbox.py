@@ -27,9 +27,9 @@ import requests
 
 import logging
 
-from ..base import Sandbox
-from ..exceptions import SandboxConfigurationError, SandboxNotStartedError
-from ..models import (
+from .base import Sandbox
+from .exceptions import SandboxConfigurationError, SandboxNotStartedError
+from .models import (
     CodeError,
     Context,
     ExecutionResult,
@@ -97,13 +97,13 @@ class LocalJupyterSandbox(Sandbox):
     def list_environments(cls) -> list[SandboxEnvironment]:
         return [
             SandboxEnvironment(
-                name="local-jupyter",
+                name="jupyter",
                 title="Local Jupyter",
                 language="python",
                 owner="local",
                 visibility="local",
                 burning_rate=0.0,
-                metadata={"variant": "local-jupyter"},
+                metadata={"variant": "jupyter"},
             )
         ]
 
@@ -356,7 +356,7 @@ class LocalJupyterSandbox(Sandbox):
         self._default_context = self.create_context("default")
         self._info = SandboxInfo(
             id=self._sandbox_id,
-            variant="local-jupyter",
+            variant="jupyter",
             status=SandboxStatus.RUNNING,
             created_at=time.time(),
             name=self.config.name,
