@@ -6,8 +6,6 @@
 
 This sandbox uses the Datalayer platform for cloud-based code execution,
 providing full isolation and scalable compute resources.
-
-Inspired by E2B and Modal sandbox APIs.
 """
 
 import time
@@ -44,19 +42,13 @@ class DatalayerSandbox(Sandbox):
     This sandbox provides full isolation, scalable compute (CPU/GPU),
     and supports snapshots for state persistence.
 
-    Inspired by E2B Code Interpreter and Modal Sandbox APIs:
-    - E2B-like: Simple creation, timeout management, file operations
-    - Modal-like: GPU support, exec, snapshots, tagging
-
     Example:
         from code_sandboxes import Sandbox
 
-        # Simple E2B-style usage
         with Sandbox.create(timeout=60) as sandbox:
             result = sandbox.run_code("print('Hello!')")
             files = sandbox.files.list("/")
 
-        # Modal-style with GPU
         with Sandbox.create(gpu="T4", environment="python-gpu-env") as sandbox:
             sandbox.run_code("import torch; print(torch.cuda.is_available())")
 
@@ -225,8 +217,6 @@ class DatalayerSandbox(Sandbox):
     def start(self) -> None:
         """Start the sandbox by creating a Datalayer runtime.
 
-        Similar to E2B's sandbox creation with timeout support.
-
         Raises:
             SandboxConfigurationError: If configuration is invalid.
             SandboxConnectionError: If connection to Datalayer fails.
@@ -327,8 +317,6 @@ class DatalayerSandbox(Sandbox):
 
     def stop(self) -> None:
         """Stop the sandbox and release the Datalayer runtime.
-
-        Similar to E2B's kill() and Modal's terminate().
         """
         if not self._started:
             return
@@ -345,12 +333,10 @@ class DatalayerSandbox(Sandbox):
         if self._info:
             self._info.status = SandboxStatus.STOPPED
 
-    # Alias for Modal compatibility
     def terminate(self) -> None:
         """Terminate the sandbox. Alias for stop()."""
         self.stop()
 
-    # Alias for E2B compatibility
     def kill(self) -> None:
         """Kill the sandbox. Alias for stop()."""
         self.stop()
@@ -358,7 +344,7 @@ class DatalayerSandbox(Sandbox):
     def set_timeout(self, timeout_seconds: float) -> None:
         """Change the sandbox timeout during runtime.
 
-        Similar to E2B's set_timeout method. Resets the timeout to the new value.
+        Resets the timeout to the new value.
 
         Args:
             timeout_seconds: New timeout in seconds from now.
@@ -372,8 +358,6 @@ class DatalayerSandbox(Sandbox):
 
     def get_info(self) -> SandboxInfo:
         """Retrieve sandbox information.
-
-        Similar to E2B's getInfo() method.
 
         Returns:
             SandboxInfo object with current sandbox state.
@@ -648,7 +632,7 @@ class DatalayerSandbox(Sandbox):
     ) -> ExecutionResult:
         """Install Python packages in the runtime.
 
-        Uses pip to install packages. Similar to E2B's package installation.
+        Uses pip to install packages.
 
         Args:
             packages: List of package names to install.

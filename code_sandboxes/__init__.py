@@ -5,7 +5,7 @@
 """Code Sandboxes - Safe, isolated environments for AI code execution.
 
 This package provides different sandbox implementations for executing
-code safely, inspired by E2B and Modal:
+code safely.
 
 Local sandboxes (in-process execution):
     - LocalEvalSandbox: Simple Python exec() based, for development/testing
@@ -39,12 +39,12 @@ Example:
         # Command execution
         result = sandbox.commands.run("ls -la")
 
-E2B-style usage:
+Style usage:
     sandbox = Sandbox.create(timeout=60)  # 60 second timeout
     result = sandbox.run_code('print("hello")')
     files = sandbox.files.list("/")
 
-Modal-style usage:
+Style usage:
     sandbox = Sandbox.create(gpu="T4", environment="python-gpu-env")
     process = sandbox.commands.exec("python", "-c", "print('hello')")
     for line in process.stdout:

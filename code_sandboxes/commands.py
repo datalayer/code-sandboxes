@@ -166,7 +166,7 @@ except:
 class SandboxCommands:
     """Command execution for a sandbox.
 
-    Provides terminal command execution similar to E2B and Modal.
+    Provides terminal command execution.
 
     Example:
         with Sandbox.create() as sandbox:

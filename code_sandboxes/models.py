@@ -4,8 +4,6 @@
 
 """Models for code execution results and contexts.
 
-Inspired by E2B Code Interpreter and Modal Sandbox models.
-
 Uses Pydantic for:
 - Automatic validation and type coercion
 - JSON serialization/deserialization
@@ -405,8 +403,6 @@ OutputHandler = Callable[[T], None]
 class SandboxConfig(BaseModel):
     """Configuration for sandbox creation.
 
-    Inspired by E2B and Modal configuration options.
-
     Attributes:
         timeout: Default timeout for code execution in seconds.
         memory_limit: Memory limit in bytes (for Docker/Datalayer sandboxes).
@@ -440,8 +436,6 @@ class SandboxConfig(BaseModel):
 
 class SandboxInfo(BaseModel):
     """Information about a running sandbox.
-
-    Inspired by E2B's getInfo() and Modal's sandbox info.
 
     Attributes:
         id: Unique identifier for the sandbox.

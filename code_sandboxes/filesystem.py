@@ -84,7 +84,7 @@ class FileWatchEvent:
 class SandboxFilesystem:
     """Filesystem operations for a sandbox.
 
-    Provides file and directory operations similar to E2B and Modal.
+    Provides file and directory operations.
 
     Example:
         with Sandbox.create() as sandbox:

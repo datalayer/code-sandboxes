@@ -38,7 +38,7 @@ class Sandbox(ABC):
     - jupyter: Local Jupyter Server with persistent kernel state
     - datalayer-runtime: Cloud-based Datalayer runtime, full isolation
 
-    Features inspired by E2B and Modal:
+    Features:
     - Code execution with result streaming
     - Filesystem operations (read, write, list, upload, download)
     - Command execution (run, exec, spawn)
@@ -187,9 +187,9 @@ class Sandbox(ABC):
     ) -> "Sandbox":
         """Factory method to create a sandbox of the specified variant.
 
-        This method provides a simple interface similar to E2B and Modal:
-        - E2B: Sandbox.create(timeout=60_000)
-        - Modal: Sandbox.create(gpu="T4", timeout=300)
+        This method provides a simple interface for creating sandboxes with different isolation levels and features:
+        - Sandbox.create(timeout=60_000)
+        - Sandbox.create(gpu="T4", timeout=300)
 
         Args:
             variant: The type of sandbox to create.
@@ -220,7 +220,7 @@ class Sandbox(ABC):
             # Simple usage
             sandbox = Sandbox.create()
 
-            # With timeout (like E2B)
+            # With timeout
             sandbox = Sandbox.create(timeout=60)
 
             # With GPU (like Modal)
