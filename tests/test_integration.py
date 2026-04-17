@@ -6,7 +6,7 @@
 
 from pathlib import Path
 
-from code_sandboxes.eval_sandbox import LocalEvalSandbox
+from code_sandboxes.eval_sandbox import EvalSandbox
 
 
 class TestIntegration:
@@ -14,7 +14,7 @@ class TestIntegration:
 
     def test_complex_computation(self):
         """Test complex computation in sandbox."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = """
 def fibonacci(n):
     if n <= 1:
@@ -32,7 +32,7 @@ result
 
     def test_data_processing(self):
         """Test data processing in sandbox."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = """
 import json
 
@@ -56,7 +56,7 @@ top_scorer = max(data, key=lambda x: x["score"])
 
     def test_file_operations(self, tmp_path: Path):
         """Test file operations in sandbox."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             file_path = tmp_path / "test.txt"
             code = f"""
 with open("{file_path}", "w") as f:
@@ -72,13 +72,11 @@ content
             execution = sandbox.run_code(code)
 
             assert len(execution.results) > 0
-            assert "Hello from sandbox!" in execution.results[0].data.get(
-                "text/plain", ""
-            )
+            assert "Hello from sandbox!" in execution.results[0].data.get("text/plain", "")
 
     def test_multiline_output(self):
         """Test multiline output."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = """
 for i in range(5):
     print(f"Line {i}")
@@ -91,7 +89,7 @@ for i in range(5):
 
     def test_exception_handling(self):
         """Test exception handling in user code."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = """
 try:
     result = 1 / 0
@@ -107,7 +105,7 @@ result
 
     def test_class_definition(self):
         """Test defining and using classes."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = """
 class Calculator:
     def __init__(self, value=0):
@@ -131,17 +129,15 @@ calc.value
 
     def test_list_comprehension(self):
         """Test list comprehensions."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = "[x**2 for x in range(10) if x % 2 == 0]"
             execution = sandbox.run_code(code)
 
-            assert "[0, 4, 16, 36, 64]" in execution.results[0].data.get(
-                "text/plain", ""
-            )
+            assert "[0, 4, 16, 36, 64]" in execution.results[0].data.get("text/plain", "")
 
     def test_generator_expression(self):
         """Test generator expressions."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = "sum(x**2 for x in range(10))"
             execution = sandbox.run_code(code)
 

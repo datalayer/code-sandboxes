@@ -208,7 +208,11 @@ class Result(BaseModel):
 
     def __repr__(self) -> str:
         if self.text:
-            return f"Result(text={self.text[:50]}...)" if len(self.text) > 50 else f"Result(text={self.text})"
+            return (
+                f"Result(text={self.text[:50]}...)"
+                if len(self.text) > 50
+                else f"Result(text={self.text})"
+            )
         return f"Result(types={list(self.data.keys())})"
 
 
@@ -306,37 +310,35 @@ class ExecutionResult(BaseModel):
     # Execution-level (infrastructure) status
     execution_ok: bool = Field(
         default=True,
-        description="Whether the sandbox infrastructure successfully executed the code"
+        description="Whether the sandbox infrastructure successfully executed the code",
     )
     execution_error: Optional[str] = Field(
-        default=None,
-        description="Details about infrastructure failure when execution_ok=False"
+        default=None, description="Details about infrastructure failure when execution_ok=False"
     )
 
     # Code-level (user code) status
     code_error: Optional[CodeError] = Field(
-        default=None,
-        description="Error information if the user's Python code raised an exception"
+        default=None, description="Error information if the user's Python code raised an exception"
     )
 
     # Metadata
     execution_count: int = 0
     context_id: Optional[str] = None
     started_at: Optional[float] = Field(
-        default=None,
-        description="Unix timestamp when execution started"
+        default=None, description="Unix timestamp when execution started"
     )
     completed_at: Optional[float] = Field(
-        default=None,
-        description="Unix timestamp when execution completed"
+        default=None, description="Unix timestamp when execution completed"
     )
     interrupted: bool = Field(
-        default=False,
-        description="Whether execution was cancelled/interrupted"
+        default=False, description="Whether execution was cancelled/interrupted"
     )
     exit_code: Optional[int] = Field(
         default=None,
-        description="Exit code when code calls sys.exit() or script terminates. None means no explicit exit."
+        description=(
+            "Exit code when code calls sys.exit() or script terminates. "
+            "None means no explicit exit."
+        ),
     )
 
     @property
@@ -393,7 +395,10 @@ class ExecutionResult(BaseModel):
         else:
             status = "failed"
         duration_str = f", duration={self.duration:.2f}s" if self.duration else ""
-        return f"ExecutionResult({status}, results={len(self.results)}, execution_count={self.execution_count}{duration_str})"
+        return (
+            f"ExecutionResult({status}, results={len(self.results)}, "
+            f"execution_count={self.execution_count}{duration_str})"
+        )
 
 
 # Type alias for output handlers (callbacks)
@@ -465,6 +470,7 @@ class SandboxInfo(BaseModel):
     def remaining_time(self) -> Optional[float]:
         """Get remaining time in seconds before sandbox terminates."""
         import time
+
         if self.end_at:
             return max(0, self.end_at - time.time())
         return None

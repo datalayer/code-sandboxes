@@ -7,12 +7,12 @@
 This package provides different sandbox implementations for executing
 code safely.
 
-Local sandboxes (in-process execution):
-    - LocalEvalSandbox: Simple Python exec() based, for development/testing
+sandboxes (in-process execution):
+    - EvalSandbox: Simple Python exec() based, for development/testing
 
 Remote sandboxes (out-of-process execution via Jupyter kernel protocol):
-    - LocalDockerSandbox: Docker container based, good isolation
-    - LocalJupyterSandbox: Jupyter Server with persistent kernel state
+    - DockerSandbox: Docker container based, good isolation
+    - JupyterSandbox: Jupyter Server with persistent kernel state
     - DatalayerSandbox: Cloud-based Datalayer runtime, full isolation
 
 Features:
@@ -51,8 +51,11 @@ Style usage:
         print(line)
 """
 
-from .base import Sandbox, SandboxVariant
+from .base import Sandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
+from .datalayer_sandbox import DatalayerSandbox
+from .docker_sandbox import DockerSandbox
+from .eval_sandbox import EvalSandbox
 from .exceptions import (
     ContextNotFoundError,
     SandboxAuthenticationError,
@@ -75,9 +78,7 @@ from .filesystem import (
     SandboxFileHandle,
     SandboxFilesystem,
 )
-from .eval_sandbox import LocalEvalSandbox
-from .docker_sandbox import LocalDockerSandbox
-from .jupyter_sandbox import LocalJupyterSandbox
+from .jupyter_sandbox import JupyterSandbox
 from .models import (
     CodeError,
     Context,
@@ -97,57 +98,56 @@ from .models import (
     SnapshotInfo,
     TunnelInfo,
 )
-from .datalayer_sandbox import DatalayerSandbox
 
 __all__ = [
-    # Main sandbox class
-    "Sandbox",
-    "SandboxVariant",
-    # Sandbox implementations
-    "LocalEvalSandbox",
-    "LocalDockerSandbox",
-    "LocalJupyterSandbox",
+    # Models
+    "CodeError",
+    "CommandResult",
+    "Context",
+    "ContextNotFoundError",
     "DatalayerSandbox",
-    # Filesystem
-    "SandboxFilesystem",
-    "SandboxFileHandle",
+    "ExecutionResult",
     "FileInfo",
     "FileType",
     "FileWatchEvent",
     "FileWatchEventType",
-    # Commands
-    "SandboxCommands",
-    "CommandResult",
-    "ProcessHandle",
-    # Models
-    "CodeError",
-    "Context",
-    "ExecutionResult",
+    "GPUType",
+    "DockerSandbox",
+    # Sandbox implementations
+    "EvalSandbox",
+    "JupyterSandbox",
     "Logs",
     "MIMEType",
     "OutputHandler",
     "OutputMessage",
-    "Result",
-    "SandboxConfig",
-    "SandboxEnvironment",
-    "SandboxInfo",
-    "SandboxStatus",
-    "SandboxVariant",
+    "ProcessHandle",
     "ResourceConfig",
-    "GPUType",
-    "SnapshotInfo",
-    "TunnelInfo",
+    "Result",
+    # Main sandbox class
+    "Sandbox",
+    "SandboxAuthenticationError",
+    # Commands
+    "SandboxCommands",
+    "SandboxConfig",
+    "SandboxConfigurationError",
+    "SandboxConnectionError",
+    "SandboxEnvironment",
     # Exceptions
     "SandboxError",
-    "SandboxTimeoutError",
     "SandboxExecutionError",
+    "SandboxFileHandle",
+    # Filesystem
+    "SandboxFilesystem",
+    "SandboxInfo",
     "SandboxNotStartedError",
-    "SandboxConnectionError",
-    "SandboxConfigurationError",
-    "SandboxSnapshotError",
-    "SandboxResourceError",
-    "SandboxAuthenticationError",
     "SandboxQuotaExceededError",
-    "ContextNotFoundError",
+    "SandboxResourceError",
+    "SandboxSnapshotError",
+    "SandboxStatus",
+    "SandboxTimeoutError",
+    "SandboxVariant",
+    "SandboxVariant",
+    "SnapshotInfo",
+    "TunnelInfo",
     "VariableNotFoundError",
 ]

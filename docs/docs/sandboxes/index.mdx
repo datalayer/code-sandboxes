@@ -50,17 +50,17 @@ sandbox = Sandbox.create(
 Concrete implementations are available from top-level modules:
 
 ```python
-from code_sandboxes.eval_sandbox import LocalEvalSandbox
-from code_sandboxes.jupyter_sandbox import LocalJupyterSandbox
-from code_sandboxes.docker_sandbox import LocalDockerSandbox
+from code_sandboxes.eval_sandbox import EvalSandbox
+from code_sandboxes.jupyter_sandbox import JupyterSandbox
+from code_sandboxes.docker_sandbox import DockerSandbox
 from code_sandboxes.datalayer_sandbox import DatalayerSandbox
 ```
 
 Code Sandboxes provides two categories of execution backends:
 
-### Local Sandboxes
+### Sandboxes
 
-Local sandboxes execute code in-process, sharing memory with the host Python process.
+sandboxes execute code in-process, sharing memory with the host Python process.
 
 #### eval
 
@@ -74,7 +74,7 @@ with Sandbox.create(variant="eval") as sandbox:
 
 ### Remote Sandboxes
 
-Remote sandboxes execute code out-of-process via the Jupyter kernel protocol, providing 
+Remote sandboxes execute code out-of-process via the Jupyter kernel protocol, providing
 better isolation and persistent kernel state.
 
 #### docker
@@ -89,7 +89,7 @@ with Sandbox.create(variant="docker", image="code-sandboxes-jupyter:latest") as 
     result = sandbox.run_code("import sys; print(sys.version)")
 ```
 
-Build the default image used by `LocalDockerSandbox`:
+Build the default image used by `DockerSandbox`:
 
 ```bash
 docker build -t code-sandboxes-jupyter:latest -f docker/Dockerfile .
@@ -153,7 +153,7 @@ with Sandbox.create() as sandbox:
     # Simple execution
     result = sandbox.run_code("print('hello')")
     print(result.stdout)  # "hello"
-    
+
     # Check success
     if result.success:
         print("Code executed successfully")
@@ -233,17 +233,17 @@ Access files within the sandbox:
 with Sandbox.create() as sandbox:
     # Write files
     sandbox.files.write("/data/test.txt", "Hello World")
-    
+
     # Read files
     content = sandbox.files.read("/data/test.txt")
-    
+
     # List directory
     for f in sandbox.files.list("/data"):
         print(f"{f.name} ({f.size} bytes)")
-    
+
     # Create directories
     sandbox.files.mkdir("/data/subdir")
-    
+
     # Upload/download
     sandbox.files.upload("local.txt", "/remote/file.txt")
     sandbox.files.download("/remote/file.txt", "downloaded.txt")
@@ -258,12 +258,12 @@ with Sandbox.create() as sandbox:
     # Run command and wait
     result = sandbox.commands.run("ls -la /")
     print(result.stdout)
-    
+
     # Execute with streaming output
     process = sandbox.commands.exec("python", "-c", "print('hello')")
     for line in process.stdout:
         print(line, end="")
-    
+
     # Install system packages
     sandbox.commands.install_system_packages(["curl", "wget"])
 ```
@@ -318,7 +318,7 @@ with Sandbox.create(variant="datalayer") as sandbox:
     # Set up environment
     sandbox.run_code("import pandas as pd")
     sandbox.run_code("df = pd.DataFrame({'a': [1,2,3]})")
-    
+
     # Create snapshot
     snapshot = sandbox.create_snapshot("my-setup")
     print(f"Snapshot: {snapshot.id}")

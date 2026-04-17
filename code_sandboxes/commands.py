@@ -5,8 +5,10 @@
 """Command execution for sandboxes."""
 
 import time
+from collections.abc import Iterator
+from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Iterator, Optional
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .base import Sandbox
@@ -34,7 +36,10 @@ class CommandResult:
         return self.exit_code == 0
 
     def __repr__(self) -> str:
-        return f"CommandResult(exit_code={self.exit_code}, stdout_len={len(self.stdout)}, stderr_len={len(self.stderr)})"
+        return (
+            f"CommandResult(exit_code={self.exit_code}, stdout_len={len(self.stdout)}, "
+            f"stderr_len={len(self.stderr)})"
+        )
 
 
 @dataclass
@@ -68,8 +73,7 @@ class ProcessHandle:
             Lines from stdout as they become available.
         """
         # For synchronous implementation, return buffered output
-        for line in self._stdout_buffer:
-            yield line
+        yield from self._stdout_buffer
 
     @property
     def stderr(self) -> Iterator[str]:
@@ -78,8 +82,7 @@ class ProcessHandle:
         Yields:
             Lines from stderr as they become available.
         """
-        for line in self._stderr_buffer:
-            yield line
+        yield from self._stderr_buffer
 
     def read_stdout(self) -> str:
         """Read all stdout content.
@@ -313,10 +316,8 @@ __proc_pid__ = {process._process_var}.pid
 """
 
         self._sandbox.run_code(code)
-        try:
+        with suppress(Exception):
             process.pid = self._sandbox.get_variable("__proc_pid__")
-        except Exception:
-            pass
 
         return process
 

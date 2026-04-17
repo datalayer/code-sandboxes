@@ -2,19 +2,19 @@
 #
 # BSD 3-Clause License
 
-"""Local jupyter sandbox tests."""
+"""jupyter sandbox tests."""
 
 import os
 from pathlib import Path
 
 import pytest
 
-from code_sandboxes.jupyter_sandbox import LocalJupyterSandbox
+from code_sandboxes.jupyter_sandbox import JupyterSandbox
 from code_sandboxes.models import SandboxConfig
 
 
-class TestLocalJupyterSandbox:
-    """Tests for LocalJupyterSandbox."""
+class TestJupyterSandbox:
+    """Tests for JupyterSandbox."""
 
     def test_local_jupyter_persistence(self, tmp_path: Path):
         """Test persistence across requests in jupyter sandbox."""
@@ -25,7 +25,7 @@ class TestLocalJupyterSandbox:
         except Exception:
             pytest.skip("jupyter_server is not available")
 
-        sandbox = LocalJupyterSandbox(config=SandboxConfig(working_dir=str(tmp_path)))
+        sandbox = JupyterSandbox(config=SandboxConfig(working_dir=str(tmp_path)))
         try:
             sandbox.start()
         except Exception as exc:

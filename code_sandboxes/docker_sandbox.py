@@ -2,7 +2,7 @@
 #
 # BSD 3-Clause License
 
-"""Local Docker-based sandbox implementation.
+"""Docker-based sandbox implementation.
 
 This sandbox runs a Jupyter Server inside a Docker container and connects
 through `jupyter-kernel-client` to execute code.
@@ -13,8 +13,8 @@ from __future__ import annotations
 import os
 import tempfile
 import time
-from typing import Optional
 import uuid
+from typing import Optional
 
 import requests
 
@@ -38,7 +38,7 @@ DEFAULT_IMAGE = "code-sandboxes-jupyter:latest"
 DEFAULT_PORT = 8888
 
 
-class LocalDockerSandbox(Sandbox):
+class DockerSandbox(Sandbox):
     """Docker container sandbox using a Jupyter Server backend."""
 
     def __init__(
@@ -75,7 +75,7 @@ class LocalDockerSandbox(Sandbox):
         return [
             SandboxEnvironment(
                 name="docker",
-                title="Local Docker (Jupyter)",
+                title="Docker (Jupyter)",
                 language="python",
                 owner="local",
                 visibility="local",
@@ -91,7 +91,7 @@ class LocalDockerSandbox(Sandbox):
             import docker  # type: ignore
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise SandboxConfigurationError(
-                "docker package is required for LocalDockerSandbox. "
+                "docker package is required for DockerSandbox. "
                 "Install it with: pip install code-sandboxes[docker]"
             ) from exc
         self._docker = docker.from_env()
@@ -128,7 +128,7 @@ class LocalDockerSandbox(Sandbox):
             from jupyter_kernel_client import KernelClient
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise SandboxConfigurationError(
-                "jupyter-kernel-client is required for LocalDockerSandbox. "
+                "jupyter-kernel-client is required for DockerSandbox. "
                 "Install it with: pip install code-sandboxes"
             ) from exc
 
@@ -234,14 +234,12 @@ class LocalDockerSandbox(Sandbox):
             raise SandboxNotStartedError()
 
         if language != "python":
-            raise ValueError(f"LocalDockerSandbox only supports Python, got: {language}")
+            raise ValueError(f"DockerSandbox only supports Python, got: {language}")
 
         started_at = time.time()
 
         if envs:
-            env_code = "\n".join(
-                f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items()
-            )
+            env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
             code = f"{env_code}\n{code}"
 
         try:
@@ -290,7 +288,7 @@ class LocalDockerSandbox(Sandbox):
             elif output_type == "error":
                 ename = output.get("ename", "Error")
                 evalue = output.get("evalue", "")
-                
+
                 # Handle SystemExit specially - extract exit code
                 if ename == "SystemExit":
                     try:
@@ -323,9 +321,7 @@ class LocalDockerSandbox(Sandbox):
             raise SandboxNotStartedError()
         return self._client.get_variable(name)
 
-    def _set_internal_variable(
-        self, name: str, value, context: Optional[Context] = None
-    ) -> None:
+    def _set_internal_variable(self, name: str, value, context: Optional[Context] = None) -> None:
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
         self._client.set_variable(name, value)

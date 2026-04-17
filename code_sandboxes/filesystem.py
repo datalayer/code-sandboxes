@@ -4,6 +4,7 @@
 
 """Filesystem operations for sandboxes."""
 
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -229,7 +230,7 @@ for name in os.listdir({path!r}):
         Returns:
             True if the path exists.
         """
-        execution = self._sandbox.run_code(f"""
+        self._sandbox.run_code(f"""
 import os
 __path_exists__ = os.path.exists({path!r})
 """)
@@ -244,7 +245,7 @@ __path_exists__ = os.path.exists({path!r})
         Returns:
             True if the path is a file.
         """
-        execution = self._sandbox.run_code(f"""
+        self._sandbox.run_code(f"""
 import os
 __is_file__ = os.path.isfile({path!r})
 """)
@@ -259,7 +260,7 @@ __is_file__ = os.path.isfile({path!r})
         Returns:
             True if the path is a directory.
         """
-        execution = self._sandbox.run_code(f"""
+        self._sandbox.run_code(f"""
 import os
 __is_dir__ = os.path.isdir({path!r})
 """)
@@ -375,7 +376,7 @@ __file_info__ = {{
         """Upload a file from local filesystem to sandbox.
 
         Args:
-            local_path: Local file path.
+            local_path: file path.
             remote_path: Destination path in sandbox.
         """
         self._sandbox.upload_file(local_path, remote_path)
@@ -385,7 +386,7 @@ __file_info__ = {{
 
         Args:
             remote_path: Path in sandbox.
-            local_path: Local destination path.
+            local_path: destination path.
         """
         self._sandbox.download_file(remote_path, local_path)
 
@@ -490,7 +491,5 @@ __read_line__ = {self._handle_id}.readline()
 
     def __del__(self):
         if not self._closed:
-            try:
+            with suppress(Exception):
                 self.close()
-            except Exception:
-                pass

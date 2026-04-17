@@ -30,12 +30,12 @@ Four variants are available:
 Canonical variant names are `eval`, `docker`, `jupyter`, and
 `datalayer`. The older `local-*` names are no longer supported.
 
-| Variant | Isolation | Use Case |
-|---------|-----------|----------|
-| `eval` | None (Python exec) | Development, testing |
-| `docker` | Container (Jupyter Server) | Local isolated execution |
-| `jupyter` | Process (Jupyter kernel) | Local persistent state |
-| `datalayer` | Cloud VM | Production, GPU workloads |
+| Variant     | Isolation                  | Use Case                  |
+| ----------- | -------------------------- | ------------------------- |
+| `eval`      | None (Python exec)         | Development, testing      |
+| `docker`    | Container (Jupyter Server) | isolated execution        |
+| `jupyter`   | Process (Jupyter kernel)   | persistent state          |
+| `datalayer` | Cloud VM                   | Production, GPU workloads |
 
 ## Module Layout
 
@@ -49,9 +49,9 @@ Sandbox implementations are exposed as top-level modules:
 Example direct imports:
 
 ```python
-from code_sandboxes.eval_sandbox import LocalEvalSandbox
-from code_sandboxes.jupyter_sandbox import LocalJupyterSandbox
-from code_sandboxes.docker_sandbox import LocalDockerSandbox
+from code_sandboxes.eval_sandbox import EvalSandbox
+from code_sandboxes.jupyter_sandbox import JupyterSandbox
+from code_sandboxes.docker_sandbox import DockerSandbox
 from code_sandboxes.datalayer_sandbox import DatalayerSandbox
 ```
 
@@ -76,7 +76,7 @@ pip install code-sandboxes[all]
 The `docker` variant runs a Jupyter Server inside a Docker container and uses
 `jupyter-kernel-client` to execute code.
 
-Build the Docker image used by `LocalDockerSandbox`:
+Build the Docker image used by `DockerSandbox`:
 
 ```bash
 docker build -t code-sandboxes-jupyter:latest -f docker/Dockerfile .
@@ -101,7 +101,7 @@ x = 10
 x * 2
 """)
     print(result.text)  # "20"
-    
+
     # Access results
     print(result.stdout)  # "2"
 ```
@@ -128,14 +128,14 @@ with Sandbox.create(
 with Sandbox.create() as sandbox:
     # Write files
     sandbox.files.write("/data/test.txt", "Hello World")
-    
+
     # Read files
     content = sandbox.files.read("/data/test.txt")
-    
+
     # List directory
     for f in sandbox.files.list("/data"):
         print(f.name, f.size)
-    
+
     # Upload/download
     sandbox.files.upload("local_file.txt", "/remote/file.txt")
     sandbox.files.download("/remote/file.txt", "downloaded.txt")
@@ -148,12 +148,12 @@ with Sandbox.create() as sandbox:
     # Run a command and wait for completion
     result = sandbox.commands.run("ls -la")
     print(result.stdout)
-    
+
     # Execute with streaming output
     process = sandbox.commands.exec("python", "-c", "print('hello')")
     for line in process.stdout:
         print(line, end="")
-    
+
     # Install system packages
     sandbox.commands.install_system_packages(["curl", "wget"])
 ```
@@ -165,7 +165,7 @@ with Sandbox.create(variant="datalayer") as sandbox:
     # Set up environment
     sandbox.install_packages(["pandas", "numpy"])
     sandbox.run_code("import pandas as pd; df = pd.DataFrame({'a': [1,2,3]})")
-    
+
     # Create snapshot
     snapshot = sandbox.create_snapshot("my-setup")
     print(f"Snapshot created: {snapshot.id}")
@@ -250,20 +250,20 @@ else:
 
 ### Core Methods
 
-| Method | Description |
-|--------|-------------|
-| `Sandbox.create()` | Create a new sandbox |
-| `Sandbox.from_id(id)` | Reconnect to an existing sandbox |
-| `Sandbox.list()` | List all sandboxes |
-| `sandbox.run_code(code)` | Execute Python code |
-| `sandbox.files.read(path)` | Read file contents |
-| `sandbox.files.write(path, content)` | Write file contents |
-| `sandbox.files.list(path)` | List directory contents |
-| `sandbox.commands.run(cmd)` | Run shell command |
-| `sandbox.commands.exec(*args)` | Execute with streaming output |
-| `sandbox.set_timeout(seconds)` | Update timeout |
-| `sandbox.create_snapshot(name)` | Save sandbox state |
-| `sandbox.terminate()` / `sandbox.kill()` | Stop sandbox |
+| Method                                   | Description                      |
+| ---------------------------------------- | -------------------------------- |
+| `Sandbox.create()`                       | Create a new sandbox             |
+| `Sandbox.from_id(id)`                    | Reconnect to an existing sandbox |
+| `Sandbox.list()`                         | List all sandboxes               |
+| `sandbox.run_code(code)`                 | Execute Python code              |
+| `sandbox.files.read(path)`               | Read file contents               |
+| `sandbox.files.write(path, content)`     | Write file contents              |
+| `sandbox.files.list(path)`               | List directory contents          |
+| `sandbox.commands.run(cmd)`              | Run shell command                |
+| `sandbox.commands.exec(*args)`           | Execute with streaming output    |
+| `sandbox.set_timeout(seconds)`           | Update timeout                   |
+| `sandbox.create_snapshot(name)`          | Save sandbox state               |
+| `sandbox.terminate()` / `sandbox.kill()` | Stop sandbox                     |
 
 ## Configuration
 

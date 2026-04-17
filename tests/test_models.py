@@ -17,6 +17,8 @@ from code_sandboxes.models import (
     SandboxConfig,
     SandboxInfo,
     SandboxStatus,
+)
+from code_sandboxes.models import (
     SandboxVariant as SandboxVariantEnum,
 )
 

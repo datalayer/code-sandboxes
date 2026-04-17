@@ -98,4 +98,12 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # S101 Use of `assert` detected
-"code_sandboxes/tests/*" = ["S101"]
+"tests/*" = ["S101"]
+# Deprecated monolithic test module retained only as a skipped compatibility stub.
+"tests/test_sandboxes.py" = ["F821"]
+"examples/*" = ["S108", "T201"]
+"code_sandboxes/base.py" = ["UP007"]
+"code_sandboxes/datalayer_sandbox.py" = ["C901", "S110"]
+"code_sandboxes/docker_sandbox.py" = ["C901", "S110", "UP007"]
+"code_sandboxes/eval_sandbox.py" = ["C901", "S102", "S307"]
+"code_sandboxes/jupyter_sandbox.py" = ["C901", "S110", "S603", "UP007"]

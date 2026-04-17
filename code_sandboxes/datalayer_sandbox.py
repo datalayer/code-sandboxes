@@ -10,7 +10,11 @@ providing full isolation and scalable compute resources.
 
 import time
 import uuid
-from typing import Any, Iterator, Optional
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from .filesystem import SandboxFileHandle
 
 from .base import Sandbox
 from .exceptions import (
@@ -291,7 +295,9 @@ class DatalayerSandbox(Sandbox):
             if self.config.gpu or self.config.cpu_limit or self.config.memory_limit:
                 resources = ResourceConfig(
                     cpu=self.config.cpu_limit,
-                    memory=self.config.memory_limit // (1024 * 1024) if self.config.memory_limit else None,
+                    memory=self.config.memory_limit // (1024 * 1024)
+                    if self.config.memory_limit
+                    else None,
                     gpu=self.config.gpu,
                 )
 
@@ -302,10 +308,10 @@ class DatalayerSandbox(Sandbox):
                 created_at=self._created_at,
                 end_at=self._end_at,
                 config=self.config,
-                    metadata={
-                        "network_policy": self.config.network_policy,
-                        "allowed_hosts": self.config.allowed_hosts,
-                    },
+                metadata={
+                    "network_policy": self.config.network_policy,
+                    "allowed_hosts": self.config.allowed_hosts,
+                },
                 name=sandbox_name,
                 resources=resources,
             )
@@ -316,8 +322,7 @@ class DatalayerSandbox(Sandbox):
             raise SandboxConnectionError(url, str(e)) from e
 
     def stop(self) -> None:
-        """Stop the sandbox and release the Datalayer runtime.
-        """
+        """Stop the sandbox and release the Datalayer runtime."""
         if not self._started:
             return
 
@@ -436,9 +441,7 @@ class DatalayerSandbox(Sandbox):
 
         # Set environment variables if provided
         if envs:
-            env_code = "\n".join(
-                f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items()
-            )
+            env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
             self._runtime.execute(env_code)
 
         # Execute the code
@@ -509,7 +512,7 @@ class DatalayerSandbox(Sandbox):
         if hasattr(response, "error") and response.error:
             ename = response.error.get("ename", "Error")
             evalue = response.error.get("evalue", "")
-            
+
             # Handle SystemExit specially - extract exit code
             if ename == "SystemExit":
                 try:
@@ -676,4 +679,5 @@ class DatalayerSandbox(Sandbox):
             SandboxFileHandle for file operations.
         """
         from .filesystem import SandboxFileHandle
+
         return SandboxFileHandle(self, path, mode)

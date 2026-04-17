@@ -278,45 +278,45 @@ class ExecutionResult(BaseModel):
     # Results and logs
     results: list[Result]
     logs: Logs
-    
+
     # Execution-level (infrastructure) status
     execution_ok: bool = True  # Did sandbox infrastructure work?
     execution_error: str | None = None  # Infrastructure failure details
-    
+
     # Code-level (user code) status
     code_error: CodeError | None = None  # Python exception info
 
     # Process exit status (sys.exit)
     exit_code: int | None = None  # Exit code if code calls sys.exit()
-    
+
     # Metadata
     execution_count: int = 0
     context_id: str | None = None
     started_at: float | None = None
     completed_at: float | None = None
     interrupted: bool = False
-    
+
     # Properties
     @property
     def success(self) -> bool:
         """True if execution_ok and no code_error and not interrupted and exit_code is 0 or None"""
-    
+
     @property
     def duration(self) -> float | None:
         """Execution duration in seconds"""
-    
+
     @property
     def text(self) -> str | None:
         """Main text result"""
-    
+
     @property
     def stdout(self) -> str:
         """All stdout as single string"""
-    
+
     @property
     def stderr(self) -> str:
         """All stderr as single string"""
-    
+
 ```
 
 **Usage:**
@@ -334,12 +334,12 @@ elif result.exit_code not in (None, 0):
 # Check code-level error
 elif result.code_error:
     print(f"Python error: {result.code_error.name}: {result.code_error.value}")
-    
+
 # Success!
 else:
     print(f"Result: {result.text}")
     print(f"Duration: {result.duration:.2f}s")
-    
+
 # Or use convenience property
 if result.success:
     print("Everything worked!")
@@ -378,7 +378,7 @@ class Result(BaseModel):
     data: dict[str, Any]      # MIME type to content mapping
     is_main_result: bool = False
     extra: dict[str, Any]     # Additional metadata
-    
+
     # Convenience properties
     @property
     def text(self) -> str | None: ...  # text/plain
@@ -405,7 +405,7 @@ class OutputMessage(BaseModel):
 class Logs(BaseModel):
     stdout: list[OutputMessage]
     stderr: list[OutputMessage]
-    
+
     @property
     def stdout_text(self) -> str: ...  # All stdout as string
     @property
@@ -453,7 +453,7 @@ class SandboxInfo(BaseModel):
     name: str | None = None
     metadata: dict[str, Any]
     resources: ResourceConfig | None = None
-    
+
     @property
     def remaining_time(self) -> float | None: ...  # Seconds until termination
 ```

@@ -28,7 +28,7 @@ def main() -> None:
             print("cmd:", cmd.stdout.strip())
     except ModuleNotFoundError as exc:
         print("docker sandbox is not available:", exc)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print("docker example failed:", exc)
 
 

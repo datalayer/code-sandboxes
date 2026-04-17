@@ -7,8 +7,8 @@
 import pytest
 
 from code_sandboxes.base import Sandbox, SandboxVariant
-from code_sandboxes.eval_sandbox import LocalEvalSandbox
-from code_sandboxes.jupyter_sandbox import LocalJupyterSandbox
+from code_sandboxes.eval_sandbox import EvalSandbox
+from code_sandboxes.jupyter_sandbox import JupyterSandbox
 from code_sandboxes.models import SandboxConfig
 
 
@@ -20,14 +20,14 @@ class TestSandboxFactory:
         sandbox = Sandbox.create(variant="eval")
 
         assert sandbox is not None
-        assert isinstance(sandbox, LocalEvalSandbox)
+        assert isinstance(sandbox, EvalSandbox)
 
     def test_create_local_jupyter(self):
         """Test creating jupyter sandbox."""
         sandbox = Sandbox.create(variant=SandboxVariant.JUPYTER)
 
         assert sandbox is not None
-        assert isinstance(sandbox, LocalJupyterSandbox)
+        assert isinstance(sandbox, JupyterSandbox)
 
     def test_create_with_config(self):
         """Test creating sandbox with config."""

@@ -34,7 +34,7 @@ def main() -> None:
             print("cmd:", cmd.stdout.strip())
     except ModuleNotFoundError as exc:
         print("jupyter sandbox is not available:", exc)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print("jupyter example failed:", exc)
 
 

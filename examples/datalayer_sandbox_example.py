@@ -30,7 +30,7 @@ def main() -> None:
         ) as sandbox:
             result = sandbox.run_code("print('hello from datalayer runtime')")
             print("stdout:", result.stdout)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print("datalayer example failed:", exc)
         print("Exception type:", type(exc))
         import traceback

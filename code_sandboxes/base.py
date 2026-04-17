@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import threading
-from typing import Any, AsyncIterator, Iterator, Optional, Union
 import uuid
+from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator, Iterator
+from typing import Any, Optional, Union
 
 from .commands import SandboxCommands
 from .filesystem import SandboxFilesystem
@@ -27,7 +28,6 @@ from .models import (
 )
 
 
-
 class Sandbox(ABC):
     """Abstract base class for code execution sandboxes.
 
@@ -35,7 +35,7 @@ class Sandbox(ABC):
     Different implementations provide different isolation levels:
     - eval: Simple Python exec() based, minimal isolation
     - docker: Docker container based, good isolation
-    - jupyter: Local Jupyter Server with persistent kernel state
+    - jupyter: Jupyter Server with persistent kernel state
     - datalayer: Cloud-based Datalayer runtime, full isolation
 
     Features:
@@ -167,7 +167,6 @@ class Sandbox(ABC):
         """
         self._tags.update(tags)
 
-
     @classmethod
     def create(
         cls,
@@ -184,10 +183,11 @@ class Sandbox(ABC):
         allowed_hosts: Optional[list[str]] = None,
         tags: Optional[dict[str, str]] = None,
         **kwargs,
-    ) -> "Sandbox":
+    ) -> Sandbox:
         """Factory method to create a sandbox of the specified variant.
 
-        This method provides a simple interface for creating sandboxes with different isolation levels and features:
+        This method provides a simple interface for creating sandboxes
+        with different isolation levels and features:
         - Sandbox.create(timeout=60_000)
         - Sandbox.create(gpu="T4", timeout=300)
 
@@ -195,7 +195,7 @@ class Sandbox(ABC):
             variant: The type of sandbox to create.
                 - "eval": Simple Python exec() based, minimal isolation
                 - "docker": Docker container based (requires Docker)
-                - "jupyter": Local Jupyter Server with persistent kernel state
+                - "jupyter": Jupyter Server with persistent kernel state
                 - "datalayer": Cloud-based Datalayer runtime (default)
             config: Optional full configuration object (overrides individual params).
             timeout: Default timeout for code execution in seconds.
@@ -226,7 +226,7 @@ class Sandbox(ABC):
             # With GPU (like Modal)
             sandbox = Sandbox.create(gpu="T4", environment="python-gpu-env")
 
-            # Local development
+            # development
             sandbox = Sandbox.create(variant="eval")
         """
         # Build config from individual parameters if not provided
@@ -243,21 +243,21 @@ class Sandbox(ABC):
                 allowed_hosts=allowed_hosts or [],
             )
 
-        from .eval_sandbox import LocalEvalSandbox
+        from .eval_sandbox import EvalSandbox
 
         variant_value = variant.value if isinstance(variant, SandboxVariant) else variant
 
         if variant_value == "eval":
-            sandbox = LocalEvalSandbox(config=config, **kwargs)
+            sandbox = EvalSandbox(config=config, **kwargs)
         elif variant_value == "docker":
             # Import here to avoid circular imports
-            from .docker_sandbox import LocalDockerSandbox
+            from .docker_sandbox import DockerSandbox
 
-            sandbox = LocalDockerSandbox(config=config, **kwargs)
+            sandbox = DockerSandbox(config=config, **kwargs)
         elif variant_value == "jupyter":
-            from .jupyter_sandbox import LocalJupyterSandbox
+            from .jupyter_sandbox import JupyterSandbox
 
-            sandbox = LocalJupyterSandbox(config=config, **kwargs)
+            sandbox = JupyterSandbox(config=config, **kwargs)
         elif variant_value == "datalayer":
             from .datalayer_sandbox import DatalayerSandbox
 
@@ -276,7 +276,7 @@ class Sandbox(ABC):
         return sandbox
 
     @classmethod
-    def from_id(cls, sandbox_id: str, **kwargs) -> "Sandbox":
+    def from_id(cls, sandbox_id: str, **kwargs) -> Sandbox:
         """Retrieve an existing sandbox by its ID.
 
         Similar to Modal's Sandbox.from_id() method.
@@ -311,20 +311,20 @@ class Sandbox(ABC):
         Returns:
             List of SandboxEnvironment entries.
         """
-        from .eval_sandbox import LocalEvalSandbox
+        from .eval_sandbox import EvalSandbox
 
         variant_value = variant.value if isinstance(variant, SandboxVariant) else variant
 
         if variant_value == "eval":
-            return LocalEvalSandbox.list_environments()
+            return EvalSandbox.list_environments()
         if variant_value == "docker":
-            from .docker_sandbox import LocalDockerSandbox
+            from .docker_sandbox import DockerSandbox
 
-            return LocalDockerSandbox.list_environments()
+            return DockerSandbox.list_environments()
         if variant_value == "jupyter":
-            from .jupyter_sandbox import LocalJupyterSandbox
+            from .jupyter_sandbox import JupyterSandbox
 
-            return LocalJupyterSandbox.list_environments()
+            return JupyterSandbox.list_environments()
         if variant_value == "datalayer":
             from .datalayer_sandbox import DatalayerSandbox
 
@@ -340,7 +340,7 @@ class Sandbox(ABC):
         cls,
         tags: Optional[dict[str, str]] = None,
         **kwargs,
-    ) -> Iterator["Sandbox"]:
+    ) -> Iterator[Sandbox]:
         """List all running sandboxes.
 
         Similar to Modal's Sandbox.list() method.
@@ -356,7 +356,7 @@ class Sandbox(ABC):
 
         yield from DatalayerSandbox.list_all(tags=tags, **kwargs)
 
-    def __enter__(self) -> "Sandbox":
+    def __enter__(self) -> Sandbox:
         """Context manager entry - starts the sandbox."""
         self.start()
         return self
@@ -365,7 +365,7 @@ class Sandbox(ABC):
         """Context manager exit - stops the sandbox."""
         self.stop()
 
-    async def __aenter__(self) -> "Sandbox":
+    async def __aenter__(self) -> Sandbox:
         """Async context manager entry."""
         await self.start_async()
         return self
@@ -486,14 +486,13 @@ class Sandbox(ABC):
             envs=envs,
             timeout=timeout,
         )
-        for msg in execution.logs.stdout:
-            yield msg
-        for msg in execution.logs.stderr:
-            yield msg
-        for result in execution.results:
-            yield result
+        yield from execution.logs.stdout
+        yield from execution.logs.stderr
+        yield from execution.results
         if not execution.execution_ok and execution.execution_error:
-            yield CodeError(name="SandboxExecutionError", value=execution.execution_error, traceback="")
+            yield CodeError(
+                name="SandboxExecutionError", value=execution.execution_error, traceback=""
+            )
         if execution.code_error:
             yield execution.code_error
 
@@ -520,7 +519,9 @@ class Sandbox(ABC):
         for result in execution.results:
             yield result
         if not execution.execution_ok and execution.execution_error:
-            yield CodeError(name="SandboxExecutionError", value=execution.execution_error, traceback="")
+            yield CodeError(
+                name="SandboxExecutionError", value=execution.execution_error, traceback=""
+            )
         if execution.code_error:
             yield execution.code_error
 
@@ -573,9 +574,7 @@ class Sandbox(ABC):
         """
         self._set_internal_variable(name, value, context)
 
-    def set_variables(
-        self, variables: dict[str, Any], context: Optional[Context] = None
-    ) -> None:
+    def set_variables(self, variables: dict[str, Any], context: Optional[Context] = None) -> None:
         """Set multiple variables in the sandbox.
 
         Args:
@@ -640,7 +639,9 @@ class Sandbox(ABC):
         Returns:
             Execution result from the installation.
         """
-        install_cmd = f"import subprocess; subprocess.run(['pip', 'install'] + {packages!r}, check=True)"
+        install_cmd = (
+            f"import subprocess; subprocess.run(['pip', 'install'] + {packages!r}, check=True)"
+        )
         return self.run_code(install_cmd, timeout=timeout or 300)
 
     def upload_file(self, local_path: str, remote_path: str) -> None:
