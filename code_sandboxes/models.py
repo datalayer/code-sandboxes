@@ -66,9 +66,9 @@ class SandboxVariant(str, Enum):
     """Supported sandbox variants."""
 
     EVAL = "eval"
-    LOCAL_DOCKER = "local-docker"
+    DOCKER = "docker"
     JUPYTER = "jupyter"
-    DATALAYER_RUNTIME = "datalayer-runtime"
+    DATALAYER = "datalayer"
 
 
 class GPUType(str, Enum):
@@ -439,7 +439,7 @@ class SandboxInfo(BaseModel):
 
     Attributes:
         id: Unique identifier for the sandbox.
-        variant: The sandbox variant (eval, local-docker, jupyter, datalayer-runtime).
+        variant: The sandbox variant (eval, docker, jupyter, datalayer).
         status: Current status of the sandbox.
         created_at: Unix timestamp when the sandbox was created.
         end_at: Unix timestamp when the sandbox will be terminated.

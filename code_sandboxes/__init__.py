@@ -20,13 +20,13 @@ Features:
 - Filesystem operations (read, write, list, upload, download)
 - Command execution (run, exec, spawn)
 - Context management for state persistence
-- Snapshot support (for datalayer-runtime)
+- Snapshot support (for datalayer)
 - GPU and resource configuration
 
 Example:
     from code_sandboxes import Sandbox
 
-    # Create a sandbox (defaults to datalayer-runtime)
+    # Create an eval sandbox
     with Sandbox.create(variant="eval") as sandbox:
         # Execute code
         result = sandbox.run_code("x = 1 + 1")

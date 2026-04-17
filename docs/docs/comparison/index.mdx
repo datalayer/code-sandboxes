@@ -152,7 +152,7 @@ sb.terminate()
 
 # Code Sandboxes
 from code_sandboxes import Sandbox
-with Sandbox.create(variant="datalayer-runtime", gpu="T4") as sandbox:
+with Sandbox.create(variant="datalayer", gpu="T4") as sandbox:
     result = sandbox.run_code("print('hello')")
     print(result.stdout)
 ```

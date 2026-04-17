@@ -15,6 +15,6 @@ python examples/datalayer_runtime_example.py
 ```
 
 Notes:
-- `local-docker` requires Docker support and a `LocalDockerSandbox` implementation.
+- `docker` requires Docker support and a `LocalDockerSandbox` implementation.
 - Build the image with: `docker build -t code-sandboxes-jupyter:latest -f docker/Dockerfile .`
-- `datalayer-runtime` requires Datalayer runtime credentials/config.
+- `datalayer` requires Datalayer runtime credentials/config.

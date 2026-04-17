@@ -74,13 +74,13 @@ class LocalDockerSandbox(Sandbox):
     def list_environments(cls) -> list[SandboxEnvironment]:
         return [
             SandboxEnvironment(
-                name="local-docker",
+                name="docker",
                 title="Local Docker (Jupyter)",
                 language="python",
                 owner="local",
                 visibility="local",
                 burning_rate=0.0,
-                metadata={"variant": "local-docker", "image": DEFAULT_IMAGE},
+                metadata={"variant": "docker", "image": DEFAULT_IMAGE},
             )
         ]
 
@@ -174,7 +174,7 @@ class LocalDockerSandbox(Sandbox):
         self._default_context = self.create_context("default")
         self._info = SandboxInfo(
             id=self._sandbox_id,
-            variant="local-docker",
+            variant="docker",
             status=SandboxStatus.RUNNING,
             created_at=time.time(),
             name=self.config.name,

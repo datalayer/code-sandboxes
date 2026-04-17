@@ -35,9 +35,9 @@ class TestModels:
     def test_sandbox_variant_enum(self):
         """Test SandboxVariant enum values."""
         assert SandboxVariantEnum.EVAL.value == "eval"
-        assert SandboxVariantEnum.LOCAL_DOCKER.value == "local-docker"
+        assert SandboxVariantEnum.DOCKER.value == "docker"
         assert SandboxVariantEnum.JUPYTER.value == "jupyter"
-        assert SandboxVariantEnum.DATALAYER_RUNTIME.value == "datalayer-runtime"
+        assert SandboxVariantEnum.DATALAYER.value == "datalayer"
 
     def test_gpu_type_enum(self):
         """Test GPUType enum values."""

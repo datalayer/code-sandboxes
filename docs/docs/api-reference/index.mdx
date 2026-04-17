@@ -18,7 +18,7 @@ Creates a new sandbox instance.
 ```python
 @classmethod
 def create(
-    variant: str = "eval",
+    variant: str = "datalayer",
     timeout: float | None = None,
     environment: str | None = None,
     gpu: str | None = None,
@@ -36,7 +36,7 @@ def create(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `variant` | `str` | Sandbox type: `"eval"`, `"local-docker"`, `"jupyter"`, or `"datalayer-runtime"` |
+| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter"`, or `"datalayer"`. Defaults to `"datalayer"`. |
 | `timeout` | `float` | Execution timeout in seconds |
 | `environment` | `str` | Runtime environment name |
 | `gpu` | `str` | GPU type (e.g., `"T4"`, `"A100"`, `"H100"`) |
@@ -54,7 +54,7 @@ Reconnects to an existing sandbox.
 
 ```python
 @classmethod
-def from_id(sandbox_id: str, variant: str = "datalayer-runtime") -> Sandbox
+def from_id(sandbox_id: str, variant: str = "datalayer") -> Sandbox
 ```
 
 #### `Sandbox.list()`
@@ -63,7 +63,7 @@ Lists all sandboxes.
 
 ```python
 @classmethod
-def list(variant: str = "datalayer-runtime") -> list[SandboxInfo]
+def list(variant: str = "datalayer") -> list[SandboxInfo]
 ```
 
 #### `Sandbox.list_environments()`
@@ -73,7 +73,7 @@ Lists available environments for a sandbox variant.
 ```python
 @classmethod
 def list_environments(
-    variant: str = "datalayer-runtime",
+    variant: str = "datalayer",
     **kwargs,
 ) -> list[SandboxEnvironment]
 ```
@@ -82,8 +82,10 @@ def list_environments(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `variant` | `str` | Sandbox type: `"eval"`, `"local-docker"`, `"jupyter"`, or `"datalayer-runtime"` |
+| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter"`, or `"datalayer"` |
 | `**kwargs` | `dict` | Variant-specific arguments (e.g., credentials, run URL) |
+
+Legacy `local-eval`, `local-docker`, and `local-jupyter` variant names are not supported.
 
 ### Instance Methods
 

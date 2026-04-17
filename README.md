@@ -27,12 +27,15 @@ This package provides a unified API for code execution with features like:
 
 Four variants are available:
 
+Canonical variant names are `eval`, `docker`, `jupyter`, and
+`datalayer`. The older `local-*` names are no longer supported.
+
 | Variant | Isolation | Use Case |
 |---------|-----------|----------|
 | `eval` | None (Python exec) | Development, testing |
-| `local-docker` | Container (Jupyter Server) | Local isolated execution |
+| `docker` | Container (Jupyter Server) | Local isolated execution |
 | `jupyter` | Process (Jupyter kernel) | Local persistent state |
-| `datalayer-runtime` | Cloud VM | Production, GPU workloads |
+| `datalayer` | Cloud VM | Production, GPU workloads |
 
 ## Module Layout
 
@@ -70,7 +73,7 @@ pip install code-sandboxes[all]
 
 ### Docker Variant Setup
 
-The `local-docker` variant runs a Jupyter Server inside a Docker container and uses
+The `docker` variant runs a Jupyter Server inside a Docker container and uses
 `jupyter-kernel-client` to execute code.
 
 Build the Docker image used by `LocalDockerSandbox`:
@@ -110,7 +113,7 @@ from code_sandboxes import Sandbox
 
 # Create a cloud sandbox with GPU
 with Sandbox.create(
-    variant="datalayer-runtime",
+    variant="datalayer",
     gpu="T4",
     environment="python-gpu-env",
     timeout=300,
@@ -158,7 +161,7 @@ with Sandbox.create() as sandbox:
 ### Snapshots (Datalayer Runtime)
 
 ```python
-with Sandbox.create(variant="datalayer-runtime") as sandbox:
+with Sandbox.create(variant="datalayer") as sandbox:
     # Set up environment
     sandbox.install_packages(["pandas", "numpy"])
     sandbox.run_code("import pandas as pd; df = pd.DataFrame({'a': [1,2,3]})")
@@ -168,7 +171,7 @@ with Sandbox.create(variant="datalayer-runtime") as sandbox:
     print(f"Snapshot created: {snapshot.id}")
 
 # Later: restore from snapshot
-with Sandbox.create(variant="datalayer-runtime", snapshot_name="my-setup") as sandbox:
+with Sandbox.create(variant="datalayer", snapshot_name="my-setup") as sandbox:
     # State is restored
     result = sandbox.run_code("print(df)")
 ```
@@ -200,7 +203,7 @@ Factory method to create sandboxes:
 
 ```python
 sandbox = Sandbox.create(
-    variant="datalayer-runtime",  # Sandbox type
+    variant="datalayer",  # Sandbox type
     timeout=60,                   # Execution timeout (seconds)
     environment="python-cpu-env",  # Runtime environment
     gpu="T4",                     # GPU type (T4, A100, H100, etc.)
@@ -286,6 +289,29 @@ config = SandboxConfig(
 
 sandbox = Sandbox.create(config=config)
 ```
+
+## CI Workflows
+
+This repository uses a reusable GitHub Actions workflow at `.github/workflows/reusable-python.yml`.
+
+The following workflows call it:
+
+- `.github/workflows/build.yml`
+- `.github/workflows/py-tests.yml`
+- `.github/workflows/py-code-style.yml`
+- `.github/workflows/py-typing.yml`
+
+Reusable workflow inputs:
+
+- `python-version`: Python version to run.
+- `install-system-deps`: Install Linux dependencies and unlock keyring.
+- `install-extras`: Extras from `pyproject.toml` (for example `test,typing`).
+- `extra-packages`: Additional packages installed with `uv pip install`.
+- `run-tests`: Enable test execution.
+- `test-command`: Command used for tests.
+- `run-mypy`: Enable mypy.
+- `mypy-target`: Package or module passed to mypy.
+- `run-pre-commit`: Enable pre-commit checks.
 
 ## License
 

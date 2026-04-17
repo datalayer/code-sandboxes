@@ -11,25 +11,28 @@ A sandbox is an isolated environment where code can be executed safely. Code San
 
 Use `Sandbox.create()` to create a new sandbox:
 
+Canonical variant names are `eval`, `docker`, `jupyter`, and `datalayer`.
+Older `local-*` names are no longer supported.
+
 ```python
 from code_sandboxes import Sandbox
 
-# Create with defaults (eval variant)
+# Create with defaults (datalayer variant)
 sandbox = Sandbox.create()
 
 # Create with specific variant
-sandbox = Sandbox.create(variant="datalayer-runtime")
+sandbox = Sandbox.create(variant="datalayer")
 
 # Create with timeout and environment
 sandbox = Sandbox.create(
-    variant="datalayer-runtime",
+    variant="datalayer",
     timeout=300,
     environment="python-cpu-env",
 )
 
 # Create with GPU support
 sandbox = Sandbox.create(
-    variant="datalayer-runtime",
+    variant="datalayer",
     gpu="T4",
     cpu=4.0,
     memory=8192,
@@ -74,7 +77,7 @@ with Sandbox.create(variant="eval") as sandbox:
 Remote sandboxes execute code out-of-process via the Jupyter kernel protocol, providing 
 better isolation and persistent kernel state.
 
-#### local-docker
+#### docker
 
 Runs code in a Docker container for local isolated execution.
 
@@ -82,7 +85,7 @@ This variant runs a Jupyter Server inside the container and connects using
 `jupyter-kernel-client`.
 
 ```python
-with Sandbox.create(variant="local-docker", image="code-sandboxes-jupyter:latest") as sandbox:
+with Sandbox.create(variant="docker", image="code-sandboxes-jupyter:latest") as sandbox:
     result = sandbox.run_code("import sys; print(sys.version)")
 ```
 
@@ -107,13 +110,13 @@ with Sandbox.create(variant="jupyter") as sandbox:
     print(result.text)  # 42
 ```
 
-#### datalayer-runtime
+#### datalayer
 
 Cloud-based execution with full isolation, GPU support, and persistence.
 
 ```python
 with Sandbox.create(
-    variant="datalayer-runtime",
+    variant="datalayer",
     gpu="A100",
     environment="python-gpu-env",
 ) as sandbox:
@@ -127,14 +130,14 @@ List available environments for a sandbox variant and pick one when creating a s
 ```python
 from code_sandboxes import Sandbox
 
-environments = Sandbox.list_environments(variant="datalayer-runtime")
+environments = Sandbox.list_environments(variant="datalayer")
 for env in environments:
     print(f"{env.name}: {env.title}")
 
 # Select the first environment
 if environments:
     sandbox = Sandbox.create(
-        variant="datalayer-runtime",
+        variant="datalayer",
         environment=environments[0].name,
     )
     sandbox.start()
@@ -171,7 +174,7 @@ x * 2
 ## Async Execution
 
 Use `await` directly in `run_code()` when the sandbox supports async execution
-(eval, jupyter, and datalayer-runtime). The last expression is
+(eval, jupyter, and datalayer). The last expression is
 returned in `results` just like sync code.
 
 ```python
@@ -271,7 +274,7 @@ with Sandbox.create() as sandbox:
 
 ```python
 # Get sandbox ID for later
-sandbox = Sandbox.create(variant="datalayer-runtime")
+sandbox = Sandbox.create(variant="datalayer")
 sandbox_id = sandbox.sandbox_id
 sandbox.start()
 
@@ -284,7 +287,7 @@ result = sandbox.run_code("print('Still running!')")
 
 ```python
 # List all sandboxes
-sandboxes = Sandbox.list(variant="datalayer-runtime")
+sandboxes = Sandbox.list(variant="datalayer")
 for info in sandboxes:
     print(f"{info.sandbox_id}: {info.status}")
 ```
@@ -308,10 +311,10 @@ with Sandbox.create() as sandbox:
 
 ## Snapshots
 
-Save and restore sandbox state (datalayer-runtime only):
+Save and restore sandbox state (datalayer only):
 
 ```python
-with Sandbox.create(variant="datalayer-runtime") as sandbox:
+with Sandbox.create(variant="datalayer") as sandbox:
     # Set up environment
     sandbox.run_code("import pandas as pd")
     sandbox.run_code("df = pd.DataFrame({'a': [1,2,3]})")
@@ -322,7 +325,7 @@ with Sandbox.create(variant="datalayer-runtime") as sandbox:
 
 # Later: restore from snapshot
 with Sandbox.create(
-    variant="datalayer-runtime",
+    variant="datalayer",
     snapshot_name="my-setup"
 ) as sandbox:
     result = sandbox.run_code("print(df)")  # State restored

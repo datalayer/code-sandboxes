@@ -34,21 +34,21 @@ class Sandbox(ABC):
     A sandbox provides a safe, isolated environment for executing code.
     Different implementations provide different isolation levels:
     - eval: Simple Python exec() based, minimal isolation
-    - local-docker: Docker container based, good isolation
+    - docker: Docker container based, good isolation
     - jupyter: Local Jupyter Server with persistent kernel state
-    - datalayer-runtime: Cloud-based Datalayer runtime, full isolation
+    - datalayer: Cloud-based Datalayer runtime, full isolation
 
     Features:
     - Code execution with result streaming
     - Filesystem operations (read, write, list, upload, download)
     - Command execution (run, exec, spawn)
     - Context management for state persistence
-    - Snapshot support (for datalayer-runtime)
-    - GPU/resource configuration (for datalayer-runtime)
+    - Snapshot support (for datalayer)
+    - GPU/resource configuration (for datalayer)
     - Timeout and lifecycle management
 
     Example:
-        with Sandbox.create(variant="datalayer-runtime") as sandbox:
+        with Sandbox.create(variant="datalayer") as sandbox:
             # Execute code
             result = sandbox.run_code("x = 1 + 1")
             result = sandbox.run_code("print(x)")  # prints 2
@@ -171,7 +171,7 @@ class Sandbox(ABC):
     @classmethod
     def create(
         cls,
-        variant: SandboxVariant | str = SandboxVariant.DATALAYER_RUNTIME,
+        variant: SandboxVariant | str = SandboxVariant.DATALAYER,
         config: Optional[SandboxConfig] = None,
         timeout: Optional[float] = None,
         name: Optional[str] = None,
@@ -194,14 +194,14 @@ class Sandbox(ABC):
         Args:
             variant: The type of sandbox to create.
                 - "eval": Simple Python exec() based, minimal isolation
-                - "local-docker": Docker container based (requires Docker)
+                - "docker": Docker container based (requires Docker)
                 - "jupyter": Local Jupyter Server with persistent kernel state
-                - "datalayer-runtime": Cloud-based Datalayer runtime (default)
+                - "datalayer": Cloud-based Datalayer runtime (default)
             config: Optional full configuration object (overrides individual params).
             timeout: Default timeout for code execution in seconds.
             name: Optional name for the sandbox.
             environment: Runtime environment (e.g., "python-cpu-env", "python-gpu-env").
-            gpu: GPU type to use (e.g., "T4", "A100", "H100"). Only for datalayer-runtime.
+            gpu: GPU type to use (e.g., "T4", "A100", "H100"). Only for datalayer.
             cpu: CPU cores to allocate.
             memory: Memory limit in MB.
             env: Environment variables to set in the sandbox.
@@ -249,7 +249,7 @@ class Sandbox(ABC):
 
         if variant_value == "eval":
             sandbox = LocalEvalSandbox(config=config, **kwargs)
-        elif variant_value == "local-docker":
+        elif variant_value == "docker":
             # Import here to avoid circular imports
             from .docker_sandbox import LocalDockerSandbox
 
@@ -258,15 +258,15 @@ class Sandbox(ABC):
             from .jupyter_sandbox import LocalJupyterSandbox
 
             sandbox = LocalJupyterSandbox(config=config, **kwargs)
-        elif variant_value == "datalayer-runtime":
+        elif variant_value == "datalayer":
             from .datalayer_sandbox import DatalayerSandbox
 
             sandbox = DatalayerSandbox(config=config, **kwargs)
         else:
             raise ValueError(
                 f"Unknown sandbox variant: {variant}. "
-                "Supported variants: eval, local-docker, jupyter, "
-                "datalayer-runtime"
+                "Supported variants: eval, docker, jupyter, "
+                "datalayer"
             )
 
         # Set tags if provided
@@ -291,7 +291,7 @@ class Sandbox(ABC):
         Raises:
             SandboxNotFoundError: If no sandbox with the given ID exists.
         """
-        # This is primarily for datalayer-runtime
+        # This is primarily for datalayer
         from .datalayer_sandbox import DatalayerSandbox
 
         return DatalayerSandbox.from_id(sandbox_id, **kwargs)
@@ -299,7 +299,7 @@ class Sandbox(ABC):
     @classmethod
     def list_environments(
         cls,
-        variant: SandboxVariant | str = SandboxVariant.DATALAYER_RUNTIME,
+        variant: SandboxVariant | str = SandboxVariant.DATALAYER,
         **kwargs,
     ) -> list[SandboxEnvironment]:
         """List available environments for a given sandbox variant.
@@ -317,7 +317,7 @@ class Sandbox(ABC):
 
         if variant_value == "eval":
             return LocalEvalSandbox.list_environments()
-        if variant_value == "local-docker":
+        if variant_value == "docker":
             from .docker_sandbox import LocalDockerSandbox
 
             return LocalDockerSandbox.list_environments()
@@ -325,14 +325,14 @@ class Sandbox(ABC):
             from .jupyter_sandbox import LocalJupyterSandbox
 
             return LocalJupyterSandbox.list_environments()
-        if variant_value == "datalayer-runtime":
+        if variant_value == "datalayer":
             from .datalayer_sandbox import DatalayerSandbox
 
             return DatalayerSandbox.list_environments(**kwargs)
         raise ValueError(
             f"Unknown sandbox variant: {variant}. "
-            "Supported variants: eval, local-docker, jupyter, "
-            "datalayer-runtime"
+            "Supported variants: eval, docker, jupyter, "
+            "datalayer"
         )
 
     @classmethod

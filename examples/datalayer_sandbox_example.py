@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Datalayer, Inc.
 # BSD 3-Clause License
 
-"""Example: datalayer-runtime sandbox (cloud runtime).
+"""Example: datalayer sandbox (cloud runtime).
 
 Run with:
     python examples/datalayer_runtime_example.py
@@ -14,7 +14,7 @@ from code_sandboxes import Sandbox
 
 def main() -> None:
     try:
-        environments = Sandbox.list_environments(variant="datalayer-runtime")
+        environments = Sandbox.list_environments(variant="datalayer")
         if not environments:
             raise RuntimeError("No environments available.")
 
@@ -24,14 +24,14 @@ def main() -> None:
 
         first_env = environments[0]
         with Sandbox.create(
-            variant="datalayer-runtime",
+            variant="datalayer",
             timeout=60,
             environment=first_env.name,
         ) as sandbox:
             result = sandbox.run_code("print('hello from datalayer runtime')")
             print("stdout:", result.stdout)
     except Exception as exc:  # noqa: BLE001
-        print("datalayer-runtime example failed:", exc)
+        print("datalayer example failed:", exc)
         print("Exception type:", type(exc))
         import traceback
 

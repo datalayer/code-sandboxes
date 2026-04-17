@@ -166,7 +166,7 @@ class DatalayerSandbox(Sandbox):
                 sandbox._started = True
                 sandbox._info = SandboxInfo(
                     id=sandbox._sandbox_id,
-                    variant="datalayer-runtime",
+                    variant="datalayer",
                     status=SandboxStatus.RUNNING,
                     created_at=time.time(),
                     name=runtime.name,
@@ -297,7 +297,7 @@ class DatalayerSandbox(Sandbox):
 
             self._info = SandboxInfo(
                 id=self._sandbox_id,
-                variant="datalayer-runtime",
+                variant="datalayer",
                 status=SandboxStatus.RUNNING,
                 created_at=self._created_at,
                 end_at=self._end_at,
@@ -366,7 +366,7 @@ class DatalayerSandbox(Sandbox):
             return self._info
         return SandboxInfo(
             id=self._sandbox_id,
-            variant="datalayer-runtime",
+            variant="datalayer",
             status=SandboxStatus.PENDING if not self._started else SandboxStatus.RUNNING,
         )
 

@@ -72,9 +72,9 @@ Execute code out-of-process via Jupyter kernel protocol, providing better isolat
 
 | Variant | Isolation Level | Best For |
 |---------|-----------------|----------|
-| `local-docker` | Container | Local isolated execution |
+| `docker` | Container | Local isolated execution |
 | `jupyter` | Process (Jupyter kernel) | Local persistent state |
-| `datalayer-runtime` | Cloud VM | Production, GPU workloads |
+| `datalayer` | Cloud VM | Production, GPU workloads |
 
 ## Quick Start
 
@@ -132,7 +132,7 @@ from code_sandboxes import Sandbox
 from agent_codemode import CodeModeExecutor, ToolRegistry
 
 # agent-codemode uses code-sandboxes internally
-executor = CodeModeExecutor(registry, sandbox_variant="datalayer-runtime")
+executor = CodeModeExecutor(registry, sandbox_variant="datalayer")
 ```
 
 ### With Agent Skills
