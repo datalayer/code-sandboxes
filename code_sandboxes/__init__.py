@@ -106,15 +106,15 @@ __all__ = [
     "Context",
     "ContextNotFoundError",
     "DatalayerSandbox",
+    "DockerSandbox",
+    # Sandbox implementations
+    "EvalSandbox",
     "ExecutionResult",
     "FileInfo",
     "FileType",
     "FileWatchEvent",
     "FileWatchEventType",
     "GPUType",
-    "DockerSandbox",
-    # Sandbox implementations
-    "EvalSandbox",
     "JupyterSandbox",
     "Logs",
     "MIMEType",
