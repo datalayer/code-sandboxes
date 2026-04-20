@@ -177,7 +177,7 @@ module.exports = {
         docs: {
           routeBasePath: '/',
           sidebarPath: require.resolve('./sidebars.js'),
-          docItemComponent: '@theme/CustomDocItem',  
+          docItemComponent: '@theme/CustomDocItem',
           editUrl: 'https://github.com/datalayer/code-sandboxes/edit/main/',
         },
         theme: {

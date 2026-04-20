@@ -5,14 +5,14 @@
 """Code Sandboxes - Safe, isolated environments for AI code execution.
 
 This package provides different sandbox implementations for executing
-code safely, inspired by E2B and Modal:
+code safely.
 
-Local sandboxes (in-process execution):
-    - LocalEvalSandbox: Simple Python exec() based, for development/testing
+sandboxes (in-process execution):
+    - EvalSandbox: Simple Python exec() based, for development/testing
 
 Remote sandboxes (out-of-process execution via Jupyter kernel protocol):
-    - LocalDockerSandbox: Docker container based, good isolation
-    - LocalJupyterSandbox: Jupyter Server with persistent kernel state
+    - DockerSandbox: Docker container based, good isolation
+    - JupyterSandbox: Jupyter Server with persistent kernel state
     - DatalayerSandbox: Cloud-based Datalayer runtime, full isolation
 
 Features:
@@ -20,14 +20,14 @@ Features:
 - Filesystem operations (read, write, list, upload, download)
 - Command execution (run, exec, spawn)
 - Context management for state persistence
-- Snapshot support (for datalayer-runtime)
+- Snapshot support (for datalayer)
 - GPU and resource configuration
 
 Example:
     from code_sandboxes import Sandbox
 
-    # Create a sandbox (defaults to datalayer-runtime)
-    with Sandbox.create(variant="local-eval") as sandbox:
+    # Create an eval sandbox
+    with Sandbox.create(variant="eval") as sandbox:
         # Execute code
         result = sandbox.run_code("x = 1 + 1")
         result = sandbox.run_code("print(x)")  # prints 2
@@ -39,20 +39,23 @@ Example:
         # Command execution
         result = sandbox.commands.run("ls -la")
 
-E2B-style usage:
+Style usage:
     sandbox = Sandbox.create(timeout=60)  # 60 second timeout
     result = sandbox.run_code('print("hello")')
     files = sandbox.files.list("/")
 
-Modal-style usage:
+Style usage:
     sandbox = Sandbox.create(gpu="T4", environment="python-gpu-env")
     process = sandbox.commands.exec("python", "-c", "print('hello')")
     for line in process.stdout:
         print(line)
 """
 
-from .base import Sandbox, SandboxVariant
+from .base import Sandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
+from .datalayer_sandbox import DatalayerSandbox
+from .docker_sandbox import DockerSandbox
+from .eval_sandbox import EvalSandbox
 from .exceptions import (
     ContextNotFoundError,
     SandboxAuthenticationError,
@@ -75,9 +78,7 @@ from .filesystem import (
     SandboxFileHandle,
     SandboxFilesystem,
 )
-from .local.eval_sandbox import LocalEvalSandbox
-from .remote.docker_sandbox import LocalDockerSandbox
-from .remote.jupyter_sandbox import LocalJupyterSandbox
+from .jupyter_sandbox import JupyterSandbox
 from .models import (
     CodeError,
     Context,
@@ -97,57 +98,56 @@ from .models import (
     SnapshotInfo,
     TunnelInfo,
 )
-from .remote.datalayer_sandbox import DatalayerSandbox
 
 __all__ = [
-    # Main sandbox class
-    "Sandbox",
-    "SandboxVariant",
-    # Sandbox implementations
-    "LocalEvalSandbox",
-    "LocalDockerSandbox",
-    "LocalJupyterSandbox",
+    # Models
+    "CodeError",
+    "CommandResult",
+    "Context",
+    "ContextNotFoundError",
     "DatalayerSandbox",
-    # Filesystem
-    "SandboxFilesystem",
-    "SandboxFileHandle",
+    "DockerSandbox",
+    # Sandbox implementations
+    "EvalSandbox",
+    "ExecutionResult",
     "FileInfo",
     "FileType",
     "FileWatchEvent",
     "FileWatchEventType",
-    # Commands
-    "SandboxCommands",
-    "CommandResult",
-    "ProcessHandle",
-    # Models
-    "CodeError",
-    "Context",
-    "ExecutionResult",
+    "GPUType",
+    "JupyterSandbox",
     "Logs",
     "MIMEType",
     "OutputHandler",
     "OutputMessage",
-    "Result",
-    "SandboxConfig",
-    "SandboxEnvironment",
-    "SandboxInfo",
-    "SandboxStatus",
-    "SandboxVariant",
+    "ProcessHandle",
     "ResourceConfig",
-    "GPUType",
-    "SnapshotInfo",
-    "TunnelInfo",
+    "Result",
+    # Main sandbox class
+    "Sandbox",
+    "SandboxAuthenticationError",
+    # Commands
+    "SandboxCommands",
+    "SandboxConfig",
+    "SandboxConfigurationError",
+    "SandboxConnectionError",
+    "SandboxEnvironment",
     # Exceptions
     "SandboxError",
-    "SandboxTimeoutError",
     "SandboxExecutionError",
+    "SandboxFileHandle",
+    # Filesystem
+    "SandboxFilesystem",
+    "SandboxInfo",
     "SandboxNotStartedError",
-    "SandboxConnectionError",
-    "SandboxConfigurationError",
-    "SandboxSnapshotError",
-    "SandboxResourceError",
-    "SandboxAuthenticationError",
     "SandboxQuotaExceededError",
-    "ContextNotFoundError",
+    "SandboxResourceError",
+    "SandboxSnapshotError",
+    "SandboxStatus",
+    "SandboxTimeoutError",
+    "SandboxVariant",
+    "SandboxVariant",
+    "SnapshotInfo",
+    "TunnelInfo",
     "VariableNotFoundError",
 ]

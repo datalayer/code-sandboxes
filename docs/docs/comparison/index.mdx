@@ -14,7 +14,7 @@ This page compares Code Sandboxes with other popular code execution platforms: E
 | **Open Source** | ✅ Yes (BSD-3) | ✅ Yes (Apache-2) | ❌ No |
 | **Self-hostable** | ✅ Yes | ✅ Yes | ❌ No |
 | **Cloud Offering** | ✅ Datalayer | ✅ E2B Cloud | ✅ Modal Cloud |
-| **Local Execution** | ✅ Yes | ❌ No | ❌ No |
+| **Execution** | ✅ Yes | ❌ No | ❌ No |
 | **GPU Support** | ✅ Yes | ❌ No | ✅ Yes |
 | **Snapshots** | ✅ Yes | ✅ Yes | ✅ Yes |
 | **Jupyter Kernel** | ✅ Native | ✅ Yes | ❌ No |
@@ -114,7 +114,7 @@ Code Sandboxes provides a unified API for local and cloud execution, with native
 
 **Pros:**
 - Open source and self-hostable
-- Local and cloud execution
+- and cloud execution
 - Native Jupyter integration
 - GPU support via Datalayer runtime
 - Simple, consistent API
@@ -152,7 +152,7 @@ sb.terminate()
 
 # Code Sandboxes
 from code_sandboxes import Sandbox
-with Sandbox.create(variant="datalayer-runtime", gpu="T4") as sandbox:
+with Sandbox.create(variant="datalayer", gpu="T4") as sandbox:
     result = sandbox.run_code("print('hello')")
     print(result.stdout)
 ```
@@ -163,7 +163,7 @@ with Sandbox.create(variant="datalayer-runtime", gpu="T4") as sandbox:
 |----------|-------------|
 | AI chatbot code execution | Code Sandboxes or E2B |
 | ML training with GPUs | Code Sandboxes or Modal |
-| Local development/testing | Code Sandboxes |
+| development/testing | Code Sandboxes |
 | Self-hosted infrastructure | Code Sandboxes or E2B |
 | Jupyter notebook workflows | Code Sandboxes |
 | Serverless Python functions | Modal |

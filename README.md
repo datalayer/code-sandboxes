@@ -27,12 +27,33 @@ This package provides a unified API for code execution with features like:
 
 Four variants are available:
 
-| Variant | Isolation | Use Case |
-|---------|-----------|----------|
-| `local-eval` | None (Python exec) | Development, testing |
-| `local-docker` | Container (Jupyter Server) | Local isolated execution |
-| `local-jupyter` | Process (Jupyter kernel) | Local persistent state |
-| `datalayer-runtime` | Cloud VM | Production, GPU workloads |
+Canonical variant names are `eval`, `docker`, `jupyter`, and
+`datalayer`. The older `local-*` names are no longer supported.
+
+| Variant     | Isolation                  | Use Case                  |
+| ----------- | -------------------------- | ------------------------- |
+| `eval`      | None (Python exec)         | Development, testing      |
+| `docker`    | Container (Jupyter Server) | isolated execution        |
+| `jupyter`   | Process (Jupyter kernel)   | persistent state          |
+| `datalayer` | Cloud VM                   | Production, GPU workloads |
+
+## Module Layout
+
+Sandbox implementations are exposed as top-level modules:
+
+- `code_sandboxes.eval_sandbox`
+- `code_sandboxes.jupyter_sandbox`
+- `code_sandboxes.docker_sandbox`
+- `code_sandboxes.datalayer_sandbox`
+
+Example direct imports:
+
+```python
+from code_sandboxes.eval_sandbox import EvalSandbox
+from code_sandboxes.jupyter_sandbox import JupyterSandbox
+from code_sandboxes.docker_sandbox import DockerSandbox
+from code_sandboxes.datalayer_sandbox import DatalayerSandbox
+```
 
 ## Installation
 
@@ -52,10 +73,10 @@ pip install code-sandboxes[all]
 
 ### Docker Variant Setup
 
-The `local-docker` variant runs a Jupyter Server inside a Docker container and uses
+The `docker` variant runs a Jupyter Server inside a Docker container and uses
 `jupyter-kernel-client` to execute code.
 
-Build the Docker image used by `LocalDockerSandbox`:
+Build the Docker image used by `DockerSandbox`:
 
 ```bash
 docker build -t code-sandboxes-jupyter:latest -f docker/Dockerfile .
@@ -69,7 +90,7 @@ docker build -t code-sandboxes-jupyter:latest -f docker/Dockerfile .
 from code_sandboxes import Sandbox
 
 # Create a sandbox with timeout
-with Sandbox.create(variant="local-eval", timeout=60) as sandbox:
+with Sandbox.create(variant="eval", timeout=60) as sandbox:
     # Execute code
     result = sandbox.run_code("x = 1 + 1")
     result = sandbox.run_code("print(x)")  # prints 2
@@ -80,7 +101,7 @@ x = 10
 x * 2
 """)
     print(result.text)  # "20"
-    
+
     # Access results
     print(result.stdout)  # "2"
 ```
@@ -92,7 +113,7 @@ from code_sandboxes import Sandbox
 
 # Create a cloud sandbox with GPU
 with Sandbox.create(
-    variant="datalayer-runtime",
+    variant="datalayer",
     gpu="T4",
     environment="python-gpu-env",
     timeout=300,
@@ -107,14 +128,14 @@ with Sandbox.create(
 with Sandbox.create() as sandbox:
     # Write files
     sandbox.files.write("/data/test.txt", "Hello World")
-    
+
     # Read files
     content = sandbox.files.read("/data/test.txt")
-    
+
     # List directory
     for f in sandbox.files.list("/data"):
         print(f.name, f.size)
-    
+
     # Upload/download
     sandbox.files.upload("local_file.txt", "/remote/file.txt")
     sandbox.files.download("/remote/file.txt", "downloaded.txt")
@@ -127,12 +148,12 @@ with Sandbox.create() as sandbox:
     # Run a command and wait for completion
     result = sandbox.commands.run("ls -la")
     print(result.stdout)
-    
+
     # Execute with streaming output
     process = sandbox.commands.exec("python", "-c", "print('hello')")
     for line in process.stdout:
         print(line, end="")
-    
+
     # Install system packages
     sandbox.commands.install_system_packages(["curl", "wget"])
 ```
@@ -140,17 +161,17 @@ with Sandbox.create() as sandbox:
 ### Snapshots (Datalayer Runtime)
 
 ```python
-with Sandbox.create(variant="datalayer-runtime") as sandbox:
+with Sandbox.create(variant="datalayer") as sandbox:
     # Set up environment
     sandbox.install_packages(["pandas", "numpy"])
     sandbox.run_code("import pandas as pd; df = pd.DataFrame({'a': [1,2,3]})")
-    
+
     # Create snapshot
     snapshot = sandbox.create_snapshot("my-setup")
     print(f"Snapshot created: {snapshot.id}")
 
 # Later: restore from snapshot
-with Sandbox.create(variant="datalayer-runtime", snapshot_name="my-setup") as sandbox:
+with Sandbox.create(variant="datalayer", snapshot_name="my-setup") as sandbox:
     # State is restored
     result = sandbox.run_code("print(df)")
 ```
@@ -182,7 +203,7 @@ Factory method to create sandboxes:
 
 ```python
 sandbox = Sandbox.create(
-    variant="datalayer-runtime",  # Sandbox type
+    variant="datalayer",  # Sandbox type
     timeout=60,                   # Execution timeout (seconds)
     environment="python-cpu-env",  # Runtime environment
     gpu="T4",                     # GPU type (T4, A100, H100, etc.)
@@ -229,20 +250,20 @@ else:
 
 ### Core Methods
 
-| Method | Description |
-|--------|-------------|
-| `Sandbox.create()` | Create a new sandbox |
-| `Sandbox.from_id(id)` | Reconnect to an existing sandbox |
-| `Sandbox.list()` | List all sandboxes |
-| `sandbox.run_code(code)` | Execute Python code |
-| `sandbox.files.read(path)` | Read file contents |
-| `sandbox.files.write(path, content)` | Write file contents |
-| `sandbox.files.list(path)` | List directory contents |
-| `sandbox.commands.run(cmd)` | Run shell command |
-| `sandbox.commands.exec(*args)` | Execute with streaming output |
-| `sandbox.set_timeout(seconds)` | Update timeout |
-| `sandbox.create_snapshot(name)` | Save sandbox state |
-| `sandbox.terminate()` / `sandbox.kill()` | Stop sandbox |
+| Method                                   | Description                      |
+| ---------------------------------------- | -------------------------------- |
+| `Sandbox.create()`                       | Create a new sandbox             |
+| `Sandbox.from_id(id)`                    | Reconnect to an existing sandbox |
+| `Sandbox.list()`                         | List all sandboxes               |
+| `sandbox.run_code(code)`                 | Execute Python code              |
+| `sandbox.files.read(path)`               | Read file contents               |
+| `sandbox.files.write(path, content)`     | Write file contents              |
+| `sandbox.files.list(path)`               | List directory contents          |
+| `sandbox.commands.run(cmd)`              | Run shell command                |
+| `sandbox.commands.exec(*args)`           | Execute with streaming output    |
+| `sandbox.set_timeout(seconds)`           | Update timeout                   |
+| `sandbox.create_snapshot(name)`          | Save sandbox state               |
+| `sandbox.terminate()` / `sandbox.kill()` | Stop sandbox                     |
 
 ## Configuration
 
@@ -268,6 +289,29 @@ config = SandboxConfig(
 
 sandbox = Sandbox.create(config=config)
 ```
+
+## CI Workflows
+
+This repository uses a reusable GitHub Actions workflow at `.github/workflows/reusable-python.yml`.
+
+The following workflows call it:
+
+- `.github/workflows/build.yml`
+- `.github/workflows/py-tests.yml`
+- `.github/workflows/py-code-style.yml`
+- `.github/workflows/py-typing.yml`
+
+Reusable workflow inputs:
+
+- `python-version`: Python version to run.
+- `install-system-deps`: Install Linux dependencies and unlock keyring.
+- `install-extras`: Extras from `pyproject.toml` (for example `test,typing`).
+- `extra-packages`: Additional packages installed with `uv pip install`.
+- `run-tests`: Enable test execution.
+- `test-command`: Command used for tests.
+- `run-mypy`: Enable mypy.
+- `mypy-target`: Package or module passed to mypy.
+- `run-pre-commit`: Enable pre-commit checks.
 
 ## License
 

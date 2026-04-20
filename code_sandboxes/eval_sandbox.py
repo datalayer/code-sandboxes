@@ -2,7 +2,7 @@
 #
 # BSD 3-Clause License
 
-"""Local eval-based sandbox implementation.
+"""eval-based sandbox implementation.
 
 This is a simple sandbox that uses Python's exec() for code execution.
 It provides minimal isolation and is suitable for development and testing.
@@ -16,18 +16,17 @@ import asyncio
 import ctypes
 import io
 import socket
+import textwrap
 import threading
 import time
-import textwrap
 import traceback
 import uuid
-from contextlib import redirect_stderr, redirect_stdout
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from typing import Any, Optional
 
-from ..base import Sandbox
-from ..exceptions import SandboxNotStartedError
-from ..models import (
+from .base import Sandbox
+from .exceptions import SandboxNotStartedError
+from .models import (
     CodeError,
     Context,
     ExecutionResult,
@@ -41,7 +40,7 @@ from ..models import (
 )
 
 
-class LocalEvalSandbox(Sandbox):
+class EvalSandbox(Sandbox):
     """A simple sandbox using Python's exec() for code execution.
 
     This sandbox maintains separate namespaces for each context, allowing
@@ -50,7 +49,7 @@ class LocalEvalSandbox(Sandbox):
     WARNING: This provides NO security isolation. Only use for trusted code.
 
     Example:
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             sandbox.run_code("x = 42")
             result = sandbox.run_code("print(x * 2)")  # prints 84
     """
@@ -72,13 +71,13 @@ class LocalEvalSandbox(Sandbox):
     def list_environments(cls) -> list[SandboxEnvironment]:
         return [
             SandboxEnvironment(
-                name="local-eval",
-                title="Local Eval",
+                name="eval",
+                title="Eval",
                 language="python",
                 owner="local",
                 visibility="local",
                 burning_rate=0.0,
-                metadata={"variant": "local-eval"},
+                metadata={"variant": "eval"},
             )
         ]
 
@@ -93,7 +92,7 @@ class LocalEvalSandbox(Sandbox):
 
         self._info = SandboxInfo(
             id=self._sandbox_id,
-            variant="local-eval",
+            variant="eval",
             status="running",
             created_at=time.time(),
             config=self.config,
@@ -176,7 +175,7 @@ class LocalEvalSandbox(Sandbox):
             raise SandboxNotStartedError()
 
         if language != "python":
-            raise ValueError(f"LocalEvalSandbox only supports Python, got: {language}")
+            raise ValueError(f"EvalSandbox only supports Python, got: {language}")
 
         # Normalize indentation for multiline snippets
         code = textwrap.dedent(code)
@@ -242,8 +241,13 @@ class LocalEvalSandbox(Sandbox):
             return asyncio.run(coro)
 
         try:
-            with self._network_guard(), redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+            with (
+                self._network_guard(),
+                redirect_stdout(stdout_buffer),
+                redirect_stderr(stderr_buffer),
+            ):
                 if "await " in code or "async " in code:
+
                     def _indent_code(value: str, spaces: int) -> str:
                         indent = " " * spaces
                         return "\n".join(indent + line for line in value.split("\n"))
@@ -253,19 +257,23 @@ async def __user_code__():
 {_indent_code(code, 4)}
     return locals()
 """
-                    import sys
-                    print(f"[SANDBOX] Executing async code, wrapping in __user_code__", file=sys.stderr, flush=True)
                     exec(async_wrapper, namespace, namespace)
                     result_value = namespace["__user_code__"]()
-                    print(f"[SANDBOX] Calling _run_coroutine_sync...", file=sys.stderr, flush=True)
                     locals_value = _run_coroutine_sync(result_value)
-                    print(f"[SANDBOX] _run_coroutine_sync returned", file=sys.stderr, flush=True)
                     if isinstance(locals_value, dict):
                         for key, value in locals_value.items():
                             # Skip Python internals but preserve user variables starting with __
-                            if key in ("__builtins__", "__name__", "__doc__", "__package__", 
-                                     "__loader__", "__spec__", "__annotations__", "__cached__",
-                                     "__file__"):
+                            if key in (
+                                "__builtins__",
+                                "__name__",
+                                "__doc__",
+                                "__package__",
+                                "__loader__",
+                                "__spec__",
+                                "__annotations__",
+                                "__cached__",
+                                "__file__",
+                            ):
                                 continue
                             namespace[key] = value
                 else:
@@ -295,7 +303,9 @@ async def __user_code__():
                                     exec(compile(parsed, "<sandbox>", "exec"), namespace)
 
                                 expr_code = ast.Expression(last_expr.value)
-                                result_value = eval(compile(expr_code, "<sandbox>", "eval"), namespace)
+                                result_value = eval(
+                                    compile(expr_code, "<sandbox>", "eval"), namespace
+                                )
                                 if asyncio.iscoroutine(result_value):
                                     result_value = _run_coroutine_sync(result_value)
                                 if result_value is not None:
@@ -458,13 +468,13 @@ async def __user_code__():
         """
         ctx = context or self._default_context
         if ctx.id not in self._namespaces:
-            from ..exceptions import VariableNotFoundError
+            from .exceptions import VariableNotFoundError
 
             raise VariableNotFoundError(name)
 
         namespace = self._namespaces[ctx.id]
         if name not in namespace:
-            from ..exceptions import VariableNotFoundError
+            from .exceptions import VariableNotFoundError
 
             raise VariableNotFoundError(name)
 

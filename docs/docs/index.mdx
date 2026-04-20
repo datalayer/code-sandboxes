@@ -46,11 +46,11 @@ This section clarifies what the package owns versus what is delegated to adjacen
 
 - **🔒 Secure Isolation**: Run untrusted code safely in sandboxed environments
 - **🐍 Python Code Execution**: Execute Python code with streaming output and rich results
-- **📁 Filesystem Operations**: Read, write, list, upload, and download files  
+- **📁 Filesystem Operations**: Read, write, list, upload, and download files
 - **💻 Command Execution**: Run shell commands with streaming support
 - **📊 Detailed Status Reporting**: Distinguish between infrastructure and code-level failures
 - **🎯 Pydantic Models**: Type-safe models with automatic validation and JSON serialization
-- **⚡ Multiple Backends**: Local eval, Docker containers, Jupyter kernels, or cloud runtimes
+- **⚡ Multiple Backends**: eval, Docker containers, Jupyter kernels, or cloud runtimes
 - **🔄 State Persistence**: Maintain variables and context between executions
 - **📊 Rich Output**: Support for text, HTML, images, and structured data
 - **📸 Snapshots**: Save and restore sandbox state
@@ -60,21 +60,21 @@ This section clarifies what the package owns versus what is delegated to adjacen
 
 Code Sandboxes supports multiple execution backends organized into two categories:
 
-### Local Sandboxes
+### Sandboxes
 Execute code in-process, sharing memory with the host Python process.
 
 | Variant | Isolation Level | Best For |
 |---------|-----------------|----------|
-| `local-eval` | None (Python exec) | Development, testing |
+| `eval` | None (Python exec) | Development, testing |
 
 ### Remote Sandboxes
 Execute code out-of-process via Jupyter kernel protocol, providing better isolation.
 
 | Variant | Isolation Level | Best For |
 |---------|-----------------|----------|
-| `local-docker` | Container | Local isolated execution |
-| `local-jupyter` | Process (Jupyter kernel) | Local persistent state |
-| `datalayer-runtime` | Cloud VM | Production, GPU workloads |
+| `docker` | Container | isolated execution |
+| `jupyter` | Process (Jupyter kernel) | persistent state |
+| `datalayer` | Cloud VM | Production, GPU workloads |
 
 ## Quick Start
 
@@ -106,11 +106,11 @@ if not result.execution_ok:
 elif result.exit_code not in (None, 0):
     print(f"Process exited with code: {result.exit_code}")
 
-# Check code-level error (Python exception)  
+# Check code-level error (Python exception)
 elif result.code_error:
     print(f"Python error: {result.code_error.name}: {result.code_error.value}")
     print(f"Traceback: {result.code_error.traceback}")
-    
+
 # Success!
 else:
     print(f"Result: {result.text}")
@@ -132,7 +132,7 @@ from code_sandboxes import Sandbox
 from agent_codemode import CodeModeExecutor, ToolRegistry
 
 # agent-codemode uses code-sandboxes internally
-executor = CodeModeExecutor(registry, sandbox_variant="datalayer-runtime")
+executor = CodeModeExecutor(registry, sandbox_variant="datalayer")
 ```
 
 ### With Agent Skills
@@ -140,14 +140,13 @@ executor = CodeModeExecutor(registry, sandbox_variant="datalayer-runtime")
 Agent Skills uses Code Sandboxes to execute skill scripts:
 
 ```python
-from code_sandboxes import LocalEvalSandbox
+from code_sandboxes import EvalSandbox
 from agent_skills import SandboxExecutor
 
-sandbox = LocalEvalSandbox()
+sandbox = EvalSandbox()
 executor = SandboxExecutor(sandbox)
 ```
 
 ## Learn More
 
 <DocCardList items={useDocsSidebar().items}/>
-

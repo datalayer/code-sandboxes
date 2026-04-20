@@ -4,17 +4,18 @@
 
 """Pytest configuration and fixtures for code-sandboxes tests."""
 
-import pytest
 from pathlib import Path
 
-from code_sandboxes.local.eval_sandbox import LocalEvalSandbox
+import pytest
+
+from code_sandboxes.eval_sandbox import EvalSandbox
 from code_sandboxes.models import SandboxConfig
 
 
 @pytest.fixture
 def sandbox():
     """Create a local eval sandbox for testing."""
-    sandbox = LocalEvalSandbox()
+    sandbox = EvalSandbox()
     sandbox.start()
     yield sandbox
     sandbox.stop()
@@ -24,7 +25,7 @@ def sandbox():
 def sandbox_with_config():
     """Create a sandbox with custom configuration."""
     config = SandboxConfig(timeout=30.0)
-    sandbox = LocalEvalSandbox(config=config)
+    sandbox = EvalSandbox(config=config)
     sandbox.start()
     yield sandbox
     sandbox.stop()

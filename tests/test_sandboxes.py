@@ -7,7 +7,11 @@
 import pytest
 
 pytest.skip(
-    "Deprecated: tests split into dedicated modules (test_models, test_local_eval, test_factory, test_local_jupyter, test_integration).",
+    (
+        "Deprecated: tests split into dedicated modules "
+        "(test_models, test_local_eval, test_factory, "
+        "test_local_jupyter, test_integration)."
+    ),
     allow_module_level=True,
 )
 
@@ -15,6 +19,7 @@ pytest.skip(
 # =============================================================================
 # Model Tests
 # =============================================================================
+
 
 class TestModels:
     """Tests for data models."""
@@ -34,10 +39,10 @@ class TestModels:
 
     def test_sandbox_variant_enum(self):
         """Test SandboxVariant enum values."""
-        assert SandboxVariantEnum.LOCAL_EVAL.value == "local-eval"
-        assert SandboxVariantEnum.LOCAL_DOCKER.value == "local-docker"
-        assert SandboxVariantEnum.LOCAL_JUPYTER.value == "local-jupyter"
-        assert SandboxVariantEnum.DATALAYER_RUNTIME.value == "datalayer-runtime"
+        assert SandboxVariantEnum.EVAL.value == "eval"
+        assert SandboxVariantEnum.DOCKER.value == "docker"
+        assert SandboxVariantEnum.JUPYTER.value == "jupyter"
+        assert SandboxVariantEnum.DATALAYER.value == "datalayer"
 
     def test_gpu_type_enum(self):
         """Test GPUType enum values."""
@@ -119,7 +124,7 @@ class TestModels:
         assert error.name == "ValueError"
         assert error.value == "Invalid input"
         assert error.traceback == "Traceback..."
-        
+
     def test_execution_success_status(self):
         """Test Execution with successful execution."""
         execution = ExecutionResult(
@@ -129,7 +134,7 @@ class TestModels:
             started_at=1000.0,
             completed_at=1001.5,
         )
-        
+
         assert execution.execution_ok is True
         assert execution.execution_error is None
         assert execution.code_error is None
@@ -146,7 +151,7 @@ class TestModels:
                 traceback="Traceback...",
             ),
         )
-        
+
         assert execution.execution_ok is True
         assert execution.code_error is not None
         assert execution.code_error.name == "ValueError"
@@ -158,7 +163,7 @@ class TestModels:
             execution_ok=False,
             execution_error="Connection timeout",
         )
-        
+
         assert execution.execution_ok is False
         assert execution.execution_error == "Connection timeout"
         assert execution.code_error is None
@@ -170,7 +175,7 @@ class TestModels:
             execution_ok=True,
             interrupted=True,
         )
-        
+
         assert execution.execution_ok is True
         assert execution.interrupted is True
         assert execution.success is False
@@ -219,7 +224,7 @@ class TestModels:
         """Test SandboxInfo model usage."""
         info = SandboxInfo(
             id="sandbox-123",
-            variant="local-eval",
+            variant="eval",
             status=SandboxStatus.RUNNING,
             created_at=1234567890.0,
             name="test-sandbox",
@@ -228,7 +233,7 @@ class TestModels:
         )
 
         assert info.id == "sandbox-123"
-        assert info.variant == "local-eval"
+        assert info.variant == "eval"
         assert info.status == SandboxStatus.RUNNING
         assert info.created_at == 1234567890.0
         assert info.name == "test-sandbox"
@@ -237,22 +242,23 @@ class TestModels:
 
 
 # =============================================================================
-# LocalEvalSandbox Tests
+# EvalSandbox Tests
 # =============================================================================
 
-class TestLocalEvalSandbox:
-    """Tests for LocalEvalSandbox."""
+
+class TestEvalSandbox:
+    """Tests for EvalSandbox."""
 
     def test_create_sandbox(self):
         """Test creating a sandbox."""
-        sandbox = LocalEvalSandbox()
+        sandbox = EvalSandbox()
 
         assert sandbox is not None
         assert not sandbox.is_started
 
     def test_start_sandbox(self):
         """Test starting a sandbox."""
-        sandbox = LocalEvalSandbox()
+        sandbox = EvalSandbox()
         sandbox.start()
 
         assert sandbox.is_started
@@ -261,7 +267,7 @@ class TestLocalEvalSandbox:
 
     def test_stop_sandbox(self):
         """Test stopping a sandbox."""
-        sandbox = LocalEvalSandbox()
+        sandbox = EvalSandbox()
         sandbox.start()
         sandbox.stop()
 
@@ -270,14 +276,14 @@ class TestLocalEvalSandbox:
 
     def test_context_manager(self):
         """Test using sandbox as context manager."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             assert sandbox.is_started
 
         assert not sandbox.is_started
 
     def test_run_code_simple_expression(self):
         """Test running a simple expression."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             execution = sandbox.run_code("1 + 1")
 
             assert execution is not None
@@ -286,7 +292,7 @@ class TestLocalEvalSandbox:
 
     def test_run_code_statement(self):
         """Test running statements."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             sandbox.run_code("x = 42")
             execution = sandbox.run_code("x * 2")
 
@@ -294,14 +300,14 @@ class TestLocalEvalSandbox:
 
     def test_run_code_print_output(self):
         """Test capturing print output."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             execution = sandbox.run_code("print('Hello, World!')")
 
             assert "Hello" in execution.logs.stdout_text
 
     def test_run_code_error(self):
         """Test handling runtime errors."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             execution = sandbox.run_code("1 / 0")
 
             assert execution.code_error is not None
@@ -309,7 +315,7 @@ class TestLocalEvalSandbox:
 
     def test_run_code_syntax_error(self):
         """Test handling syntax errors."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             execution = sandbox.run_code("if if if")
 
             assert execution.code_error is not None
@@ -317,7 +323,7 @@ class TestLocalEvalSandbox:
 
     def test_run_code_system_exit(self):
         """Test handling sys.exit without treating it as a code error."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             execution = sandbox.run_code("import sys; sys.exit(2)")
 
             assert execution.execution_ok is True
@@ -327,7 +333,7 @@ class TestLocalEvalSandbox:
 
     def test_variable_persistence(self):
         """Test that variables persist between executions."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             sandbox.run_code("counter = 0")
             sandbox.run_code("counter += 10")
             execution = sandbox.run_code("counter")
@@ -336,7 +342,7 @@ class TestLocalEvalSandbox:
 
     def test_async_state_persistence(self):
         """Test that async locals persist between executions."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             sandbox.run_code(
                 """
 async def set_value():
@@ -352,7 +358,7 @@ value = await set_value()
 
     def test_function_definition(self):
         """Test defining and calling functions."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             sandbox.run_code("""
 def greet(name):
     return f'Hello, {name}!'
@@ -363,7 +369,7 @@ def greet(name):
 
     def test_async_code(self):
         """Test running async code."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             sandbox.run_code("""
 import asyncio
 
@@ -377,7 +383,7 @@ async def async_add(a, b):
 
     def test_async_await_direct(self):
         """Test running async code with await directly in code."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             # First define an async function
             sandbox.run_code("""
 import asyncio
@@ -386,14 +392,14 @@ async def fetch_data():
     await asyncio.sleep(0.01)
     return {"status": "success", "value": 42}
 """)
-            
+
             # Then call it with await directly (no asyncio.run wrapper)
             execution = sandbox.run_code("""
 result = await fetch_data()
 print(f"Status: {result['status']}, Value: {result['value']}")
 result
 """)
-            
+
             assert execution.success, f"Execution failed: {execution.code_error}"
             assert "Status: success, Value: 42" in execution.stdout
             # The result should be returned
@@ -402,7 +408,7 @@ result
 
     def test_async_await_with_nested_calls(self):
         """Test async code with nested await calls."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             # Define multiple async functions
             sandbox.run_code("""
 import asyncio
@@ -420,14 +426,14 @@ async def process():
     result = await multiply(num, 5)
     return result
 """)
-            
+
             # Call with await
             execution = sandbox.run_code("""
 final_result = await process()
 print(f"Final result: {final_result}")
 final_result
 """)
-            
+
             assert execution.success, f"Execution failed: {execution.code_error}"
             assert "Final result: 50" in execution.stdout
             # Check result if available
@@ -436,58 +442,59 @@ final_result
 
     def test_async_with_external_caller(self):
         """Test async code that calls external async functions stored in namespace."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             # Set up an async callable in the namespace
             async def external_async_function(name):
                 import asyncio
+
                 await asyncio.sleep(0.01)
                 return f"Hello, {name}!"
-            
+
             sandbox.set_variable("external_func", external_async_function)
-            
+
             # Call it with await
             execution = sandbox.run_code("""
 greeting = await external_func("World")
 print(greeting)
 greeting
 """)
-            
+
             assert execution.success, f"Execution failed: {execution.code_error}"
             assert "Hello, World!" in execution.stdout
-            # Check result if available  
+            # Check result if available
             if execution.results:
                 assert "Hello, World!" in execution.results[0].data.get("text/plain", "")
 
     def test_async_function_defined_in_separate_execution(self):
         """Test calling async function defined in a separate run_code call."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             # Register a tool caller function
             async def my_tool_caller(tool_name, arguments):
                 return f"Called {tool_name} with {arguments}"
 
             sandbox.register_tool_caller(my_tool_caller)
-            
+
             # Verify __call_tool__ is available
             execution1 = sandbox.run_code("""
 print(f"__call_tool__ defined: {callable(__call_tool__)}")
 """)
-            
+
             assert execution1.success, f"Execution failed: {execution1.code_error}"
             assert "defined: True" in execution1.stdout
-            
+
             # Use the function with await
             execution2 = sandbox.run_code("""
 result = await __call_tool__("test_tool", {"arg": "value"})
 print(f"Result: {result}")
 result
 """)
-            
+
             assert execution2.success, f"Execution failed: {execution2.code_error}"
             assert "Called test_tool" in execution2.stdout
 
     def test_async_stdout_capture(self):
         """Test that stdout is properly captured in async code."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             execution = sandbox.run_code("""
 import asyncio
 
@@ -500,15 +507,21 @@ async def print_messages():
 result = await print_messages()
 print(f"Result: {result}")
 """)
-            
+
             assert execution.success, f"Execution failed: {execution.code_error}"
-            assert "First message" in execution.stdout, f"Expected 'First message' in stdout, got: {execution.stdout!r}"
-            assert "Second message" in execution.stdout, f"Expected 'Second message' in stdout, got: {execution.stdout!r}"
-            assert "Result: done" in execution.stdout, f"Expected 'Result: done' in stdout, got: {execution.stdout!r}"
+            assert (
+                "First message" in execution.stdout
+            ), f"Expected 'First message' in stdout, got: {execution.stdout!r}"
+            assert (
+                "Second message" in execution.stdout
+            ), f"Expected 'Second message' in stdout, got: {execution.stdout!r}"
+            assert (
+                "Result: done" in execution.stdout
+            ), f"Expected 'Result: done' in stdout, got: {execution.stdout!r}"
 
     def test_async_stderr_capture(self):
         """Test that stderr is properly captured in async code."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             execution = sandbox.run_code("""
 import asyncio
 import sys
@@ -521,14 +534,18 @@ async def print_errors():
 
 result = await print_errors()
 """)
-            
+
             assert execution.success, f"Execution failed: {execution.code_error}"
-            assert "Error message" in execution.stderr, f"Expected 'Error message' in stderr, got: {execution.stderr!r}"
-            assert "Another error" in execution.stderr, f"Expected 'Another error' in stderr, got: {execution.stderr!r}"
+            assert (
+                "Error message" in execution.stderr
+            ), f"Expected 'Error message' in stderr, got: {execution.stderr!r}"
+            assert (
+                "Another error" in execution.stderr
+            ), f"Expected 'Another error' in stderr, got: {execution.stderr!r}"
 
     def test_async_mixed_output(self):
         """Test that both stdout and stderr are captured in async code."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             execution = sandbox.run_code("""
 import asyncio
 import sys
@@ -542,7 +559,7 @@ async def mixed_output():
 
 await mixed_output()
 """)
-            
+
             assert execution.success, f"Execution failed: {execution.code_error}"
             assert "stdout line 1" in execution.stdout
             assert "stdout line 2" in execution.stdout
@@ -551,7 +568,7 @@ await mixed_output()
 
     def test_import_modules(self):
         """Test importing standard library modules."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             sandbox.run_code("import json")
             execution = sandbox.run_code('json.dumps({"key": "value"})')
 
@@ -559,20 +576,20 @@ await mixed_output()
 
     def test_not_started_error(self):
         """Test error when running code without starting."""
-        sandbox = LocalEvalSandbox()
+        sandbox = EvalSandbox()
 
         with pytest.raises(SandboxNotStartedError):
             sandbox.run_code("1 + 1")
 
     def test_unsupported_language(self):
         """Test error for unsupported language."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             with pytest.raises(ValueError, match="only supports Python"):
                 sandbox.run_code("console.log('hello')", language="javascript")
 
     def test_multiple_contexts(self):
         """Test multiple execution contexts."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             ctx1 = sandbox.create_context("context1")
             ctx2 = sandbox.create_context("context2")
 
@@ -596,7 +613,7 @@ await mixed_output()
         def on_result(res):
             result_messages.append(res)
 
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             sandbox.run_code(
                 "print('callback test')\n42",
                 on_stdout=on_stdout,
@@ -608,7 +625,7 @@ await mixed_output()
 
     def test_environment_variables(self):
         """Test setting environment variables."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             execution = sandbox.run_code(
                 "import os; os.environ.get('TEST_VAR', 'not set')",
                 envs={"TEST_VAR": "test_value"},
@@ -620,7 +637,7 @@ await mixed_output()
     def test_network_policy_blocks_connections(self):
         """Test that network policy can block outbound connections."""
         config = SandboxConfig(network_policy="none")
-        with LocalEvalSandbox(config=config) as sandbox:
+        with EvalSandbox(config=config) as sandbox:
             execution = sandbox.run_code(
                 "import socket; socket.create_connection(('example.com', 80))"
             )
@@ -630,15 +647,15 @@ await mixed_output()
 
     def test_sandbox_id(self):
         """Test sandbox ID is assigned."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             assert sandbox.sandbox_id is not None
             assert len(sandbox.sandbox_id) > 0
 
     def test_sandbox_info(self):
         """Test sandbox info."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             assert sandbox.info is not None
-            assert sandbox.info.variant == "local-eval"
+            assert sandbox.info.variant == "eval"
             assert sandbox.info.status == "running"
 
 
@@ -646,33 +663,34 @@ await mixed_output()
 # Sandbox Factory Tests
 # =============================================================================
 
+
 class TestSandboxFactory:
     """Tests for Sandbox.create factory method."""
 
     def test_create_local_eval(self):
-        """Test creating local-eval sandbox."""
-        sandbox = Sandbox.create(variant="local-eval")
+        """Test creating eval sandbox."""
+        sandbox = Sandbox.create(variant="eval")
 
         assert sandbox is not None
-        assert isinstance(sandbox, LocalEvalSandbox)
+        assert isinstance(sandbox, EvalSandbox)
 
     def test_create_local_jupyter(self):
-        """Test creating local-jupyter sandbox."""
-        sandbox = Sandbox.create(variant=SandboxVariant.LOCAL_JUPYTER)
+        """Test creating jupyter sandbox."""
+        sandbox = Sandbox.create(variant=SandboxVariant.JUPYTER)
 
         assert sandbox is not None
-        assert isinstance(sandbox, LocalJupyterSandbox)
+        assert isinstance(sandbox, JupyterSandbox)
 
     def test_create_with_config(self):
         """Test creating sandbox with config."""
         config = SandboxConfig(timeout=120.0)
-        sandbox = Sandbox.create(variant="local-eval", config=config)
+        sandbox = Sandbox.create(variant="eval", config=config)
 
         assert sandbox.config.timeout == 120.0
 
     def test_create_with_timeout(self):
         """Test creating sandbox with timeout parameter."""
-        sandbox = Sandbox.create(variant="local-eval", timeout=90.0)
+        sandbox = Sandbox.create(variant="eval", timeout=90.0)
 
         assert sandbox.config.timeout == 90.0
 
@@ -680,7 +698,7 @@ class TestSandboxFactory:
         """Test creating sandbox with environment variables."""
         config = SandboxConfig(env_vars={"MY_VAR": "my_value"})
         sandbox = Sandbox.create(
-            variant="local-eval",
+            variant="eval",
             config=config,
         )
 
@@ -693,26 +711,27 @@ class TestSandboxFactory:
 
 
 # =============================================================================
-# Local Jupyter Sandbox Tests
+# Jupyter Sandbox Tests
 # =============================================================================
 
-class TestLocalJupyterSandbox:
-    """Tests for LocalJupyterSandbox."""
+
+class TestJupyterSandbox:
+    """Tests for JupyterSandbox."""
 
     def test_local_jupyter_persistence(self, tmp_path: Path):
-        """Test persistence across requests in local-jupyter sandbox."""
-        if os.environ.get("RUN_LOCAL_JUPYTER_TESTS") != "1":
-            pytest.skip("Set RUN_LOCAL_JUPYTER_TESTS=1 to enable local-jupyter tests")
+        """Test persistence across requests in jupyter sandbox."""
+        if os.environ.get("RUN_JUPYTER_TESTS") != "1":
+            pytest.skip("Set RUN_JUPYTER_TESTS=1 to enable jupyter tests")
         try:
             import jupyter_server  # noqa: F401
         except Exception:
             pytest.skip("jupyter_server is not available")
 
-        sandbox = LocalJupyterSandbox(config=SandboxConfig(working_dir=str(tmp_path)))
+        sandbox = JupyterSandbox(config=SandboxConfig(working_dir=str(tmp_path)))
         try:
             sandbox.start()
         except Exception as exc:
-            pytest.skip(f"local-jupyter sandbox not available: {exc}")
+            pytest.skip(f"jupyter sandbox not available: {exc}")
 
         try:
             sandbox.run_code("x = 7")
@@ -726,12 +745,13 @@ class TestLocalJupyterSandbox:
 # Integration Tests
 # =============================================================================
 
+
 class TestIntegration:
     """Integration tests for code-sandboxes."""
 
     def test_complex_computation(self):
         """Test complex computation in sandbox."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = """
 def fibonacci(n):
     if n <= 1:
@@ -749,7 +769,7 @@ result
 
     def test_data_processing(self):
         """Test data processing in sandbox."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = """
 import json
 
@@ -773,7 +793,7 @@ top_scorer = max(data, key=lambda x: x["score"])
 
     def test_file_operations(self, tmp_path: Path):
         """Test file operations in sandbox."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             # Write a file
             file_path = tmp_path / "test.txt"
             code = f"""
@@ -795,7 +815,7 @@ content
 
     def test_multiline_output(self):
         """Test multiline output."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = """
 for i in range(5):
     print(f"Line {i}")
@@ -808,7 +828,7 @@ for i in range(5):
 
     def test_exception_handling(self):
         """Test exception handling in user code."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = """
 try:
     result = 1 / 0
@@ -824,16 +844,16 @@ result
 
     def test_class_definition(self):
         """Test defining and using classes."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = """
 class Calculator:
     def __init__(self, value=0):
         self.value = value
-    
+
     def add(self, x):
         self.value += x
         return self
-    
+
     def multiply(self, x):
         self.value *= x
         return self
@@ -848,7 +868,7 @@ calc.value
 
     def test_list_comprehension(self):
         """Test list comprehensions."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = "[x**2 for x in range(10) if x % 2 == 0]"
             execution = sandbox.run_code(code)
 
@@ -856,7 +876,7 @@ calc.value
 
     def test_generator_expression(self):
         """Test generator expressions."""
-        with LocalEvalSandbox() as sandbox:
+        with EvalSandbox() as sandbox:
             code = "sum(x**2 for x in range(10))"
             execution = sandbox.run_code(code)
 

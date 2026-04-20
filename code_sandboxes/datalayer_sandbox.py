@@ -6,22 +6,24 @@
 
 This sandbox uses the Datalayer platform for cloud-based code execution,
 providing full isolation and scalable compute resources.
-
-Inspired by E2B and Modal sandbox APIs.
 """
 
 import time
 import uuid
-from typing import Any, Iterator, Optional
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any, Optional
 
-from ..base import Sandbox
-from ..exceptions import (
+if TYPE_CHECKING:
+    from .filesystem import SandboxFileHandle
+
+from .base import Sandbox
+from .exceptions import (
     SandboxConfigurationError,
     SandboxConnectionError,
     SandboxNotStartedError,
     SandboxSnapshotError,
 )
-from ..models import (
+from .models import (
     CodeError,
     Context,
     ExecutionResult,
@@ -44,19 +46,13 @@ class DatalayerSandbox(Sandbox):
     This sandbox provides full isolation, scalable compute (CPU/GPU),
     and supports snapshots for state persistence.
 
-    Inspired by E2B Code Interpreter and Modal Sandbox APIs:
-    - E2B-like: Simple creation, timeout management, file operations
-    - Modal-like: GPU support, exec, snapshots, tagging
-
     Example:
         from code_sandboxes import Sandbox
 
-        # Simple E2B-style usage
         with Sandbox.create(timeout=60) as sandbox:
             result = sandbox.run_code("print('Hello!')")
             files = sandbox.files.list("/")
 
-        # Modal-style with GPU
         with Sandbox.create(gpu="T4", environment="python-gpu-env") as sandbox:
             sandbox.run_code("import torch; print(torch.cuda.is_available())")
 
@@ -174,7 +170,7 @@ class DatalayerSandbox(Sandbox):
                 sandbox._started = True
                 sandbox._info = SandboxInfo(
                     id=sandbox._sandbox_id,
-                    variant="datalayer-runtime",
+                    variant="datalayer",
                     status=SandboxStatus.RUNNING,
                     created_at=time.time(),
                     name=runtime.name,
@@ -224,8 +220,6 @@ class DatalayerSandbox(Sandbox):
 
     def start(self) -> None:
         """Start the sandbox by creating a Datalayer runtime.
-
-        Similar to E2B's sandbox creation with timeout support.
 
         Raises:
             SandboxConfigurationError: If configuration is invalid.
@@ -301,21 +295,23 @@ class DatalayerSandbox(Sandbox):
             if self.config.gpu or self.config.cpu_limit or self.config.memory_limit:
                 resources = ResourceConfig(
                     cpu=self.config.cpu_limit,
-                    memory=self.config.memory_limit // (1024 * 1024) if self.config.memory_limit else None,
+                    memory=self.config.memory_limit // (1024 * 1024)
+                    if self.config.memory_limit
+                    else None,
                     gpu=self.config.gpu,
                 )
 
             self._info = SandboxInfo(
                 id=self._sandbox_id,
-                variant="datalayer-runtime",
+                variant="datalayer",
                 status=SandboxStatus.RUNNING,
                 created_at=self._created_at,
                 end_at=self._end_at,
                 config=self.config,
-                    metadata={
-                        "network_policy": self.config.network_policy,
-                        "allowed_hosts": self.config.allowed_hosts,
-                    },
+                metadata={
+                    "network_policy": self.config.network_policy,
+                    "allowed_hosts": self.config.allowed_hosts,
+                },
                 name=sandbox_name,
                 resources=resources,
             )
@@ -326,10 +322,7 @@ class DatalayerSandbox(Sandbox):
             raise SandboxConnectionError(url, str(e)) from e
 
     def stop(self) -> None:
-        """Stop the sandbox and release the Datalayer runtime.
-
-        Similar to E2B's kill() and Modal's terminate().
-        """
+        """Stop the sandbox and release the Datalayer runtime."""
         if not self._started:
             return
 
@@ -345,12 +338,10 @@ class DatalayerSandbox(Sandbox):
         if self._info:
             self._info.status = SandboxStatus.STOPPED
 
-    # Alias for Modal compatibility
     def terminate(self) -> None:
         """Terminate the sandbox. Alias for stop()."""
         self.stop()
 
-    # Alias for E2B compatibility
     def kill(self) -> None:
         """Kill the sandbox. Alias for stop()."""
         self.stop()
@@ -358,7 +349,7 @@ class DatalayerSandbox(Sandbox):
     def set_timeout(self, timeout_seconds: float) -> None:
         """Change the sandbox timeout during runtime.
 
-        Similar to E2B's set_timeout method. Resets the timeout to the new value.
+        Resets the timeout to the new value.
 
         Args:
             timeout_seconds: New timeout in seconds from now.
@@ -373,8 +364,6 @@ class DatalayerSandbox(Sandbox):
     def get_info(self) -> SandboxInfo:
         """Retrieve sandbox information.
 
-        Similar to E2B's getInfo() method.
-
         Returns:
             SandboxInfo object with current sandbox state.
         """
@@ -382,7 +371,7 @@ class DatalayerSandbox(Sandbox):
             return self._info
         return SandboxInfo(
             id=self._sandbox_id,
-            variant="datalayer-runtime",
+            variant="datalayer",
             status=SandboxStatus.PENDING if not self._started else SandboxStatus.RUNNING,
         )
 
@@ -452,9 +441,7 @@ class DatalayerSandbox(Sandbox):
 
         # Set environment variables if provided
         if envs:
-            env_code = "\n".join(
-                f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items()
-            )
+            env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
             self._runtime.execute(env_code)
 
         # Execute the code
@@ -525,7 +512,7 @@ class DatalayerSandbox(Sandbox):
         if hasattr(response, "error") and response.error:
             ename = response.error.get("ename", "Error")
             evalue = response.error.get("evalue", "")
-            
+
             # Handle SystemExit specially - extract exit code
             if ename == "SystemExit":
                 try:
@@ -648,7 +635,7 @@ class DatalayerSandbox(Sandbox):
     ) -> ExecutionResult:
         """Install Python packages in the runtime.
 
-        Uses pip to install packages. Similar to E2B's package installation.
+        Uses pip to install packages.
 
         Args:
             packages: List of package names to install.
@@ -691,5 +678,6 @@ class DatalayerSandbox(Sandbox):
         Returns:
             SandboxFileHandle for file operations.
         """
-        from ..filesystem import SandboxFileHandle
+        from .filesystem import SandboxFileHandle
+
         return SandboxFileHandle(self, path, mode)

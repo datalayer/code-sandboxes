@@ -17,6 +17,8 @@ from code_sandboxes.models import (
     SandboxConfig,
     SandboxInfo,
     SandboxStatus,
+)
+from code_sandboxes.models import (
     SandboxVariant as SandboxVariantEnum,
 )
 
@@ -39,10 +41,10 @@ class TestModels:
 
     def test_sandbox_variant_enum(self):
         """Test SandboxVariant enum values."""
-        assert SandboxVariantEnum.LOCAL_EVAL.value == "local-eval"
-        assert SandboxVariantEnum.LOCAL_DOCKER.value == "local-docker"
-        assert SandboxVariantEnum.LOCAL_JUPYTER.value == "local-jupyter"
-        assert SandboxVariantEnum.DATALAYER_RUNTIME.value == "datalayer-runtime"
+        assert SandboxVariantEnum.EVAL.value == "eval"
+        assert SandboxVariantEnum.DOCKER.value == "docker"
+        assert SandboxVariantEnum.JUPYTER.value == "jupyter"
+        assert SandboxVariantEnum.DATALAYER.value == "datalayer"
 
     def test_gpu_type_enum(self):
         """Test GPUType enum values."""
@@ -224,7 +226,7 @@ class TestModels:
         """Test SandboxInfo model usage."""
         info = SandboxInfo(
             id="sandbox-123",
-            variant="local-eval",
+            variant="eval",
             status=SandboxStatus.RUNNING,
             created_at=1234567890.0,
             name="test-sandbox",
@@ -233,7 +235,7 @@ class TestModels:
         )
 
         assert info.id == "sandbox-123"
-        assert info.variant == "local-eval"
+        assert info.variant == "eval"
         assert info.status == SandboxStatus.RUNNING
         assert info.created_at == 1234567890.0
         assert info.name == "test-sandbox"

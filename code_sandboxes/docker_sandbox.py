@@ -2,7 +2,7 @@
 #
 # BSD 3-Clause License
 
-"""Local Docker-based sandbox implementation.
+"""Docker-based sandbox implementation.
 
 This sandbox runs a Jupyter Server inside a Docker container and connects
 through `jupyter-kernel-client` to execute code.
@@ -13,14 +13,14 @@ from __future__ import annotations
 import os
 import tempfile
 import time
-from typing import Optional
 import uuid
+from typing import Optional
 
 import requests
 
-from ..base import Sandbox
-from ..exceptions import SandboxConfigurationError, SandboxNotStartedError
-from ..models import (
+from .base import Sandbox
+from .exceptions import SandboxConfigurationError, SandboxNotStartedError
+from .models import (
     CodeError,
     Context,
     ExecutionResult,
@@ -38,7 +38,7 @@ DEFAULT_IMAGE = "code-sandboxes-jupyter:latest"
 DEFAULT_PORT = 8888
 
 
-class LocalDockerSandbox(Sandbox):
+class DockerSandbox(Sandbox):
     """Docker container sandbox using a Jupyter Server backend."""
 
     def __init__(
@@ -74,13 +74,13 @@ class LocalDockerSandbox(Sandbox):
     def list_environments(cls) -> list[SandboxEnvironment]:
         return [
             SandboxEnvironment(
-                name="local-docker",
-                title="Local Docker (Jupyter)",
+                name="docker",
+                title="Docker (Jupyter)",
                 language="python",
                 owner="local",
                 visibility="local",
                 burning_rate=0.0,
-                metadata={"variant": "local-docker", "image": DEFAULT_IMAGE},
+                metadata={"variant": "docker", "image": DEFAULT_IMAGE},
             )
         ]
 
@@ -91,7 +91,7 @@ class LocalDockerSandbox(Sandbox):
             import docker  # type: ignore
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise SandboxConfigurationError(
-                "docker package is required for LocalDockerSandbox. "
+                "docker package is required for DockerSandbox. "
                 "Install it with: pip install code-sandboxes[docker]"
             ) from exc
         self._docker = docker.from_env()
@@ -128,7 +128,7 @@ class LocalDockerSandbox(Sandbox):
             from jupyter_kernel_client import KernelClient
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise SandboxConfigurationError(
-                "jupyter-kernel-client is required for LocalDockerSandbox. "
+                "jupyter-kernel-client is required for DockerSandbox. "
                 "Install it with: pip install code-sandboxes"
             ) from exc
 
@@ -174,7 +174,7 @@ class LocalDockerSandbox(Sandbox):
         self._default_context = self.create_context("default")
         self._info = SandboxInfo(
             id=self._sandbox_id,
-            variant="local-docker",
+            variant="docker",
             status=SandboxStatus.RUNNING,
             created_at=time.time(),
             name=self.config.name,
@@ -234,14 +234,12 @@ class LocalDockerSandbox(Sandbox):
             raise SandboxNotStartedError()
 
         if language != "python":
-            raise ValueError(f"LocalDockerSandbox only supports Python, got: {language}")
+            raise ValueError(f"DockerSandbox only supports Python, got: {language}")
 
         started_at = time.time()
 
         if envs:
-            env_code = "\n".join(
-                f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items()
-            )
+            env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
             code = f"{env_code}\n{code}"
 
         try:
@@ -290,7 +288,7 @@ class LocalDockerSandbox(Sandbox):
             elif output_type == "error":
                 ename = output.get("ename", "Error")
                 evalue = output.get("evalue", "")
-                
+
                 # Handle SystemExit specially - extract exit code
                 if ename == "SystemExit":
                     try:
@@ -323,9 +321,7 @@ class LocalDockerSandbox(Sandbox):
             raise SandboxNotStartedError()
         return self._client.get_variable(name)
 
-    def _set_internal_variable(
-        self, name: str, value, context: Optional[Context] = None
-    ) -> None:
+    def _set_internal_variable(self, name: str, value, context: Optional[Context] = None) -> None:
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
         self._client.set_variable(name, value)

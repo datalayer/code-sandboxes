@@ -2,7 +2,7 @@
 #
 # BSD 3-Clause License
 
-"""Local Jupyter-based sandbox implementation.
+"""Jupyter-based sandbox implementation.
 
 This sandbox runs a local Jupyter Server process (or connects to an existing
 one) and uses ``jupyter-kernel-client`` to execute code in a persistent kernel.
@@ -10,6 +10,7 @@ one) and uses ``jupyter-kernel-client`` to execute code in a persistent kernel.
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import socket
@@ -18,18 +19,16 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
-import uuid
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 import requests
 
-import logging
-
-from ..base import Sandbox
-from ..exceptions import SandboxConfigurationError, SandboxNotStartedError
-from ..models import (
+from .base import Sandbox
+from .exceptions import SandboxConfigurationError, SandboxNotStartedError
+from .models import (
     CodeError,
     Context,
     ExecutionResult,
@@ -50,8 +49,8 @@ DEFAULT_STARTUP_TIMEOUT = 30.0
 logger = logging.getLogger(__name__)
 
 
-class LocalJupyterSandbox(Sandbox):
-    """Local Jupyter Server sandbox using a persistent kernel."""
+class JupyterSandbox(Sandbox):
+    """Jupyter Server sandbox using a persistent kernel."""
 
     def __init__(
         self,
@@ -97,13 +96,13 @@ class LocalJupyterSandbox(Sandbox):
     def list_environments(cls) -> list[SandboxEnvironment]:
         return [
             SandboxEnvironment(
-                name="local-jupyter",
-                title="Local Jupyter",
+                name="jupyter",
+                title="Jupyter",
                 language="python",
                 owner="local",
                 visibility="local",
                 burning_rate=0.0,
-                metadata={"variant": "local-jupyter"},
+                metadata={"variant": "jupyter"},
             )
         ]
 
@@ -190,7 +189,9 @@ class LocalJupyterSandbox(Sandbox):
         caller already runs inside an async loop (e.g. uvicorn / uvloop).
         """
         cmd = [
-            sys.executable, "-m", "jupyter_server",
+            sys.executable,
+            "-m",
+            "jupyter_server",
             "--no-browser",
             f"--ServerApp.token={self._token}",
             f"--ServerApp.port={port}",
@@ -201,7 +202,9 @@ class LocalJupyterSandbox(Sandbox):
 
         logger.info(
             "Starting Jupyter server subprocess on %s:%d (workdir=%s)",
-            self._host, port, workdir,
+            self._host,
+            port,
+            workdir,
         )
 
         self._server_process = subprocess.Popen(
@@ -224,7 +227,7 @@ class LocalJupyterSandbox(Sandbox):
             from jupyter_server.serverapp import ServerApp
         except Exception as exc:
             raise SandboxConfigurationError(
-                "jupyter_server is required for LocalJupyterSandbox. "
+                "jupyter_server is required for JupyterSandbox. "
                 "Install it with: pip install code-sandboxes[test]"
             ) from exc
 
@@ -289,15 +292,11 @@ class LocalJupyterSandbox(Sandbox):
         try:
             from jupyter_server_client import JupyterServerClient
         except ImportError:
-            logger.debug(
-                "jupyter-server-client not available, will create a new kernel"
-            )
+            logger.debug("jupyter-server-client not available, will create a new kernel")
             return None
 
         try:
-            jsc = JupyterServerClient(
-                base_url=self._server_url, token=self._token
-            )
+            jsc = JupyterServerClient(base_url=self._server_url, token=self._token)
             kernels = jsc.kernels.list_kernels()
             if not kernels:
                 logger.info("No existing kernels found, will create a new one")
@@ -321,9 +320,7 @@ class LocalJupyterSandbox(Sandbox):
             )
             return kernels[0].id
         except Exception as e:
-            logger.warning(
-                "Failed to list existing kernels: %s, will create a new one", e
-            )
+            logger.warning("Failed to list existing kernels: %s, will create a new one", e)
             return None
 
     def start(self) -> None:
@@ -334,7 +331,7 @@ class LocalJupyterSandbox(Sandbox):
             from jupyter_kernel_client import KernelClient
         except ImportError as exc:
             raise SandboxConfigurationError(
-                "jupyter-kernel-client is required for LocalJupyterSandbox. "
+                "jupyter-kernel-client is required for JupyterSandbox. "
                 "Install it with: pip install code-sandboxes[test]"
             ) from exc
 
@@ -356,7 +353,7 @@ class LocalJupyterSandbox(Sandbox):
         self._default_context = self.create_context("default")
         self._info = SandboxInfo(
             id=self._sandbox_id,
-            variant="local-jupyter",
+            variant="jupyter",
             status=SandboxStatus.RUNNING,
             created_at=time.time(),
             name=self.config.name,
@@ -433,7 +430,7 @@ class LocalJupyterSandbox(Sandbox):
             return False
         try:
             # KernelClient exposes the kernel ID as the `.id` property
-            kernel_id = getattr(self._client, 'id', None)
+            kernel_id = getattr(self._client, "id", None)
             if kernel_id:
                 resp = requests.post(
                     f"{self._server_url}/api/kernels/{kernel_id}/interrupt",
@@ -462,7 +459,7 @@ class LocalJupyterSandbox(Sandbox):
             raise SandboxNotStartedError()
 
         if language != "python":
-            raise ValueError(f"LocalJupyterSandbox only supports Python, got: {language}")
+            raise ValueError(f"JupyterSandbox only supports Python, got: {language}")
 
         started_at = time.time()
 
@@ -471,9 +468,7 @@ class LocalJupyterSandbox(Sandbox):
         self._executing_event.set()
 
         if envs:
-            env_code = "\n".join(
-                f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items()
-            )
+            env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
             code = f"{env_code}\n{code}"
 
         try:
@@ -494,7 +489,9 @@ class LocalJupyterSandbox(Sandbox):
                     name="KeyboardInterrupt",
                     value="Execution was interrupted",
                     traceback="",
-                ) if was_interrupted else None,
+                )
+                if was_interrupted
+                else None,
             )
 
         stdout_messages: list[OutputMessage] = []
@@ -531,7 +528,7 @@ class LocalJupyterSandbox(Sandbox):
             elif output_type == "error":
                 ename = output.get("ename", "Error")
                 evalue = output.get("evalue", "")
-                
+
                 # Handle SystemExit specially - extract exit code
                 if ename == "SystemExit":
                     try:
@@ -570,9 +567,7 @@ class LocalJupyterSandbox(Sandbox):
             raise SandboxNotStartedError()
         return self._client.get_variable(name)
 
-    def _set_internal_variable(
-        self, name: str, value, context: Optional[Context] = None
-    ) -> None:
+    def _set_internal_variable(self, name: str, value, context: Optional[Context] = None) -> None:
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
         self._client.set_variable(name, value)

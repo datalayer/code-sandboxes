@@ -11,25 +11,28 @@ A sandbox is an isolated environment where code can be executed safely. Code San
 
 Use `Sandbox.create()` to create a new sandbox:
 
+Canonical variant names are `eval`, `docker`, `jupyter`, and `datalayer`.
+Older `local-*` names are no longer supported.
+
 ```python
 from code_sandboxes import Sandbox
 
-# Create with defaults (local-eval variant)
+# Create with defaults (datalayer variant)
 sandbox = Sandbox.create()
 
 # Create with specific variant
-sandbox = Sandbox.create(variant="datalayer-runtime")
+sandbox = Sandbox.create(variant="datalayer")
 
 # Create with timeout and environment
 sandbox = Sandbox.create(
-    variant="datalayer-runtime",
+    variant="datalayer",
     timeout=300,
     environment="python-cpu-env",
 )
 
 # Create with GPU support
 sandbox = Sandbox.create(
-    variant="datalayer-runtime",
+    variant="datalayer",
     gpu="T4",
     cpu=4.0,
     memory=8192,
@@ -37,35 +40,44 @@ sandbox = Sandbox.create(
 
 # Create with network policy
 sandbox = Sandbox.create(
-    variant="local-eval",
+    variant="eval",
     network_policy="none",  # block all outbound connections
 )
 ```
 
 ## Sandbox Variants
 
+Concrete implementations are available from top-level modules:
+
+```python
+from code_sandboxes.eval_sandbox import EvalSandbox
+from code_sandboxes.jupyter_sandbox import JupyterSandbox
+from code_sandboxes.docker_sandbox import DockerSandbox
+from code_sandboxes.datalayer_sandbox import DatalayerSandbox
+```
+
 Code Sandboxes provides two categories of execution backends:
 
-### Local Sandboxes
+### Sandboxes
 
-Local sandboxes execute code in-process, sharing memory with the host Python process.
+sandboxes execute code in-process, sharing memory with the host Python process.
 
-#### local-eval
+#### eval
 
 Uses Python's `exec()` for code execution. No isolation, but fast and simple for development.
 
 ```python
-with Sandbox.create(variant="local-eval") as sandbox:
+with Sandbox.create(variant="eval") as sandbox:
     result = sandbox.run_code("x = 1 + 1")
     result = sandbox.run_code("print(x)")  # prints 2
 ```
 
 ### Remote Sandboxes
 
-Remote sandboxes execute code out-of-process via the Jupyter kernel protocol, providing 
+Remote sandboxes execute code out-of-process via the Jupyter kernel protocol, providing
 better isolation and persistent kernel state.
 
-#### local-docker
+#### docker
 
 Runs code in a Docker container for local isolated execution.
 
@@ -73,17 +85,17 @@ This variant runs a Jupyter Server inside the container and connects using
 `jupyter-kernel-client`.
 
 ```python
-with Sandbox.create(variant="local-docker", image="code-sandboxes-jupyter:latest") as sandbox:
+with Sandbox.create(variant="docker", image="code-sandboxes-jupyter:latest") as sandbox:
     result = sandbox.run_code("import sys; print(sys.version)")
 ```
 
-Build the default image used by `LocalDockerSandbox`:
+Build the default image used by `DockerSandbox`:
 
 ```bash
 docker build -t code-sandboxes-jupyter:latest -f docker/Dockerfile .
 ```
 
-#### local-jupyter
+#### jupyter
 
 Runs code against a local Jupyter Server and connects using `jupyter-kernel-client`.
 This variant provides process isolation via the Jupyter kernel and persistent
@@ -92,19 +104,19 @@ state across requests.
 Requirements: `jupyter_server` and `jupyter-kernel-client`.
 
 ```python
-with Sandbox.create(variant="local-jupyter") as sandbox:
+with Sandbox.create(variant="jupyter") as sandbox:
     sandbox.run_code("x = 40")
     result = sandbox.run_code("x + 2")
     print(result.text)  # 42
 ```
 
-#### datalayer-runtime
+#### datalayer
 
 Cloud-based execution with full isolation, GPU support, and persistence.
 
 ```python
 with Sandbox.create(
-    variant="datalayer-runtime",
+    variant="datalayer",
     gpu="A100",
     environment="python-gpu-env",
 ) as sandbox:
@@ -118,14 +130,14 @@ List available environments for a sandbox variant and pick one when creating a s
 ```python
 from code_sandboxes import Sandbox
 
-environments = Sandbox.list_environments(variant="datalayer-runtime")
+environments = Sandbox.list_environments(variant="datalayer")
 for env in environments:
     print(f"{env.name}: {env.title}")
 
 # Select the first environment
 if environments:
     sandbox = Sandbox.create(
-        variant="datalayer-runtime",
+        variant="datalayer",
         environment=environments[0].name,
     )
     sandbox.start()
@@ -141,7 +153,7 @@ with Sandbox.create() as sandbox:
     # Simple execution
     result = sandbox.run_code("print('hello')")
     print(result.stdout)  # "hello"
-    
+
     # Check success
     if result.success:
         print("Code executed successfully")
@@ -162,11 +174,11 @@ x * 2
 ## Async Execution
 
 Use `await` directly in `run_code()` when the sandbox supports async execution
-(local-eval, local-jupyter, and datalayer-runtime). The last expression is
+(eval, jupyter, and datalayer). The last expression is
 returned in `results` just like sync code.
 
 ```python
-with Sandbox.create(variant="local-eval") as sandbox:
+with Sandbox.create(variant="eval") as sandbox:
     result = sandbox.run_code("""
 import asyncio
 
@@ -221,17 +233,17 @@ Access files within the sandbox:
 with Sandbox.create() as sandbox:
     # Write files
     sandbox.files.write("/data/test.txt", "Hello World")
-    
+
     # Read files
     content = sandbox.files.read("/data/test.txt")
-    
+
     # List directory
     for f in sandbox.files.list("/data"):
         print(f"{f.name} ({f.size} bytes)")
-    
+
     # Create directories
     sandbox.files.mkdir("/data/subdir")
-    
+
     # Upload/download
     sandbox.files.upload("local.txt", "/remote/file.txt")
     sandbox.files.download("/remote/file.txt", "downloaded.txt")
@@ -246,12 +258,12 @@ with Sandbox.create() as sandbox:
     # Run command and wait
     result = sandbox.commands.run("ls -la /")
     print(result.stdout)
-    
+
     # Execute with streaming output
     process = sandbox.commands.exec("python", "-c", "print('hello')")
     for line in process.stdout:
         print(line, end="")
-    
+
     # Install system packages
     sandbox.commands.install_system_packages(["curl", "wget"])
 ```
@@ -262,7 +274,7 @@ with Sandbox.create() as sandbox:
 
 ```python
 # Get sandbox ID for later
-sandbox = Sandbox.create(variant="datalayer-runtime")
+sandbox = Sandbox.create(variant="datalayer")
 sandbox_id = sandbox.sandbox_id
 sandbox.start()
 
@@ -275,7 +287,7 @@ result = sandbox.run_code("print('Still running!')")
 
 ```python
 # List all sandboxes
-sandboxes = Sandbox.list(variant="datalayer-runtime")
+sandboxes = Sandbox.list(variant="datalayer")
 for info in sandboxes:
     print(f"{info.sandbox_id}: {info.status}")
 ```
@@ -299,21 +311,21 @@ with Sandbox.create() as sandbox:
 
 ## Snapshots
 
-Save and restore sandbox state (datalayer-runtime only):
+Save and restore sandbox state (datalayer only):
 
 ```python
-with Sandbox.create(variant="datalayer-runtime") as sandbox:
+with Sandbox.create(variant="datalayer") as sandbox:
     # Set up environment
     sandbox.run_code("import pandas as pd")
     sandbox.run_code("df = pd.DataFrame({'a': [1,2,3]})")
-    
+
     # Create snapshot
     snapshot = sandbox.create_snapshot("my-setup")
     print(f"Snapshot: {snapshot.id}")
 
 # Later: restore from snapshot
 with Sandbox.create(
-    variant="datalayer-runtime",
+    variant="datalayer",
     snapshot_name="my-setup"
 ) as sandbox:
     result = sandbox.run_code("print(df)")  # State restored
