@@ -52,6 +52,7 @@ Style usage:
 """
 
 from .base import Sandbox
+from .client import CodeExecutionOutcome, CodeSandboxClient
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .datalayer_sandbox import DatalayerSandbox
 from .docker_sandbox import DockerSandbox
@@ -102,6 +103,8 @@ from .models import (
 __all__ = [
     # Models
     "CodeError",
+    "CodeExecutionOutcome",
+    "CodeSandboxClient",
     "CommandResult",
     "Context",
     "ContextNotFoundError",
