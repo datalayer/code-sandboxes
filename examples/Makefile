@@ -22,7 +22,12 @@ colab:
 	$(PYTHON) colab_sandbox_example.py
 
 modal:
-	$(PYTHON) modal_sandbox_example.py
+	@if [ -n "$$MODAL_GPU" ]; then \
+		echo "Running modal example with GPU flavor: $$MODAL_GPU"; \
+		$(PYTHON) modal_sandbox_example.py --gpu "$$MODAL_GPU"; \
+	else \
+		$(PYTHON) modal_sandbox_example.py; \
+	fi
 
 modal-gpu:
 	@echo "Preparing Modal GPU sandbox run..."
