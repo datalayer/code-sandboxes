@@ -143,3 +143,63 @@ def test_modal_start_uses_supported_default_python_version(monkeypatch):
     assert sandbox.is_started is True
 
     sandbox.stop()
+
+
+def test_modal_start_forwards_gpu_flavor(monkeypatch):
+    """Configured GPU flavor should be propagated to Modal Sandbox.create."""
+
+    class _FakeImage:
+        def pip_install(self, *_args):
+            return self
+
+    class _FakeApp:
+        pass
+
+    class _FakeSandboxObj:
+        object_id = "modal-object-id"
+
+        def terminate(self):
+            return None
+
+        def detach(self):
+            return None
+
+    captured: dict = {}
+
+    class _FakeModal:
+        class App:
+            @staticmethod
+            def lookup(_name, create_if_missing=False):
+                assert create_if_missing is True
+                return _FakeApp()
+
+        class Image:
+            @staticmethod
+            def debian_slim(*, python_version):
+                captured["python_version"] = python_version
+                return _FakeImage()
+
+        class Secret:
+            @staticmethod
+            def from_dict(_values):
+                return object()
+
+        class gpu:
+            @staticmethod
+            def A100():
+                return "GPU_A100"
+
+        class Sandbox:
+            @staticmethod
+            def create(**kwargs):
+                captured["create_kwargs"] = kwargs
+                return _FakeSandboxObj()
+
+    monkeypatch.setitem(sys.modules, "modal", _FakeModal)
+
+    sandbox = ModalSandbox(config=SandboxConfig(timeout=10.0, max_lifetime=30.0, gpu="A100"))
+    sandbox.start()
+
+    assert captured["create_kwargs"]["gpu"] == "GPU_A100"
+
+    sandbox.stop()

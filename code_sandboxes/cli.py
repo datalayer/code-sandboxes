@@ -88,6 +88,7 @@ def _resolve_variant_kwargs(
     proxy_token: str | None,
     token: str | None,
     run_url: str | None,
+    gpu: str | None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
 
@@ -109,6 +110,9 @@ def _resolve_variant_kwargs(
         if run_url:
             kwargs["run_url"] = run_url
 
+    if variant in {"modal", "datalayer"} and gpu:
+        kwargs["gpu"] = gpu
+
     return kwargs
 
 
@@ -121,6 +125,7 @@ def _run_repl(
     proxy_token: str | None = None,
     token: str | None = None,
     run_url: str | None = None,
+    gpu: str | None = None,
 ) -> None:
     selected_variant = _resolve_variant(variant)
     sandbox_kwargs = _resolve_variant_kwargs(
@@ -130,6 +135,7 @@ def _run_repl(
         proxy_token=proxy_token,
         token=token,
         run_url=run_url,
+        gpu=gpu,
     )
 
     typer.secho(f"Starting sandbox variant: {selected_variant}", fg=typer.colors.CYAN)
@@ -198,6 +204,11 @@ def repl(
     proxy_token: str | None = typer.Option(None, help="Colab runtime proxy token."),
     token: str | None = typer.Option(None, help="Datalayer API token override."),
     run_url: str | None = typer.Option(None, help="Datalayer run URL override."),
+    gpu: str | None = typer.Option(
+        None,
+        "--gpu",
+        help="GPU flavor for supported variants (e.g., modal/datalayer: T4, A10G, A100, H100).",
+    ),
 ) -> None:
     """Launch an interactive REPL against the selected sandbox variant.
 
@@ -212,6 +223,7 @@ def repl(
         proxy_token=proxy_token,
         token=token,
         run_url=run_url,
+        gpu=gpu,
     )
 
 

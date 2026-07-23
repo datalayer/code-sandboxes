@@ -87,3 +87,24 @@ def test_root_defaults_to_jupyter_repl(monkeypatch):
     assert result.exit_code == 0
     assert captured["kwargs"]["variant"] == "jupyter"
     assert captured["kwargs"]["port"] == 0
+
+
+def test_repl_modal_gpu_is_forwarded(monkeypatch):
+    runner = CliRunner()
+    captured: dict = {}
+
+    def _fake_create(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return _FakeSandbox()
+
+    monkeypatch.setattr(sandbox_cli.Sandbox, "create", staticmethod(_fake_create))
+
+    result = runner.invoke(
+        sandbox_cli.app,
+        ["repl", "--variant", "modal", "--gpu", "A100"],
+        input=":exit\n",
+    )
+
+    assert result.exit_code == 0
+    assert captured["kwargs"]["variant"] == "modal"
+    assert captured["kwargs"]["gpu"] == "A100"

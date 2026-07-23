@@ -44,6 +44,42 @@ DEFAULT_APP_NAME = "code-sandboxes"
 DEFAULT_MODAL_PYTHON_VERSION = "3.12"
 
 
+def _resolve_modal_gpu(gpu_flavor: str, modal_module: Any) -> Any:
+    """Resolve a GPU flavor string to a Modal GPU spec when possible.
+
+    Falls back to the raw string when no structured constructor is available.
+    """
+    flavor = gpu_flavor.strip()
+    gpu_ns = getattr(modal_module, "gpu", None)
+    if gpu_ns is None:
+        return flavor
+
+    normalized = flavor.upper().replace("_", "-")
+
+    if normalized == "A100-80GB" and hasattr(gpu_ns, "A100"):
+        try:
+            return gpu_ns.A100(size="80GB")
+        except Exception:
+            return flavor
+
+    attr_by_flavor = {
+        "T4": "T4",
+        "L4": "L4",
+        "A10G": "A10G",
+        "A100": "A100",
+        "H100": "H100",
+    }
+    attr_name = attr_by_flavor.get(normalized)
+    if not attr_name or not hasattr(gpu_ns, attr_name):
+        return flavor
+
+    candidate = getattr(gpu_ns, attr_name)
+    try:
+        return candidate()
+    except TypeError:
+        return candidate
+
+
 def _modal_exec_timeout_seconds(timeout: float | None, default: float) -> int:
     """Return a Modal-compatible timeout in integer seconds."""
     value = timeout if timeout is not None else default
@@ -126,6 +162,8 @@ class ModalSandbox(Sandbox):
             "image": image,
             "timeout": int(self.config.max_lifetime),
         }
+        if self.config.gpu:
+            create_kwargs["gpu"] = _resolve_modal_gpu(self.config.gpu, modal)
         if secrets:
             create_kwargs["secrets"] = secrets
 
