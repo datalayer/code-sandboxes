@@ -164,6 +164,13 @@ def test_modal_start_forwards_gpu_flavor(monkeypatch):
         def detach(self):
             return None
 
+    class _FakeGpu:
+        @staticmethod
+        def a100():
+            return "GPU_A100"
+
+    _FakeGpu.A100 = staticmethod(_FakeGpu.a100)
+
     captured: dict = {}
 
     class _FakeModal:
@@ -184,16 +191,13 @@ def test_modal_start_forwards_gpu_flavor(monkeypatch):
             def from_dict(_values):
                 return object()
 
-        class gpu:
-            @staticmethod
-            def A100():
-                return "GPU_A100"
-
         class Sandbox:
             @staticmethod
             def create(**kwargs):
                 captured["create_kwargs"] = kwargs
                 return _FakeSandboxObj()
+
+    _FakeModal.gpu = _FakeGpu
 
     monkeypatch.setitem(sys.modules, "modal", _FakeModal)
 
