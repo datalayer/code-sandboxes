@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import click
 import typer
 
 from . import Sandbox
@@ -71,7 +70,6 @@ def _resolve_variant(variant: str | None) -> str:
             "Sandbox variant",
             default="jupyter",
             show_default=True,
-            type=click.Choice(sorted(_SUPPORTED_REPL_VARIANTS), case_sensitive=False),
         )
         selected = selected.strip().lower()
 
