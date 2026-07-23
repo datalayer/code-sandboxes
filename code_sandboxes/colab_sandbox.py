@@ -67,9 +67,7 @@ class ColabSandbox(Sandbox):
         self._kernel_id = kernel_id or extras.get("kernel_id")
         self._proxy_token = proxy_token or extras.get("proxy_token")
         self._client_agent = client_agent
-        self._use_browser_bridge = use_browser_bridge or bool(
-            extras.get("use_browser_bridge")
-        )
+        self._use_browser_bridge = use_browser_bridge or bool(extras.get("use_browser_bridge"))
         self._bridge_timeout = bridge_timeout
         self._client = None
         self._sandbox_id = str(uuid.uuid4())
@@ -95,9 +93,7 @@ class ColabSandbox(Sandbox):
 
         # Obtain the runtime details from an authenticated browser session when
         # they were not supplied and the browser bridge is enabled.
-        if self._use_browser_bridge and (
-            not self._server_url or not self._proxy_token
-        ):
+        if self._use_browser_bridge and (not self._server_url or not self._proxy_token):
             self._acquire_via_browser_bridge()
 
         if not self._server_url or not self._proxy_token:

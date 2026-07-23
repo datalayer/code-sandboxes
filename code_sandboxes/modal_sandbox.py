@@ -16,8 +16,8 @@ captured; only stdout/stderr text and the process exit code are returned.
 
 from __future__ import annotations
 
-import math
 import logging
+import math
 import time
 import uuid
 from typing import Any
