@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 from .base import Sandbox
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
@@ -56,10 +56,10 @@ class ModalSandbox(Sandbox):
 
     def __init__(
         self,
-        config: Optional[SandboxConfig] = None,
+        config: SandboxConfig | None = None,
         app_name: str = DEFAULT_APP_NAME,
-        image: Optional[Any] = None,
-        pip_packages: Optional[list[str]] = None,
+        image: Any | None = None,
+        pip_packages: list[str] | None = None,
         python_executable: str = "python",
         **kwargs,
     ):
@@ -143,28 +143,28 @@ class ModalSandbox(Sandbox):
             try:
                 self._sandbox.terminate()
             except Exception:
-                pass
+                logger.debug("Ignoring error while terminating Modal sandbox", exc_info=True)
             try:
                 self._sandbox.detach()
             except Exception:
-                pass
+                logger.debug("Ignoring error while detaching Modal sandbox", exc_info=True)
             self._sandbox = None
         self._app = None
         self._started = False
         if self._info:
             self._info.status = SandboxStatus.STOPPED
 
-    def run_code(
+    def run_code(  # noqa: C901
         self,
         code: str,
         language: str = "python",
-        context: Optional[Context] = None,
-        on_stdout: Optional[OutputHandler[OutputMessage]] = None,
-        on_stderr: Optional[OutputHandler[OutputMessage]] = None,
-        on_result: Optional[OutputHandler[Result]] = None,
-        on_error: Optional[OutputHandler[CodeError]] = None,
-        envs: Optional[dict[str, str]] = None,
-        timeout: Optional[float] = None,
+        context: Context | None = None,
+        on_stdout: OutputHandler[OutputMessage] | None = None,
+        on_stderr: OutputHandler[OutputMessage] | None = None,
+        on_result: OutputHandler[Result] | None = None,
+        on_error: OutputHandler[CodeError] | None = None,
+        envs: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> ExecutionResult:
         if not self._started or self._sandbox is None:
             raise SandboxNotStartedError()
@@ -181,14 +181,14 @@ class ModalSandbox(Sandbox):
 
         stdout_messages: list[OutputMessage] = []
         stderr_messages: list[OutputMessage] = []
-        code_error: Optional[CodeError] = None
+        code_error: CodeError | None = None
 
         try:
             process = self._sandbox.exec(
                 self._python_executable,
                 "-c",
                 code,
-                timeout=int(timeout or self.config.timeout),
+                timeout=timeout or self.config.timeout,
             )
             stdout_text = process.stdout.read()
             stderr_text = process.stderr.read()
@@ -215,7 +215,7 @@ class ModalSandbox(Sandbox):
             if on_stderr:
                 on_stderr(msg)
 
-        exit_code = returncode
+        exit_code: int | None = None
         # A non-zero return code with stderr output indicates the user code
         # raised an exception. Surface it as a code error.
         if returncode not in (0, None) and stderr_text:
@@ -225,6 +225,8 @@ class ModalSandbox(Sandbox):
             code_error = CodeError(name=name, value=value, traceback=stderr_text)
             if on_error:
                 on_error(code_error)
+        elif returncode not in (0, None):
+            exit_code = int(returncode)
 
         return ExecutionResult(
             results=[],
@@ -239,16 +241,16 @@ class ModalSandbox(Sandbox):
         )
 
     def _do_interrupt(self) -> bool:
-        """Modal does not expose fine-grained interrupts; terminate the process."""
+        """Modal does not support interrupts."""
         return False
 
-    def _get_internal_variable(self, name: str, context: Optional[Context] = None):
+    def _get_internal_variable(self, name: str, context: Context | None = None):
         raise NotImplementedError(
             "ModalSandbox executes each snippet in a fresh process and does not "
             "support cross-call variable access."
         )
 
-    def _set_internal_variable(self, name: str, value, context: Optional[Context] = None) -> None:
+    def _set_internal_variable(self, name: str, value, context: Context | None = None) -> None:
         raise NotImplementedError(
             "ModalSandbox executes each snippet in a fresh process and does not "
             "support cross-call variable access."

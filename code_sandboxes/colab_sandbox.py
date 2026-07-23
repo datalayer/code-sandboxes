@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Optional
 
 from .base import Sandbox
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
@@ -52,10 +51,10 @@ class ColabSandbox(Sandbox):
 
     def __init__(
         self,
-        config: Optional[SandboxConfig] = None,
-        server_url: Optional[str] = None,
-        kernel_id: Optional[str] = None,
-        proxy_token: Optional[str] = None,
+        config: SandboxConfig | None = None,
+        server_url: str | None = None,
+        kernel_id: str | None = None,
+        proxy_token: str | None = None,
         client_agent: str = "code-sandboxes",
         **kwargs,
     ):
@@ -98,7 +97,7 @@ class ColabSandbox(Sandbox):
             from jupyter_kernel_client import ColabKernelClient
         except ImportError as exc:
             raise SandboxConfigurationError(
-                "jupyter-kernel-client>=0.10 is required for ColabSandbox. "
+                "jupyter-kernel-client>=0.12.0 is required for ColabSandbox. "
                 "Install it with: pip install jupyter-kernel-client"
             ) from exc
 
@@ -134,23 +133,23 @@ class ColabSandbox(Sandbox):
                 # Do not shut down the Colab kernel; we only disconnect.
                 self._client.stop(shutdown_kernel=False)
             except Exception:
-                pass
+                logger.debug("Ignoring error while stopping Colab client", exc_info=True)
             self._client = None
         self._started = False
         if self._info:
             self._info.status = SandboxStatus.STOPPED
 
-    def run_code(
+    def run_code(  # noqa: C901
         self,
         code: str,
         language: str = "python",
-        context: Optional[Context] = None,
-        on_stdout: Optional[OutputHandler[OutputMessage]] = None,
-        on_stderr: Optional[OutputHandler[OutputMessage]] = None,
-        on_result: Optional[OutputHandler[Result]] = None,
-        on_error: Optional[OutputHandler[CodeError]] = None,
-        envs: Optional[dict[str, str]] = None,
-        timeout: Optional[float] = None,
+        context: Context | None = None,
+        on_stdout: OutputHandler[OutputMessage] | None = None,
+        on_stderr: OutputHandler[OutputMessage] | None = None,
+        on_result: OutputHandler[Result] | None = None,
+        on_error: OutputHandler[CodeError] | None = None,
+        envs: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> ExecutionResult:
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
@@ -173,7 +172,7 @@ class ColabSandbox(Sandbox):
             was_interrupted = self._interrupt_requested.is_set()
             self._interrupt_requested.clear()
             return ExecutionResult(
-                execution_ok=not was_interrupted,
+                execution_ok=False,
                 execution_error=f"Failed to execute code: {e}" if not was_interrupted else None,
                 started_at=started_at,
                 completed_at=time.time(),
@@ -184,8 +183,8 @@ class ColabSandbox(Sandbox):
         stdout_messages: list[OutputMessage] = []
         stderr_messages: list[OutputMessage] = []
         results: list[Result] = []
-        code_error: Optional[CodeError] = None
-        exit_code: Optional[int] = None
+        code_error: CodeError | None = None
+        exit_code: int | None = None
 
         current_time = time.time()
         for output in reply.get("outputs", []):
@@ -246,12 +245,12 @@ class ColabSandbox(Sandbox):
             interrupted=was_interrupted,
         )
 
-    def _get_internal_variable(self, name: str, context: Optional[Context] = None):
+    def _get_internal_variable(self, name: str, context: Context | None = None):
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
         return self._client.get_variable(name)
 
-    def _set_internal_variable(self, name: str, value, context: Optional[Context] = None) -> None:
+    def _set_internal_variable(self, name: str, value, context: Context | None = None) -> None:
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
         self._client.set_variable(name, value)

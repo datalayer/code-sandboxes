@@ -29,15 +29,15 @@ Seven variants are available. Canonical variant names are `jupyter`, `docker`,
 `eval`, `monty`, `colab`, `modal`, and `datalayer`. The older `local-*` names
 are no longer supported.
 
-| Variant     | Isolation                    | Use Case                          |
-| ----------- | ---------------------------- | --------------------------------- |
-| `jupyter`   | Process (Jupyter kernel)     | Persistent state, local/remote    |
-| `docker`    | Container (Jupyter Server)   | Local isolated execution          |
-| `eval`      | None (Python exec)           | Development, testing              |
-| `monty`     | In-process secure interpreter | Fast, safe LLM snippets           |
-| `colab`     | Google Colab runtime         | Free hosted GPU/CPU kernels        |
-| `modal`     | Modal cloud container        | On-demand isolated cloud compute   |
-| `datalayer` | Cloud VM                     | Production, GPU workloads          |
+| Variant     | Isolation                     | Use Case                         |
+| ----------- | ----------------------------- | -------------------------------- |
+| `jupyter`   | Process (Jupyter kernel)      | Persistent state, local/remote   |
+| `docker`    | Container (Jupyter Server)    | Local isolated execution         |
+| `eval`      | None (Python exec)            | Development, testing             |
+| `monty`     | In-process secure interpreter | Fast, safe LLM snippets          |
+| `colab`     | Google Colab runtime          | Free hosted GPU/CPU kernels      |
+| `modal`     | Modal cloud container         | On-demand isolated cloud compute |
+| `datalayer` | Cloud VM                      | Production, GPU workloads        |
 
 See [Backend Setup Guides](#backend-setup-guides) below for per-variant
 installation, credentials, and usage.
@@ -236,28 +236,28 @@ pip install code-sandboxes
 
 **Parameters:**
 
-| Parameter | Description |
-| --------- | ----------- |
-| `server_url` | Jupyter Server URL (default: an auto-started local server) |
-| `token` | Jupyter Server authentication token |
-| `host` / `port` | Bind address when the sandbox starts its own server |
-| `python_executable` | Interpreter used to launch the managed server |
+| Parameter           | Description                                                |
+| ------------------- | ---------------------------------------------------------- |
+| `server_url`        | Jupyter Server URL (default: an auto-started local server) |
+| `token`             | Jupyter Server authentication token                        |
+| `host` / `port`     | Bind address when the sandbox starts its own server        |
+| `python_executable` | Interpreter used to launch the managed server              |
 
 **How to obtain the `token`:**
 
 - If you start the server yourself, you choose the token:
-    ```bash
-    jupyter server --port 8888 --IdentityProvider.token MY_TOKEN
-    ```
+  ```bash
+  jupyter server --port 8888 --IdentityProvider.token MY_TOKEN
+  ```
 - For an already-running server, print the URL + token with:
-    ```bash
-    jupyter server list
-    # http://localhost:8888/?token=abcd1234...  :: /home/you/notebooks
-    ```
-    The `token=...` query value is your token. You can also pass the full URL as
-    `server_url` (the `?token=...` is parsed automatically).
+  ```bash
+  jupyter server list
+  # http://localhost:8888/?token=abcd1234...  :: /home/you/notebooks
+  ```
+  The `token=...` query value is your token. You can also pass the full URL as
+  `server_url` (the `?token=...` is parsed automatically).
 - If you omit `server_url` entirely, `JupyterSandbox` **starts and manages its own
-    local Jupyter Server** and generates the token for you — no configuration needed.
+  local Jupyter Server** and generates the token for you — no configuration needed.
 
 **Usage:**
 
@@ -305,13 +305,13 @@ docker build -t code-sandboxes-jupyter:latest -f docker/Dockerfile .
 **Parameters** (no external credentials — the kernel `token` is generated
 automatically):
 
-| Parameter | Description |
-| --------- | ----------- |
-| `image` | Container image to run (default `code-sandboxes-jupyter:latest`) |
-| `container_name` | Optional fixed container name |
-| `host` / `container_port` | Where the in-container server is exposed |
-| `auto_remove` | Remove the container on stop (default `True`) |
-| `workdir` | Host working directory to mount |
+| Parameter                 | Description                                                      |
+| ------------------------- | ---------------------------------------------------------------- |
+| `image`                   | Container image to run (default `code-sandboxes-jupyter:latest`) |
+| `container_name`          | Optional fixed container name                                    |
+| `host` / `container_port` | Where the in-container server is exposed                         |
+| `auto_remove`             | Remove the container on stop (default `True`)                    |
+| `workdir`                 | Host working directory to mount                                  |
 
 **Usage:**
 
@@ -369,12 +369,12 @@ pip install code-sandboxes[monty]
 **Credentials / parameters:** none required (fully local, in-process). Optional
 constructor parameters on `MontySandbox`:
 
-| Parameter | How to obtain / when to use |
-| --------- | --------------------------- |
-| `type_check` | Set `True` to type-check code before running it |
-| `type_check_stubs` | Provide type stub definitions when `type_check` is enabled |
+| Parameter            | How to obtain / when to use                                 |
+| -------------------- | ----------------------------------------------------------- |
+| `type_check`         | Set `True` to type-check code before running it             |
+| `type_check_stubs`   | Provide type stub definitions when `type_check` is enabled  |
 | `external_functions` | Dict of `{name: callable}` host functions the code may call |
-| `limits` | Monty `ResourceLimits` mapping (memory, stack depth, time) |
+| `limits`             | Monty `ResourceLimits` mapping (memory, stack depth, time)  |
 
 **Usage:**
 
@@ -413,10 +413,10 @@ pip install code-sandboxes[colab]
 
 **Parameters:**
 
-| Parameter | Description |
-| --------- | ----------- |
-| `server_url` | The Colab runtime proxy/tunnel URL |
-| `kernel_id` | The assigned kernel identifier |
+| Parameter     | Description                           |
+| ------------- | ------------------------------------- |
+| `server_url`  | The Colab runtime proxy/tunnel URL    |
+| `kernel_id`   | The assigned kernel identifier        |
 | `proxy_token` | The `colab-runtime-proxy-token` value |
 
 **How to obtain these values** — they are the pieces of the WebSocket URL that
@@ -430,9 +430,9 @@ Read them from your browser's developer tools:
 
 1. Open your notebook on [colab.research.google.com](https://colab.research.google.com)
    and **connect to a runtime** (*Runtime → Connect*, or run any cell).
-2. Open DevTools (`F12`) → **Network** tab, select the **WS** filter (or type
+1. Open DevTools (`F12`) → **Network** tab, select the **WS** filter (or type
    `kernels`), then run a cell to trigger kernel traffic.
-3. Click the `.../api/kernels/<kernel_id>/channels?...` request and read off:
+1. Click the `.../api/kernels/<kernel_id>/channels?...` request and read off:
    - **`server_url`** — scheme + host *before* `/api/kernels` (change `wss://` to
      `https://`). Colab assigns a per-session host such as
      `https://8080-m-s-kkb-...-d.us-east1-0.prod.colab.dev`; there is usually **no**
@@ -477,17 +477,20 @@ pip install code-sandboxes[modal]
 **How to obtain Modal credentials:**
 
 1. Create a free account at [modal.com](https://modal.com).
-2. Authenticate the CLI — this opens a browser and writes credentials to
+
+1. Authenticate the CLI — this opens a browser and writes credentials to
    `~/.modal.toml`:
+
    ```bash
    modal token new
    ```
-3. Alternatively, create a token in the Modal dashboard
+
+1. Alternatively, create a token in the Modal dashboard
    (**Settings → API Tokens**) and export it as environment variables:
 
-   | Environment variable | Description |
-   | -------------------- | ----------- |
-   | `MODAL_TOKEN_ID` | Modal token id (starts with `ak-`) |
+   | Environment variable | Description                            |
+   | -------------------- | -------------------------------------- |
+   | `MODAL_TOKEN_ID`     | Modal token id (starts with `ak-`)     |
    | `MODAL_TOKEN_SECRET` | Modal token secret (starts with `as-`) |
 
 **Parameters:** `app_name`, `image` (a prebuilt `modal.Image`), `pip_packages`
@@ -513,7 +516,8 @@ with Sandbox.create(
 ### 7. Datalayer
 
 Cloud-based execution with full isolation, GPU support, snapshots, and
-persistence via the [Datalayer](https://datalayer.ai) runtime.
+persistence via the [Datalayer](https://datalayer.ai) runtime, powered by the
+`agent_runtimes` package.
 
 **Install:**
 
@@ -521,16 +525,21 @@ persistence via the [Datalayer](https://datalayer.ai) runtime.
 pip install code-sandboxes[datalayer]
 ```
 
+This extra installs `agent_runtimes`, which provides the runtime client used by
+the `datalayer` sandbox variant.
+
 **How to obtain Datalayer credentials:**
 
 1. Create an account at [datalayer.ai](https://datalayer.ai).
-2. Generate an API token from your account settings (**IAM → Tokens / API Keys**).
-3. Export it (or pass it as the `token` parameter):
 
-   | Environment variable | Description |
-   | -------------------- | ----------- |
-   | `DATALAYER_API_KEY` | API key for Datalayer runtime authentication |
-   | `DATALAYER_RUN_URL` | Custom Datalayer service URL (optional, for self-hosted) |
+1. Generate an API token from your account settings (**IAM → Tokens / API Keys**).
+
+1. Export it (or pass it as the `token` parameter):
+
+   | Environment variable | Description                                              |
+   | -------------------- | -------------------------------------------------------- |
+   | `DATALAYER_API_KEY`  | API key for Datalayer runtime authentication             |
+   | `DATALAYER_RUN_URL`  | Custom Datalayer service URL (optional, for self-hosted) |
 
 **Parameters:** `token` (defaults to `DATALAYER_API_KEY`), `run_url`,
 `snapshot_name`, plus creation options like `environment`, `gpu`, `cpu`, `memory`.
@@ -647,6 +656,25 @@ config = SandboxConfig(
 
 sandbox = Sandbox.create(config=config)
 ```
+
+## Testing
+
+Run the local test suite:
+
+```bash
+pytest tests/
+```
+
+Required environment variables for tests:
+
+- None for the default local suite (`eval`, factory, model, and local Jupyter tests).
+
+Optional environment variables for cloud-integration smoke tests:
+
+- `DATALAYER_API_KEY`: required only when running Datalayer runtime smoke tests.
+- `DATALAYER_RUN_URL`: optional custom Datalayer runtime URL.
+- `DATALAYER_ENVIRONMENT`: optional environment override (for example `ai-agents-env`).
+- `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`: required only if you add or run Modal integration tests.
 
 ## CI Workflows
 

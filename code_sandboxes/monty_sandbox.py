@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 from .base import Sandbox
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
@@ -60,11 +60,11 @@ class MontySandbox(Sandbox):
 
     def __init__(
         self,
-        config: Optional[SandboxConfig] = None,
+        config: SandboxConfig | None = None,
         type_check: bool = False,
-        type_check_stubs: Optional[str] = None,
-        external_functions: Optional[dict[str, Any]] = None,
-        limits: Optional[dict[str, Any]] = None,
+        type_check_stubs: str | None = None,
+        external_functions: dict[str, Any] | None = None,
+        limits: dict[str, Any] | None = None,
         **kwargs,
     ):
         super().__init__(config)
@@ -142,17 +142,17 @@ class MontySandbox(Sandbox):
             return value.decode("utf-8", errors="replace")
         return str(value)
 
-    def run_code(
+    def run_code(  # noqa: C901
         self,
         code: str,
         language: str = "python",
-        context: Optional[Context] = None,
-        on_stdout: Optional[OutputHandler[OutputMessage]] = None,
-        on_stderr: Optional[OutputHandler[OutputMessage]] = None,
-        on_result: Optional[OutputHandler[Result]] = None,
-        on_error: Optional[OutputHandler[CodeError]] = None,
-        envs: Optional[dict[str, str]] = None,
-        timeout: Optional[float] = None,
+        context: Context | None = None,
+        on_stdout: OutputHandler[OutputMessage] | None = None,
+        on_stderr: OutputHandler[OutputMessage] | None = None,
+        on_result: OutputHandler[Result] | None = None,
+        on_error: OutputHandler[CodeError] | None = None,
+        envs: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> ExecutionResult:
         if not self._started or self._repl is None:
             raise SandboxNotStartedError()
@@ -166,7 +166,7 @@ class MontySandbox(Sandbox):
         stdout_messages: list[OutputMessage] = []
         stderr_messages: list[OutputMessage] = []
         results: list[Result] = []
-        code_error: Optional[CodeError] = None
+        code_error: CodeError | None = None
 
         # Fresh collector per call so we only capture this snippet's output.
         collector = self._collect_streams()
@@ -224,12 +224,12 @@ class MontySandbox(Sandbox):
             completed_at=time.time(),
         )
 
-    def _get_internal_variable(self, name: str, context: Optional[Context] = None):
+    def _get_internal_variable(self, name: str, context: Context | None = None):
         if not self._started or self._repl is None:
             raise SandboxNotStartedError()
         return self._repl.feed_run(name)
 
-    def _set_internal_variable(self, name: str, value, context: Optional[Context] = None) -> None:
+    def _set_internal_variable(self, name: str, value, context: Context | None = None) -> None:
         if not self._started or self._repl is None:
             raise SandboxNotStartedError()
         self._repl.feed_run(f"{name} = {value!r}")

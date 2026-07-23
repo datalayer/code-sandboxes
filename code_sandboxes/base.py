@@ -10,7 +10,7 @@ import threading
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 from .commands import SandboxCommands
 from .filesystem import SandboxFilesystem
@@ -67,26 +67,26 @@ class Sandbox(ABC):
         commands: Command execution operations.
     """
 
-    def __init__(self, config: Optional[SandboxConfig] = None):
+    def __init__(self, config: SandboxConfig | None = None):
         """Initialize sandbox with configuration.
 
         Args:
             config: Sandbox configuration. Uses defaults if not provided.
         """
         self.config = config or SandboxConfig()
-        self._info: Optional[SandboxInfo] = None
+        self._info: SandboxInfo | None = None
         self._started = False
-        self._default_context: Optional[Context] = None
-        self._files: Optional[SandboxFilesystem] = None
-        self._commands: Optional[SandboxCommands] = None
+        self._default_context: Context | None = None
+        self._files: SandboxFilesystem | None = None
+        self._commands: SandboxCommands | None = None
         self._tags: dict[str, str] = {}
         self._created_at: float = 0.0
-        self._tool_caller: Optional[Any] = None  # Tool caller function for MCP tools
+        self._tool_caller: Any | None = None  # Tool caller function for MCP tools
         self._executing_event = threading.Event()  # Set while code is running
         self._interrupt_requested = threading.Event()  # Set to request interruption
 
     @property
-    def info(self) -> Optional[SandboxInfo]:
+    def info(self) -> SandboxInfo | None:
         """Get information about this sandbox."""
         return self._info
 
@@ -125,7 +125,7 @@ class Sandbox(ABC):
         return True
 
     @property
-    def sandbox_id(self) -> Optional[str]:
+    def sandbox_id(self) -> str | None:
         """Get the sandbox ID."""
         return self._info.id if self._info else None
 
@@ -171,17 +171,17 @@ class Sandbox(ABC):
     def create(
         cls,
         variant: SandboxVariant | str = SandboxVariant.DATALAYER,
-        config: Optional[SandboxConfig] = None,
-        timeout: Optional[float] = None,
-        name: Optional[str] = None,
-        environment: Optional[str] = None,
-        gpu: Optional[str] = None,
-        cpu: Optional[float] = None,
-        memory: Optional[int] = None,
-        env: Optional[dict[str, str]] = None,
-        network_policy: Optional[str] = None,
-        allowed_hosts: Optional[list[str]] = None,
-        tags: Optional[dict[str, str]] = None,
+        config: SandboxConfig | None = None,
+        timeout: float | None = None,
+        name: str | None = None,
+        environment: str | None = None,
+        gpu: str | None = None,
+        cpu: float | None = None,
+        memory: int | None = None,
+        env: dict[str, str] | None = None,
+        network_policy: str | None = None,
+        allowed_hosts: list[str] | None = None,
+        tags: dict[str, str] | None = None,
         **kwargs,
     ) -> Sandbox:
         """Factory method to create a sandbox of the specified variant.
@@ -350,7 +350,7 @@ class Sandbox(ABC):
     @classmethod
     def list(
         cls,
-        tags: Optional[dict[str, str]] = None,
+        tags: dict[str, str] | None = None,
         **kwargs,
     ) -> Iterator[Sandbox]:
         """List all running sandboxes.
@@ -416,13 +416,13 @@ class Sandbox(ABC):
         self,
         code: str,
         language: str = "python",
-        context: Optional[Context] = None,
-        on_stdout: Optional[OutputHandler[OutputMessage]] = None,
-        on_stderr: Optional[OutputHandler[OutputMessage]] = None,
-        on_result: Optional[OutputHandler[Result]] = None,
-        on_error: Optional[OutputHandler[CodeError]] = None,
-        envs: Optional[dict[str, str]] = None,
-        timeout: Optional[float] = None,
+        context: Context | None = None,
+        on_stdout: OutputHandler[OutputMessage] | None = None,
+        on_stderr: OutputHandler[OutputMessage] | None = None,
+        on_result: OutputHandler[Result] | None = None,
+        on_error: OutputHandler[CodeError] | None = None,
+        envs: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> ExecutionResult:
         """Execute code in the sandbox.
 
@@ -447,13 +447,13 @@ class Sandbox(ABC):
         self,
         code: str,
         language: str = "python",
-        context: Optional[Context] = None,
-        on_stdout: Optional[OutputHandler[OutputMessage]] = None,
-        on_stderr: Optional[OutputHandler[OutputMessage]] = None,
-        on_result: Optional[OutputHandler[Result]] = None,
-        on_error: Optional[OutputHandler[CodeError]] = None,
-        envs: Optional[dict[str, str]] = None,
-        timeout: Optional[float] = None,
+        context: Context | None = None,
+        on_stdout: OutputHandler[OutputMessage] | None = None,
+        on_stderr: OutputHandler[OutputMessage] | None = None,
+        on_result: OutputHandler[Result] | None = None,
+        on_error: OutputHandler[CodeError] | None = None,
+        envs: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> ExecutionResult:
         """Async version of run_code(). Default implementation calls sync version."""
         return self.run_code(
@@ -472,9 +472,9 @@ class Sandbox(ABC):
         self,
         code: str,
         language: str = "python",
-        context: Optional[Context] = None,
-        envs: Optional[dict[str, str]] = None,
-        timeout: Optional[float] = None,
+        context: Context | None = None,
+        envs: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> Iterator[Union[OutputMessage, Result, CodeError]]:
         """Execute code with streaming output.
 
@@ -512,9 +512,9 @@ class Sandbox(ABC):
         self,
         code: str,
         language: str = "python",
-        context: Optional[Context] = None,
-        envs: Optional[dict[str, str]] = None,
-        timeout: Optional[float] = None,
+        context: Context | None = None,
+        envs: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> AsyncIterator[Union[OutputMessage, Result, CodeError]]:
         """Async version of run_code_streaming()."""
         execution = await self.run_code_async(
@@ -537,7 +537,7 @@ class Sandbox(ABC):
         if execution.code_error:
             yield execution.code_error
 
-    def create_context(self, name: Optional[str] = None) -> Context:
+    def create_context(self, name: str | None = None) -> Context:
         """Create a new execution context.
 
         A context maintains state (variables, imports, etc.) between executions.
@@ -551,7 +551,7 @@ class Sandbox(ABC):
         context_id = name or str(uuid.uuid4())
         return Context(id=context_id, language="python", cwd=self.config.working_dir)
 
-    def get_variable(self, name: str, context: Optional[Context] = None) -> Any:
+    def get_variable(self, name: str, context: Context | None = None) -> Any:
         """Get a variable from the sandbox.
 
         Args:
@@ -576,7 +576,7 @@ class Sandbox(ABC):
             raise VariableNotFoundError(name)
         return self._get_internal_variable("__result__", context)
 
-    def set_variable(self, name: str, value: Any, context: Optional[Context] = None) -> None:
+    def set_variable(self, name: str, value: Any, context: Context | None = None) -> None:
         """Set a variable in the sandbox.
 
         Args:
@@ -586,7 +586,7 @@ class Sandbox(ABC):
         """
         self._set_internal_variable(name, value, context)
 
-    def set_variables(self, variables: dict[str, Any], context: Optional[Context] = None) -> None:
+    def set_variables(self, variables: dict[str, Any], context: Context | None = None) -> None:
         """Set multiple variables in the sandbox.
 
         Args:
@@ -628,19 +628,17 @@ class Sandbox(ABC):
             self._set_internal_variable("__call_tool__", self._tool_caller)
 
     @abstractmethod
-    def _get_internal_variable(self, name: str, context: Optional[Context] = None) -> Any:
+    def _get_internal_variable(self, name: str, context: Context | None = None) -> Any:
         """Internal method to get a variable. Must be implemented by subclasses."""
         pass
 
     @abstractmethod
-    def _set_internal_variable(
-        self, name: str, value: Any, context: Optional[Context] = None
-    ) -> None:
+    def _set_internal_variable(self, name: str, value: Any, context: Context | None = None) -> None:
         """Internal method to set a variable. Must be implemented by subclasses."""
         pass
 
     def install_packages(
-        self, packages: list[str], timeout: Optional[float] = None
+        self, packages: list[str], timeout: float | None = None
     ) -> ExecutionResult:
         """Install Python packages in the sandbox.
 

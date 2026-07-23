@@ -45,6 +45,9 @@ class TestModels:
         assert SandboxVariantEnum.DOCKER.value == "docker"
         assert SandboxVariantEnum.JUPYTER.value == "jupyter"
         assert SandboxVariantEnum.DATALAYER.value == "datalayer"
+        assert SandboxVariantEnum.COLAB.value == "colab"
+        assert SandboxVariantEnum.MONTY.value == "monty"
+        assert SandboxVariantEnum.MODAL.value == "modal"
 
     def test_gpu_type_enum(self):
         """Test GPUType enum values."""

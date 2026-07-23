@@ -87,7 +87,6 @@ from .filesystem import (
 )
 from .jupyter_sandbox import JupyterSandbox
 from .modal_sandbox import ModalSandbox
-from .monty_sandbox import MontySandbox
 from .models import (
     CodeError,
     Context,
@@ -107,6 +106,7 @@ from .models import (
     SnapshotInfo,
     TunnelInfo,
 )
+from .monty_sandbox import MontySandbox
 
 __all__ = [
     # Models

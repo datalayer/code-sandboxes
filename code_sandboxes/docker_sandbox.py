@@ -14,7 +14,6 @@ import os
 import tempfile
 import time
 import uuid
-from typing import Optional
 
 import requests
 
@@ -43,15 +42,15 @@ class DockerSandbox(Sandbox):
 
     def __init__(
         self,
-        config: Optional[SandboxConfig] = None,
-        image: Optional[str] = None,
-        token: Optional[str] = None,
+        config: SandboxConfig | None = None,
+        image: str | None = None,
+        token: str | None = None,
         host: str = "127.0.0.1",
         container_port: int = DEFAULT_PORT,
-        container_name: Optional[str] = None,
+        container_name: str | None = None,
         docker_client=None,
         auto_remove: bool = True,
-        workdir: Optional[str] = None,
+        workdir: str | None = None,
         **kwargs,
     ):
         super().__init__(config)
@@ -66,8 +65,8 @@ class DockerSandbox(Sandbox):
         self._client = None
         self._sandbox_id = str(uuid.uuid4())
         self._workdir = workdir
-        self._workdir_tmp: Optional[str] = None
-        self._server_url: Optional[str] = None
+        self._workdir_tmp: str | None = None
+        self._server_url: str | None = None
         self._extra_kwargs = kwargs
 
     @classmethod
@@ -222,13 +221,13 @@ class DockerSandbox(Sandbox):
         self,
         code: str,
         language: str = "python",
-        context: Optional[Context] = None,
-        on_stdout: Optional[OutputHandler[OutputMessage]] = None,
-        on_stderr: Optional[OutputHandler[OutputMessage]] = None,
-        on_result: Optional[OutputHandler[Result]] = None,
-        on_error: Optional[OutputHandler[CodeError]] = None,
-        envs: Optional[dict[str, str]] = None,
-        timeout: Optional[float] = None,
+        context: Context | None = None,
+        on_stdout: OutputHandler[OutputMessage] | None = None,
+        on_stderr: OutputHandler[OutputMessage] | None = None,
+        on_result: OutputHandler[Result] | None = None,
+        on_error: OutputHandler[CodeError] | None = None,
+        envs: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> ExecutionResult:
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
@@ -257,8 +256,8 @@ class DockerSandbox(Sandbox):
         stdout_messages: list[OutputMessage] = []
         stderr_messages: list[OutputMessage] = []
         results: list[Result] = []
-        code_error: Optional[CodeError] = None
-        exit_code: Optional[int] = None
+        code_error: CodeError | None = None
+        exit_code: int | None = None
 
         current_time = time.time()
         for output in reply.get("outputs", []):
@@ -316,12 +315,12 @@ class DockerSandbox(Sandbox):
             completed_at=time.time(),
         )
 
-    def _get_internal_variable(self, name: str, context: Optional[Context] = None):
+    def _get_internal_variable(self, name: str, context: Context | None = None):
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
         return self._client.get_variable(name)
 
-    def _set_internal_variable(self, name: str, value, context: Optional[Context] = None) -> None:
+    def _set_internal_variable(self, name: str, value, context: Context | None = None) -> None:
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
         self._client.set_variable(name, value)
