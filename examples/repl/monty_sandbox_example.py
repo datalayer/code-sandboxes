@@ -3,14 +3,14 @@
 
 """REPL example: monty sandbox (secure in-process interpreter)."""
 
-from code_sandboxes import Sandbox
-
 from repl_common import run_repl
+
+from code_sandboxes import Sandbox
 
 
 def main() -> None:
     try:
-        with Sandbox.create(variant="monty", timeout=30) as sandbox:
+        with Sandbox.create(variant="monty", timeout=30, name="monty1") as sandbox:
             run_repl(sandbox)
     except ModuleNotFoundError as exc:
         print("monty sandbox is not available:", exc)
