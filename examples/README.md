@@ -10,6 +10,11 @@
 
 # { } Code Sandboxes Examples
 
+This folder now contains two example sets:
+
+- `exec/`: one-shot execution examples (run a predefined script and exit).
+- `repl/`: interactive REPL examples (run ad-hoc code in a loop).
+
 Supported sandbox variants:
 
 - `jupyter`
@@ -20,9 +25,10 @@ Supported sandbox variants:
 - `modal`
 - `datalayer`
 
-Run examples from the `examples/` directory:
+Run one-shot examples from `examples/exec/`:
 
 ```bash
+cd exec
 python eval_sandbox_example.py
 python jupyter_sandbox_example.py
 python docker_sandbox_example.py
@@ -32,9 +38,23 @@ python modal_sandbox_example.py
 python datalayer_sandbox_example.py
 ```
 
-You can also run via Make targets:
+Or run one-shot examples via Make targets:
 
 ```bash
+cd exec
+make eval
+make jupyter
+make docker
+make monty
+make colab
+make modal
+make datalayer
+```
+
+Run REPL examples from `examples/repl/`:
+
+```bash
+cd repl
 make eval
 make jupyter
 make docker
