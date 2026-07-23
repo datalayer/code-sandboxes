@@ -70,3 +70,20 @@ def test_repl_colab_prompts_and_forwards_credentials(monkeypatch):
     assert captured["kwargs"]["server_url"] == "https://colab-host.example"
     assert captured["kwargs"]["kernel_id"] == "kernel-abc"
     assert captured["kwargs"]["proxy_token"] == "proxy-xyz"  # noqa: S105
+
+
+def test_root_defaults_to_jupyter_repl(monkeypatch):
+    runner = CliRunner()
+    captured: dict = {}
+
+    def _fake_create(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return _FakeSandbox()
+
+    monkeypatch.setattr(sandbox_cli.Sandbox, "create", staticmethod(_fake_create))
+
+    result = runner.invoke(sandbox_cli.app, [], input=":exit\n")
+
+    assert result.exit_code == 0
+    assert captured["kwargs"]["variant"] == "jupyter"
+    assert captured["kwargs"]["port"] == 0

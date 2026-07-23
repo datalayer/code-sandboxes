@@ -217,14 +217,15 @@ with Sandbox.create() as sandbox:
 
 ## CLI REPL
 
-`code-sandboxes` includes a Typer-based CLI that launches an interactive REPL
+`sandbox` includes a Typer-based CLI that launches an interactive REPL
 against a selected sandbox variant and always terminates created resources on exit.
+The `code-sandboxes` command remains available as an alias.
 
 ```bash
-code-sandboxes repl --variant jupyter
-code-sandboxes repl --variant monty
-code-sandboxes repl --variant modal
-code-sandboxes repl --variant colab
+sandbox repl --variant jupyter
+sandbox repl --variant monty
+sandbox repl --variant modal
+sandbox repl --variant colab
 ```
 
 If `--variant` is omitted, the CLI prompts for one.
@@ -485,6 +486,26 @@ with Sandbox.create(
     sandbox.run_code("x = 40")
     print(sandbox.run_code("x + 2").text)  # 42
 ```
+
+**Browser bridge (no manual DevTools):** instead of copying the values by hand,
+set `use_browser_bridge=True` to obtain them from an authenticated Colab browser
+session. This reuses `jupyter-kernel-client`'s browser bridge: a short-lived
+localhost WebSocket server is opened with a one-time token, a Colab page is
+launched, and the authenticated tab posts the runtime `server_url` /
+`kernel_id` / `proxy_token` back to the process. Google credentials never leave
+the browser.
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="colab", use_browser_bridge=True) as sandbox:
+    print(sandbox.run_code("print(1 + 1)").text)
+```
+
+Install the bridge extra with `pip install 'jupyter-kernel-client[bridge]'`. The
+browser side must run a cooperating page/extension/userscript that reads the
+token and port from the launch URL and sends the payload (see the
+`jupyter-kernel-client` README for the contract).
 
 ### 6. Modal
 

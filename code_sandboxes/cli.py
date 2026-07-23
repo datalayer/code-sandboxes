@@ -29,10 +29,11 @@ _SUPPORTED_REPL_VARIANTS = {
 _EXIT_COMMANDS = {":exit", ":quit", "exit", "quit"}
 
 
-@app.callback()
-def _root() -> None:
+@app.callback(invoke_without_command=True)
+def _root(ctx: typer.Context) -> None:
     """Code sandboxes CLI."""
-    return
+    if ctx.invoked_subcommand is None:
+        _run_repl(variant="jupyter")
 
 
 def _print_result(result: Any) -> None:
@@ -113,30 +114,16 @@ def _resolve_variant_kwargs(
     return kwargs
 
 
-@app.command()
-def repl(
-    variant: str | None = typer.Option(
-        None,
-        "--variant",
-        "-v",
-        help="Sandbox variant (jupyter, docker, eval, monty, colab, modal, datalayer).",
-    ),
-    timeout: float = typer.Option(60.0, help="Default code execution timeout (seconds)."),
-    environment: str | None = typer.Option(
-        None,
-        help="Sandbox environment (used by variants such as datalayer).",
-    ),
-    server_url: str | None = typer.Option(None, help="Colab runtime URL."),
-    kernel_id: str | None = typer.Option(None, help="Colab kernel ID."),
-    proxy_token: str | None = typer.Option(None, help="Colab runtime proxy token."),
-    token: str | None = typer.Option(None, help="Datalayer API token override."),
-    run_url: str | None = typer.Option(None, help="Datalayer run URL override."),
+def _run_repl(
+    variant: str | None = None,
+    timeout: float = 60.0,
+    environment: str | None = None,
+    server_url: str | None = None,
+    kernel_id: str | None = None,
+    proxy_token: str | None = None,
+    token: str | None = None,
+    run_url: str | None = None,
 ) -> None:
-    """Launch an interactive REPL against the selected sandbox variant.
-
-    The sandbox is always terminated when this command exits.
-    """
-
     selected_variant = _resolve_variant(variant)
     sandbox_kwargs = _resolve_variant_kwargs(
         selected_variant,
@@ -193,6 +180,41 @@ def repl(
         raise typer.Exit(code=1) from None
 
     typer.secho("Sandbox terminated.", fg=typer.colors.GREEN)
+
+
+@app.command()
+def repl(
+    variant: str | None = typer.Option(
+        None,
+        "--variant",
+        "-v",
+        help="Sandbox variant (jupyter, docker, eval, monty, colab, modal, datalayer).",
+    ),
+    timeout: float = typer.Option(60.0, help="Default code execution timeout (seconds)."),
+    environment: str | None = typer.Option(
+        None,
+        help="Sandbox environment (used by variants such as datalayer).",
+    ),
+    server_url: str | None = typer.Option(None, help="Colab runtime URL."),
+    kernel_id: str | None = typer.Option(None, help="Colab kernel ID."),
+    proxy_token: str | None = typer.Option(None, help="Colab runtime proxy token."),
+    token: str | None = typer.Option(None, help="Datalayer API token override."),
+    run_url: str | None = typer.Option(None, help="Datalayer run URL override."),
+) -> None:
+    """Launch an interactive REPL against the selected sandbox variant.
+
+    The sandbox is always terminated when this command exits.
+    """
+    _run_repl(
+        variant=variant,
+        timeout=timeout,
+        environment=environment,
+        server_url=server_url,
+        kernel_id=kernel_id,
+        proxy_token=proxy_token,
+        token=token,
+        run_url=run_url,
+    )
 
 
 def main() -> None:

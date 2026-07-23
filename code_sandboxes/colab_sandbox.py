@@ -56,6 +56,8 @@ class ColabSandbox(Sandbox):
         kernel_id: str | None = None,
         proxy_token: str | None = None,
         client_agent: str = "code-sandboxes",
+        use_browser_bridge: bool = False,
+        bridge_timeout: float = 60.0,
         **kwargs,
     ):
         super().__init__(config)
@@ -65,6 +67,10 @@ class ColabSandbox(Sandbox):
         self._kernel_id = kernel_id or extras.get("kernel_id")
         self._proxy_token = proxy_token or extras.get("proxy_token")
         self._client_agent = client_agent
+        self._use_browser_bridge = use_browser_bridge or bool(
+            extras.get("use_browser_bridge")
+        )
+        self._bridge_timeout = bridge_timeout
         self._client = None
         self._sandbox_id = str(uuid.uuid4())
         self._extra_kwargs = kwargs
@@ -87,10 +93,19 @@ class ColabSandbox(Sandbox):
         if self._started:
             return
 
-        if not self._server_url or not self._kernel_id or not self._proxy_token:
+        # Obtain the runtime details from an authenticated browser session when
+        # they were not supplied and the browser bridge is enabled.
+        if self._use_browser_bridge and (
+            not self._server_url or not self._proxy_token
+        ):
+            self._acquire_via_browser_bridge()
+
+        if not self._server_url or not self._proxy_token:
             raise SandboxConfigurationError(
-                "ColabSandbox requires 'server_url', 'kernel_id' and 'proxy_token'. "
-                "These are typically obtained from a Colab runtime assignment API."
+                "ColabSandbox requires 'server_url' and 'proxy_token' (and "
+                "optionally 'kernel_id'). Provide them directly, or set "
+                "use_browser_bridge=True to obtain them from an authenticated "
+                "Colab browser session."
             )
 
         try:
@@ -120,6 +135,27 @@ class ColabSandbox(Sandbox):
             config=self.config,
         )
         self._started = True
+
+    def _acquire_via_browser_bridge(self) -> None:
+        """Fill in runtime details from an authenticated Colab browser session.
+
+        Uses ``jupyter-kernel-client``'s reusable browser bridge: a local
+        WebSocket server is opened, the Colab page is launched with a one-time
+        token, and the authenticated browser posts the runtime
+        ``server_url`` / ``kernel_id`` / ``proxy_token`` back to this process.
+        """
+        try:
+            from jupyter_kernel_client import request_colab_connection
+        except ImportError as exc:
+            raise SandboxConfigurationError(
+                "The browser bridge requires jupyter-kernel-client[bridge]. "
+                "Install it with: pip install 'jupyter-kernel-client[bridge]'"
+            ) from exc
+
+        info = request_colab_connection(timeout=self._bridge_timeout)
+        self._server_url = self._server_url or info.server_url
+        self._proxy_token = self._proxy_token or info.proxy_token
+        self._kernel_id = self._kernel_id or info.kernel_id
 
     def _setup_tool_caller(self) -> None:
         """Keep tool calling on the client side for Colab sandboxes."""

@@ -4,6 +4,7 @@
 
 """Unit tests for Modal/Colab sandbox execution edge cases."""
 
+import sys
 from unittest.mock import MagicMock
 
 from code_sandboxes.colab_sandbox import ColabSandbox
@@ -37,13 +38,13 @@ def _started_modal_with_process(process: _FakeProcess) -> ModalSandbox:
     return sandbox
 
 
-def test_modal_preserves_sub_second_timeout():
-    """The timeout forwarded to Modal should preserve float precision."""
+def test_modal_sub_second_timeout_is_rounded_for_modal_exec():
+    """Modal exec expects integer seconds, so sub-second values are rounded up."""
     sandbox = _started_modal_with_process(_FakeProcess(stdout="", stderr="", returncode=0))
 
     sandbox.run_code("print('ok')", timeout=0.5)
 
-    assert sandbox._sandbox.exec.call_args.kwargs["timeout"] == 0.5
+    assert sandbox._sandbox.exec.call_args.kwargs["timeout"] == 1
 
 
 def test_modal_code_error_does_not_set_exit_code():
@@ -86,3 +87,59 @@ def test_colab_execute_exception_sets_execution_ok_false():
     assert result.execution_ok is False
     assert result.execution_error is not None
     assert "Failed to execute code" in result.execution_error
+
+
+def test_modal_start_uses_supported_default_python_version(monkeypatch):
+    """Default Modal image should pin a Modal-supported Python series."""
+
+    class _FakeImage:
+        def pip_install(self, *_args):
+            return self
+
+    class _FakeApp:
+        pass
+
+    class _FakeSandboxObj:
+        object_id = "modal-object-id"
+
+        def terminate(self):
+            return None
+
+        def detach(self):
+            return None
+
+    captured: dict = {}
+
+    class _FakeModal:
+        class App:
+            @staticmethod
+            def lookup(_name, create_if_missing=False):
+                assert create_if_missing is True
+                return _FakeApp()
+
+        class Image:
+            @staticmethod
+            def debian_slim(*, python_version):
+                captured["python_version"] = python_version
+                return _FakeImage()
+
+        class Secret:
+            @staticmethod
+            def from_dict(_values):
+                return object()
+
+        class Sandbox:
+            @staticmethod
+            def create(**kwargs):
+                captured["create_kwargs"] = kwargs
+                return _FakeSandboxObj()
+
+    monkeypatch.setitem(sys.modules, "modal", _FakeModal)
+
+    sandbox = ModalSandbox(config=SandboxConfig(timeout=10.0, max_lifetime=30.0))
+    sandbox.start()
+
+    assert captured["python_version"] == "3.12"
+    assert sandbox.is_started is True
+
+    sandbox.stop()

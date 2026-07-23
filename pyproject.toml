@@ -21,7 +21,7 @@ classifiers = [
   "Programming Language :: Python :: 3",
 ]
 dependencies = [
-  "jupyter-kernel-client>=0.12.0",
+  "jupyter-kernel-client>=0.13.0",
   "jupyter-server",
   "jupyter-server-client",
   "pydantic>=2.0",
@@ -30,6 +30,7 @@ dependencies = [
 
 [project.scripts]
 code-sandboxes = "code_sandboxes.cli:main"
+sandbox = "code_sandboxes.cli:main"
 
 [project.optional-dependencies]
 datalayer = ["agent_runtimes>=1.0.16"]

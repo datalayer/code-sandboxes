@@ -16,6 +16,7 @@ captured; only stdout/stderr text and the process exit code are returned.
 
 from __future__ import annotations
 
+import math
 import logging
 import time
 import uuid
@@ -40,6 +41,13 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_APP_NAME = "code-sandboxes"
+DEFAULT_MODAL_PYTHON_VERSION = "3.12"
+
+
+def _modal_exec_timeout_seconds(timeout: float | None, default: float) -> int:
+    """Return a Modal-compatible timeout in integer seconds."""
+    value = timeout if timeout is not None else default
+    return max(1, int(math.ceil(value)))
 
 
 class ModalSandbox(Sandbox):
@@ -60,6 +68,7 @@ class ModalSandbox(Sandbox):
         app_name: str = DEFAULT_APP_NAME,
         image: Any | None = None,
         pip_packages: list[str] | None = None,
+        python_version: str = DEFAULT_MODAL_PYTHON_VERSION,
         python_executable: str = "python",
         **kwargs,
     ):
@@ -67,6 +76,7 @@ class ModalSandbox(Sandbox):
         self._app_name = app_name
         self._image = image
         self._pip_packages = pip_packages or []
+        self._python_version = python_version
         self._python_executable = python_executable
         self._app = None
         self._sandbox = None
@@ -103,7 +113,7 @@ class ModalSandbox(Sandbox):
 
         image = self._image
         if image is None:
-            image = modal.Image.debian_slim()
+            image = modal.Image.debian_slim(python_version=self._python_version)
             if self._pip_packages:
                 image = image.pip_install(*self._pip_packages)
 
@@ -188,7 +198,7 @@ class ModalSandbox(Sandbox):
                 self._python_executable,
                 "-c",
                 code,
-                timeout=timeout or self.config.timeout,
+                timeout=_modal_exec_timeout_seconds(timeout, self.config.timeout),
             )
             stdout_text = process.stdout.read()
             stderr_text = process.stderr.read()
