@@ -12,6 +12,8 @@ import os
 
 from code_sandboxes import Sandbox
 
+from exec_common import show_and_run
+
 
 def _require(name: str) -> str:
     value = os.environ.get(name)
@@ -33,11 +35,11 @@ def main() -> None:
             kernel_id=runtime_id,
             proxy_token=runtime_proxy_token,
         ) as sandbox:
-            sandbox.run_code("x = 40")
-            result = sandbox.run_code("x + 2")
+            show_and_run(sandbox, "x = 40")
+            result = show_and_run(sandbox, "x + 2")
             print("result:", result.text)
 
-            result = sandbox.run_code("print('hello from colab')")
+            result = show_and_run(sandbox, "print('hello from colab')")
             print("stdout:", result.stdout)
     except Exception as exc:
         print("colab example failed:", exc)

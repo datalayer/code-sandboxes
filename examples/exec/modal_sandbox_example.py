@@ -21,6 +21,8 @@ from pathlib import Path
 
 from code_sandboxes import Sandbox
 
+from exec_common import show_and_run
+
 
 def _has_modal_auth() -> bool:
     if os.environ.get("MODAL_TOKEN_ID") and os.environ.get("MODAL_TOKEN_SECRET"):
@@ -79,14 +81,14 @@ def main() -> None:
             gpu=gpu,
             pip_packages=["numpy"],
         ) as sandbox:
-            result = sandbox.run_code("import numpy as np; print(int(np.arange(5).sum()))")
+            result = show_and_run(sandbox, "import numpy as np; print(int(np.arange(5).sum()))")
             print("stdout:", result.stdout.strip())
 
             if gpu:
-                gpu_result = sandbox.run_code(_gpu_probe_code())
+                gpu_result = show_and_run(sandbox, _gpu_probe_code())
                 print("gpu_probe:\n", gpu_result.stdout.strip())
 
-            error_result = sandbox.run_code("raise RuntimeError('modal failure example')")
+            error_result = show_and_run(sandbox, "raise RuntimeError('modal failure example')")
             if error_result.code_error:
                 print(
                     "code_error:",

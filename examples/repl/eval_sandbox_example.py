@@ -3,9 +3,9 @@
 
 """REPL example: eval sandbox (no isolation)."""
 
-from code_sandboxes import Sandbox
-
 from repl_common import run_repl
+
+from code_sandboxes import Sandbox
 
 
 def main() -> None:

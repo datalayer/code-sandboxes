@@ -12,6 +12,8 @@ Build it with: make -C .. build-docker
 
 from code_sandboxes import Sandbox
 
+from exec_common import show_and_run
+
 
 def main() -> None:
     try:
@@ -20,9 +22,9 @@ def main() -> None:
             timeout=30,
             image="code-sandboxes-jupyter:latest",
         ) as sandbox:
-            result = sandbox.run_code("print('hello from docker')")
+            result = show_and_run(sandbox, "print('hello from docker')")
             print("stdout:", result.stdout)
-            error_result = sandbox.run_code("raise RuntimeError('boom')")
+            error_result = show_and_run(sandbox, "raise RuntimeError('boom')")
             if error_result.code_error:
                 print(
                     "code_error:",

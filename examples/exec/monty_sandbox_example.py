@@ -11,18 +11,20 @@ Note: This requires code-sandboxes[monty] / pydantic-monty.
 
 from code_sandboxes import Sandbox
 
+from exec_common import show_and_run
+
 
 def main() -> None:
     try:
         with Sandbox.create(variant="monty", timeout=30) as sandbox:
-            sandbox.run_code("x = 21")
-            result = sandbox.run_code("x * 2")
+            show_and_run(sandbox, "x = 21")
+            result = show_and_run(sandbox, "x * 2")
             print("result:", result.text)
 
-            result = sandbox.run_code("print('hello from monty')")
+            result = show_and_run(sandbox, "print('hello from monty')")
             print("stdout:", result.stdout)
 
-            error_result = sandbox.run_code("raise ValueError('monty failure example')")
+            error_result = show_and_run(sandbox, "raise ValueError('monty failure example')")
             if error_result.code_error:
                 print(
                     "code_error:",
