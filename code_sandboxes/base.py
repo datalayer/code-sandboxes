@@ -262,11 +262,23 @@ class Sandbox(ABC):
             from .datalayer_sandbox import DatalayerSandbox
 
             sandbox = DatalayerSandbox(config=config, **kwargs)
+        elif variant_value == "colab":
+            from .colab_sandbox import ColabSandbox
+
+            sandbox = ColabSandbox(config=config, **kwargs)
+        elif variant_value == "monty":
+            from .monty_sandbox import MontySandbox
+
+            sandbox = MontySandbox(config=config, **kwargs)
+        elif variant_value == "modal":
+            from .modal_sandbox import ModalSandbox
+
+            sandbox = ModalSandbox(config=config, **kwargs)
         else:
             raise ValueError(
                 f"Unknown sandbox variant: {variant}. "
                 "Supported variants: eval, docker, jupyter, "
-                "datalayer"
+                "datalayer, colab, monty, modal"
             )
 
         # Set tags if provided

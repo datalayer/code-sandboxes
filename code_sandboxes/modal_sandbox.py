@@ -1,0 +1,255 @@
+# Copyright (c) 2025-2026 Datalayer, Inc.
+#
+# BSD 3-Clause License
+
+"""Modal sandbox implementation.
+
+`Modal <https://modal.com/docs/guide/sandbox>`_ provides secure, cloud-hosted
+containers that can run arbitrary code. This sandbox uses ``modal.Sandbox`` to
+provision a container and executes Python snippets inside it via ``sandbox.exec``.
+
+Each ``run_code`` call runs the snippet as a fresh ``python -c`` process, so
+Python variables do **not** persist across calls (use the filesystem or a single
+snippet for stateful workflows). Rich display outputs (images, HTML) are not
+captured; only stdout/stderr text and the process exit code are returned.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+import uuid
+from typing import Any, Optional
+
+from .base import Sandbox
+from .exceptions import SandboxConfigurationError, SandboxNotStartedError
+from .models import (
+    CodeError,
+    Context,
+    ExecutionResult,
+    Logs,
+    OutputHandler,
+    OutputMessage,
+    Result,
+    SandboxConfig,
+    SandboxEnvironment,
+    SandboxInfo,
+    SandboxStatus,
+)
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_APP_NAME = "code-sandboxes"
+
+
+class ModalSandbox(Sandbox):
+    """Sandbox backed by a Modal cloud container.
+
+    Args:
+        config: Optional sandbox configuration.
+        app_name: Name of the Modal App to attach the sandbox to (created if missing).
+        image: An optional pre-built ``modal.Image``. When omitted, a
+            ``debian_slim`` image is used, optionally extended with ``pip_packages``.
+        pip_packages: Optional list of pip packages to install in the default image.
+        python_executable: Executable used to run snippets (default ``python``).
+    """
+
+    def __init__(
+        self,
+        config: Optional[SandboxConfig] = None,
+        app_name: str = DEFAULT_APP_NAME,
+        image: Optional[Any] = None,
+        pip_packages: Optional[list[str]] = None,
+        python_executable: str = "python",
+        **kwargs,
+    ):
+        super().__init__(config)
+        self._app_name = app_name
+        self._image = image
+        self._pip_packages = pip_packages or []
+        self._python_executable = python_executable
+        self._app = None
+        self._sandbox = None
+        self._sandbox_id = str(uuid.uuid4())
+        self._execution_count = 0
+        self._extra_kwargs = kwargs
+
+    @classmethod
+    def list_environments(cls) -> list[SandboxEnvironment]:
+        return [
+            SandboxEnvironment(
+                name="modal",
+                title="Modal",
+                language="python",
+                owner="modal",
+                visibility="cloud",
+                burning_rate=0.0,
+                metadata={"variant": "modal"},
+            )
+        ]
+
+    def start(self) -> None:
+        if self._started:
+            return
+
+        try:
+            import modal
+        except ImportError as exc:
+            raise SandboxConfigurationError(
+                "modal is required for ModalSandbox. Install it with: pip install modal"
+            ) from exc
+
+        self._app = modal.App.lookup(self._app_name, create_if_missing=True)
+
+        image = self._image
+        if image is None:
+            image = modal.Image.debian_slim()
+            if self._pip_packages:
+                image = image.pip_install(*self._pip_packages)
+
+        secrets = []
+        if self.config.env_vars:
+            secrets.append(modal.Secret.from_dict(dict(self.config.env_vars)))
+
+        create_kwargs: dict[str, Any] = {
+            "app": self._app,
+            "image": image,
+            "timeout": int(self.config.max_lifetime),
+        }
+        if secrets:
+            create_kwargs["secrets"] = secrets
+
+        self._sandbox = modal.Sandbox.create(**create_kwargs)
+
+        self._default_context = self.create_context("default")
+        self._info = SandboxInfo(
+            id=self._sandbox_id,
+            variant="modal",
+            status=SandboxStatus.RUNNING,
+            created_at=time.time(),
+            name=self.config.name,
+            metadata={
+                "app_name": self._app_name,
+                "modal_sandbox_id": getattr(self._sandbox, "object_id", None),
+            },
+            config=self.config,
+        )
+        self._started = True
+
+    def stop(self) -> None:
+        if not self._started:
+            return
+        if self._sandbox is not None:
+            try:
+                self._sandbox.terminate()
+            except Exception:
+                pass
+            try:
+                self._sandbox.detach()
+            except Exception:
+                pass
+            self._sandbox = None
+        self._app = None
+        self._started = False
+        if self._info:
+            self._info.status = SandboxStatus.STOPPED
+
+    def run_code(
+        self,
+        code: str,
+        language: str = "python",
+        context: Optional[Context] = None,
+        on_stdout: Optional[OutputHandler[OutputMessage]] = None,
+        on_stderr: Optional[OutputHandler[OutputMessage]] = None,
+        on_result: Optional[OutputHandler[Result]] = None,
+        on_error: Optional[OutputHandler[CodeError]] = None,
+        envs: Optional[dict[str, str]] = None,
+        timeout: Optional[float] = None,
+    ) -> ExecutionResult:
+        if not self._started or self._sandbox is None:
+            raise SandboxNotStartedError()
+
+        if language != "python":
+            raise ValueError(f"ModalSandbox only supports Python, got: {language}")
+
+        started_at = time.time()
+        self._execution_count += 1
+
+        if envs:
+            env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
+            code = f"{env_code}\n{code}"
+
+        stdout_messages: list[OutputMessage] = []
+        stderr_messages: list[OutputMessage] = []
+        code_error: Optional[CodeError] = None
+
+        try:
+            process = self._sandbox.exec(
+                self._python_executable,
+                "-c",
+                code,
+                timeout=int(timeout or self.config.timeout),
+            )
+            stdout_text = process.stdout.read()
+            stderr_text = process.stderr.read()
+            process.wait()
+            returncode = process.returncode
+        except Exception as e:
+            return ExecutionResult(
+                execution_ok=False,
+                execution_error=f"Failed to execute code on Modal: {e}",
+                started_at=started_at,
+                completed_at=time.time(),
+                context_id=context.id if context else "default",
+            )
+
+        current_time = time.time()
+        for line in (stdout_text or "").splitlines():
+            msg = OutputMessage(line=line, timestamp=current_time, error=False)
+            stdout_messages.append(msg)
+            if on_stdout:
+                on_stdout(msg)
+        for line in (stderr_text or "").splitlines():
+            msg = OutputMessage(line=line, timestamp=current_time, error=True)
+            stderr_messages.append(msg)
+            if on_stderr:
+                on_stderr(msg)
+
+        exit_code = returncode
+        # A non-zero return code with stderr output indicates the user code
+        # raised an exception. Surface it as a code error.
+        if returncode not in (0, None) and stderr_text:
+            last_line = stderr_text.strip().splitlines()[-1] if stderr_text.strip() else ""
+            name = last_line.split(":", 1)[0].strip() or "Error"
+            value = last_line.split(":", 1)[1].strip() if ":" in last_line else last_line
+            code_error = CodeError(name=name, value=value, traceback=stderr_text)
+            if on_error:
+                on_error(code_error)
+
+        return ExecutionResult(
+            results=[],
+            logs=Logs(stdout=stdout_messages, stderr=stderr_messages),
+            execution_ok=True,
+            code_error=code_error,
+            exit_code=exit_code,
+            execution_count=self._execution_count,
+            context_id=context.id if context else "default",
+            started_at=started_at,
+            completed_at=time.time(),
+        )
+
+    def _do_interrupt(self) -> bool:
+        """Modal does not expose fine-grained interrupts; terminate the process."""
+        return False
+
+    def _get_internal_variable(self, name: str, context: Optional[Context] = None):
+        raise NotImplementedError(
+            "ModalSandbox executes each snippet in a fresh process and does not "
+            "support cross-call variable access."
+        )
+
+    def _set_internal_variable(self, name: str, value, context: Optional[Context] = None) -> None:
+        raise NotImplementedError(
+            "ModalSandbox executes each snippet in a fresh process and does not "
+            "support cross-call variable access."
+        )

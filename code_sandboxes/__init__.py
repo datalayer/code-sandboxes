@@ -9,11 +9,16 @@ code safely.
 
 sandboxes (in-process execution):
     - EvalSandbox: Simple Python exec() based, for development/testing
+    - MontySandbox: Minimal secure Python interpreter (pydantic-monty)
 
 Remote sandboxes (out-of-process execution via Jupyter kernel protocol):
     - DockerSandbox: Docker container based, good isolation
     - JupyterSandbox: Jupyter Server with persistent kernel state
     - DatalayerSandbox: Cloud-based Datalayer runtime, full isolation
+    - ColabSandbox: Google Colab runtime, connects to an assigned kernel
+
+Cloud container sandboxes:
+    - ModalSandbox: Modal cloud containers, per-snippet process execution
 
 Features:
 - Code execution with streaming support
@@ -53,6 +58,7 @@ Style usage:
 
 from .base import Sandbox
 from .client import CodeExecutionOutcome, CodeSandboxClient
+from .colab_sandbox import ColabSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .datalayer_sandbox import DatalayerSandbox
 from .docker_sandbox import DockerSandbox
@@ -80,6 +86,8 @@ from .filesystem import (
     SandboxFilesystem,
 )
 from .jupyter_sandbox import JupyterSandbox
+from .modal_sandbox import ModalSandbox
+from .monty_sandbox import MontySandbox
 from .models import (
     CodeError,
     Context,
@@ -105,6 +113,7 @@ __all__ = [
     "CodeError",
     "CodeExecutionOutcome",
     "CodeSandboxClient",
+    "ColabSandbox",
     "CommandResult",
     "Context",
     "ContextNotFoundError",
@@ -121,6 +130,8 @@ __all__ = [
     "JupyterSandbox",
     "Logs",
     "MIMEType",
+    "ModalSandbox",
+    "MontySandbox",
     "OutputHandler",
     "OutputMessage",
     "ProcessHandle",

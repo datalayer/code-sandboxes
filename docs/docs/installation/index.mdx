@@ -24,6 +24,15 @@ pip install code-sandboxes[datalayer]
 # With Docker support (local containers)
 pip install code-sandboxes[docker]
 
+# With Google Colab support
+pip install code-sandboxes[colab]
+
+# With Monty (secure in-process interpreter) support
+pip install code-sandboxes[monty]
+
+# With Modal cloud sandbox support
+pip install code-sandboxes[modal]
+
 # All features
 pip install code-sandboxes[all]
 ```
@@ -32,7 +41,12 @@ pip install code-sandboxes[all]
 
 - Python 3.10 or higher
 - For Docker variant: Docker installed and running
-- For Datalayer variant: Valid API key
+- For Datalayer variant: valid `DATALAYER_API_KEY`
+- For Google Colab variant: `code-sandboxes[colab]` and a Colab runtime assignment
+  (server URL, kernel id, proxy token)
+- For Monty variant: `code-sandboxes[monty]` (no credentials required)
+- For Modal variant: `code-sandboxes[modal]` and Modal credentials
+  (`modal token new` or `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`)
 
 ## Configuration
 
@@ -42,6 +56,8 @@ pip install code-sandboxes[all]
 |----------|-------------|
 | `DATALAYER_API_KEY` | API key for Datalayer runtime authentication |
 | `DATALAYER_RUN_URL` | Custom Datalayer service URL (optional) |
+| `MODAL_TOKEN_ID` | Modal token id (Modal variant) |
+| `MODAL_TOKEN_SECRET` | Modal token secret (Modal variant) |
 
 ### Programmatic Configuration
 
