@@ -121,7 +121,7 @@ class SandboxFilesystem:
 with open({path!r}, 'r') as f:
     __file_content__ = f.read()
 """)
-        if execution.error:
+        if (not execution.execution_ok) or execution.code_error:
             raise FileNotFoundError(f"Could not read file: {path}")
         return self._sandbox.get_variable("__file_content__")
 
@@ -205,7 +205,7 @@ for name in os.listdir({path!r}):
     except OSError:
         pass
 """)
-        if execution.error:
+        if (not execution.execution_ok) or execution.code_error:
             raise FileNotFoundError(f"Could not list directory: {path}")
 
         contents = self._sandbox.get_variable("__dir_contents__")
@@ -359,7 +359,7 @@ __file_info__ = {{
     'permissions': oct(st.st_mode)[-3:],
 }}
 """)
-        if execution.error:
+        if (not execution.execution_ok) or execution.code_error:
             raise FileNotFoundError(f"Could not get info for: {path}")
 
         info = self._sandbox.get_variable("__file_info__")

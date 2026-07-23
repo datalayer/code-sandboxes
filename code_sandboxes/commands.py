@@ -250,11 +250,11 @@ except Exception as e:
 
         execution = self._sandbox.run_code(code, timeout=timeout)
 
-        if execution.error:
+        if not execution.execution_ok:
             return CommandResult(
                 exit_code=-1,
                 stdout="",
-                stderr=str(execution.error),
+                stderr=execution.execution_error or "Sandbox execution failed",
                 duration=time.time() - start_time,
             )
 
@@ -398,11 +398,11 @@ except Exception as e:
 
         execution = self._sandbox.run_code(code, timeout=timeout)
 
-        if execution.error:
+        if not execution.execution_ok:
             return CommandResult(
                 exit_code=-1,
                 stdout="",
-                stderr=str(execution.error),
+                stderr=execution.execution_error or "Sandbox execution failed",
                 duration=time.time() - start_time,
             )
 
