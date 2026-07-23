@@ -58,7 +58,10 @@ Style usage:
 
 from .base import Sandbox
 from .client import CodeExecutionOutcome, CodeSandboxClient
+<<<<<<< HEAD
 from .colab_sandbox import ColabSandbox
+=======
+>>>>>>> main
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .datalayer_sandbox import DatalayerSandbox
 from .docker_sandbox import DockerSandbox
@@ -113,7 +116,10 @@ __all__ = [
     "CodeError",
     "CodeExecutionOutcome",
     "CodeSandboxClient",
+<<<<<<< HEAD
     "ColabSandbox",
+=======
+>>>>>>> main
     "CommandResult",
     "Context",
     "ContextNotFoundError",
