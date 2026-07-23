@@ -10,9 +10,9 @@ Run with:
 
 import os
 
-from code_sandboxes import Sandbox
-
 from exec_common import show_and_run
+
+from code_sandboxes import Sandbox
 
 
 def _require(name: str) -> str:

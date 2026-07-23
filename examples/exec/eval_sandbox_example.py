@@ -7,9 +7,9 @@ Run with:
     python examples/eval_sandbox_example.py
 """
 
-from code_sandboxes import Sandbox
-
 from exec_common import show_and_run
+
+from code_sandboxes import Sandbox
 
 
 def main() -> None:

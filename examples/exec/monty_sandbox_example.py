@@ -9,9 +9,9 @@ Run with:
 Note: This requires code-sandboxes[monty] / pydantic-monty.
 """
 
-from code_sandboxes import Sandbox
-
 from exec_common import show_and_run
+
+from code_sandboxes import Sandbox
 
 
 def main() -> None:

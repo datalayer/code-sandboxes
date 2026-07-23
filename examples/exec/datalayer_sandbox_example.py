@@ -9,9 +9,9 @@ Run with:
 This requires Datalayer runtime credentials/config.
 """
 
-from code_sandboxes import Sandbox
-
 from exec_common import show_and_run
+
+from code_sandboxes import Sandbox
 
 
 def main() -> None:

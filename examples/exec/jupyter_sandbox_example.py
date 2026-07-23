@@ -9,9 +9,9 @@ Run with:
 Note: This requires jupyter_server and jupyter-kernel-client.
 """
 
-from code_sandboxes import Sandbox
-
 from exec_common import show_and_run
+
+from code_sandboxes import Sandbox
 
 
 def main() -> None:

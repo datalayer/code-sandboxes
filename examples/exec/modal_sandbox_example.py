@@ -19,9 +19,9 @@ import argparse
 import os
 from pathlib import Path
 
-from code_sandboxes import Sandbox
-
 from exec_common import show_and_run
+
+from code_sandboxes import Sandbox
 
 
 def _has_modal_auth() -> bool:
