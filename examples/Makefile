@@ -2,18 +2,27 @@
 
 PYTHON ?= python
 
-.PHONY: all eval docker jupyter datalayer
+.PHONY: all eval docker jupyter monty colab modal datalayer
 
-all: eval docker jupyter datalayer
+all: eval docker jupyter monty colab modal datalayer
 
 eval:
-	$(PYTHON) local_eval_example.py
+	$(PYTHON) eval_sandbox_example.py
 
 docker:
-	$(PYTHON) local_docker_example.py
+	$(PYTHON) docker_sandbox_example.py
 
 jupyter:
-	$(PYTHON) local_jupyter_example.py
+	$(PYTHON) jupyter_sandbox_example.py
+
+monty:
+	$(PYTHON) monty_sandbox_example.py
+
+colab:
+	$(PYTHON) colab_sandbox_example.py
+
+modal:
+	$(PYTHON) modal_sandbox_example.py
 
 datalayer:
-	$(PYTHON) datalayer_runtime_example.py
+	$(PYTHON) datalayer_sandbox_example.py

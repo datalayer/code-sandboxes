@@ -4,7 +4,7 @@
 """Example: eval sandbox (no isolation).
 
 Run with:
-  python examples/local_eval_example.py
+    python examples/eval_sandbox_example.py
 """
 
 from code_sandboxes import Sandbox

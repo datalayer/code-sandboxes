@@ -4,7 +4,7 @@
 """Example: docker sandbox (container isolation).
 
 Run with:
-  python examples/local_docker_example.py
+    python examples/docker_sandbox_example.py
 
 Note: This requires Docker support and the `datalayer/code-sandboxes:latest` image.
 Build it with: make -C .. build-docker
@@ -18,12 +18,16 @@ def main() -> None:
         with Sandbox.create(
             variant="docker",
             timeout=30,
-            image="datalayer/code-sandboxes:latest",
+            image="code-sandboxes-jupyter:latest",
         ) as sandbox:
             result = sandbox.run_code("print('hello from docker')")
             print("stdout:", result.stdout)
-            result = sandbox.run_code("fail")
-            print("stderr:", result.error)
+            error_result = sandbox.run_code("raise RuntimeError('boom')")
+            if error_result.code_error:
+                print(
+                    "code_error:",
+                    f"{error_result.code_error.name}: {error_result.code_error.value}",
+                )
             cmd = sandbox.commands.run("python", "-c", "print(123)")
             print("cmd:", cmd.stdout.strip())
     except ModuleNotFoundError as exc:

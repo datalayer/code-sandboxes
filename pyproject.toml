@@ -25,7 +25,11 @@ dependencies = [
   "jupyter-server",
   "jupyter-server-client",
   "pydantic>=2.0",
+  "typer>=0.12.0",
 ]
+
+[project.scripts]
+code-sandboxes = "code_sandboxes.cli:main"
 
 [project.optional-dependencies]
 datalayer = ["agent_runtimes>=1.0.16"]

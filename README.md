@@ -215,6 +215,29 @@ with Sandbox.create() as sandbox:
     )
 ```
 
+## CLI REPL
+
+`code-sandboxes` includes a Typer-based CLI that launches an interactive REPL
+against a selected sandbox variant and always terminates created resources on exit.
+
+```bash
+code-sandboxes repl --variant jupyter
+code-sandboxes repl --variant monty
+code-sandboxes repl --variant modal
+code-sandboxes repl --variant colab
+```
+
+If `--variant` is omitted, the CLI prompts for one.
+
+Variant notes:
+
+- `jupyter`: starts a managed local Jupyter server on a random port.
+- `monty`: starts a Monty REPL-backed sandbox.
+- `modal`: starts a Modal sandbox container.
+- `colab`: prompts for runtime URL, kernel ID, and proxy token.
+
+Exit with `:exit`, `:quit`, or Ctrl+D.
+
 ## Backend Setup Guides
 
 Each backend has its own installation, credential, and parameter requirements.
@@ -485,6 +508,9 @@ pip install code-sandboxes[modal]
    modal token new
    ```
 
+   This is enough for local use: the Modal SDK reads credentials from
+   `~/.modal.toml` automatically.
+
 1. Alternatively, create a token in the Modal dashboard
    (**Settings → API Tokens**) and export it as environment variables:
 
@@ -492,6 +518,34 @@ pip install code-sandboxes[modal]
    | -------------------- | -------------------------------------- |
    | `MODAL_TOKEN_ID`     | Modal token id (starts with `ak-`)     |
    | `MODAL_TOKEN_SECRET` | Modal token secret (starts with `as-`) |
+
+**Do you need both `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`?**
+
+- For environment-based auth (CI/CD, containers, hosted runners): **yes**,
+  you need both values because Modal authenticates with a token pair
+  (public id + secret).
+- For local development with `modal token new`: **not necessarily**. The SDK can
+  authenticate directly from `~/.modal.toml`.
+
+If you need to export environment variables from your local Modal config, you can
+read them from `~/.modal.toml`:
+
+```bash
+python - <<'PY'
+import pathlib
+import tomllib
+
+cfg = tomllib.loads(pathlib.Path("~/.modal.toml").expanduser().read_text())
+profile = cfg.get("default", cfg)
+token_id = profile.get("token_id")
+token_secret = profile.get("token_secret")
+if token_id and token_secret:
+        print(f"export MODAL_TOKEN_ID={token_id}")
+        print(f"export MODAL_TOKEN_SECRET={token_secret}")
+else:
+        raise SystemExit("Could not find token_id/token_secret in ~/.modal.toml")
+PY
+```
 
 **Parameters:** `app_name`, `image` (a prebuilt `modal.Image`), `pip_packages`
 (extra packages for the default image), `python_executable`.

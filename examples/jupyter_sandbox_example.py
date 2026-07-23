@@ -4,7 +4,7 @@
 """Example: jupyter sandbox (Jupyter kernel isolation with persistent state).
 
 Run with:
-  python examples/local_jupyter_example.py
+    python examples/jupyter_sandbox_example.py
 
 Note: This requires jupyter_server and jupyter-kernel-client.
 """

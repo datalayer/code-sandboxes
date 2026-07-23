@@ -255,8 +255,37 @@ state). Configure the image with additional pip packages as needed.
    ```bash
    modal token new
    ```
+    This is enough for local use: the Modal SDK reads credentials from
+    `~/.modal.toml` automatically.
 3. Alternatively, create a token in the Modal dashboard (**Settings → API Tokens**)
    and export `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`.
+
+**Do you need both `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`?**
+
+- For environment-based auth (CI/CD, containers, hosted runners): **yes**,
+  you need both values because Modal authenticates with a token pair
+  (public id + secret).
+- For local development with `modal token new`: **not necessarily**. The SDK can
+  authenticate directly from `~/.modal.toml`.
+
+If you need environment variables, you can export them from your local config:
+
+```bash
+python - <<'PY'
+import pathlib
+import tomllib
+
+cfg = tomllib.loads(pathlib.Path("~/.modal.toml").expanduser().read_text())
+profile = cfg.get("default", cfg)
+token_id = profile.get("token_id")
+token_secret = profile.get("token_secret")
+if token_id and token_secret:
+     print(f"export MODAL_TOKEN_ID={token_id}")
+     print(f"export MODAL_TOKEN_SECRET={token_secret}")
+else:
+     raise SystemExit("Could not find token_id/token_secret in ~/.modal.toml")
+PY
+```
 
 ```python
 with Sandbox.create(

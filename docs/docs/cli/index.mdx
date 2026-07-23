@@ -1,0 +1,59 @@
+---
+title: CLI REPL
+sidebar_position: 1
+---
+
+# CLI REPL
+
+Code Sandboxes provides a Typer-based CLI that launches an interactive REPL
+against a selected sandbox variant.
+
+```bash
+code-sandboxes repl --variant jupyter
+```
+
+## Variant Selection
+
+You can either pass `--variant` directly or omit it and choose interactively.
+
+Supported variants:
+
+- `jupyter`
+- `docker`
+- `eval`
+- `monty`
+- `colab`
+- `modal`
+- `datalayer`
+
+## Variant-specific Behavior
+
+- `jupyter`: starts a managed local Jupyter server on a random port.
+- `monty`: starts a Monty REPL-backed sandbox.
+- `modal`: starts a Modal sandbox container.
+- `colab`: prompts for runtime URL, kernel ID, and proxy token.
+
+## Usage
+
+```bash
+# Interactive variant prompt
+code-sandboxes repl
+
+# Explicit variant
+code-sandboxes repl --variant monty
+
+# Datalayer with overrides
+code-sandboxes repl --variant datalayer --token "$DATALAYER_API_KEY" --run-url "https://prod1.datalayer.run"
+```
+
+## Exiting and Cleanup
+
+Use any of the following to exit:
+
+- `:exit`
+- `:quit`
+- `exit`
+- `quit`
+- `Ctrl+D`
+
+On exit, the created sandbox resource is terminated automatically.
