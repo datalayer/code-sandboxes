@@ -69,6 +69,10 @@ class SandboxVariant(str, Enum):
     DOCKER = "docker"
     JUPYTER = "jupyter"
     DATALAYER = "datalayer"
+    COLAB = "colab"
+    KAGGLE = "kaggle"
+    MONTY = "monty"
+    MODAL = "modal"
 
 
 class GPUType(str, Enum):

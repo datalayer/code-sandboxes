@@ -2,20 +2,22 @@
 #
 # BSD 3-Clause License
 
-"""Docker-based sandbox implementation.
+"""Google Colab sandbox implementation.
 
-This sandbox runs a Jupyter Server inside a Docker container and connects
-through `jupyter-kernel-client` to execute code.
+This sandbox connects to an existing Google Colab runtime and executes code in
+its kernel using ``jupyter-kernel-client``'s :class:`ColabKernelClient`.
+
+Unlike the Jupyter/Docker sandboxes, this sandbox does **not** provision a
+runtime: a Colab runtime must already be running in a browser session. Reuse it
+with either explicit ``server_url`` / ``kernel_id`` / ``proxy_token`` values or
+by passing a Colab WebSocket ``channels_url``.
 """
 
 from __future__ import annotations
 
-import os
-import tempfile
+import logging
 import time
 import uuid
-
-import requests
 
 from .base import Sandbox
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
@@ -33,191 +35,133 @@ from .models import (
     SandboxStatus,
 )
 
-DEFAULT_IMAGE = "code-sandboxes-jupyter:latest"
-DEFAULT_PORT = 8888
+logger = logging.getLogger(__name__)
 
 
-class DockerSandbox(Sandbox):
-    """Docker container sandbox using a Jupyter Server backend."""
+class ColabSandbox(Sandbox):
+    """Sandbox backed by a Google Colab runtime.
+
+    Args:
+        config: Optional sandbox configuration.
+        server_url: The Colab runtime proxy URL.
+        kernel_id: The Colab kernel identifier to connect to.
+        proxy_token: The Colab runtime proxy token.
+        channels_url: Optional Colab channels URL to parse `server_url`,
+            `kernel_id`, and `proxy_token` from.
+        client_agent: Value advertised through the ``X-Colab-Client-Agent`` header.
+    """
 
     def __init__(
         self,
         config: SandboxConfig | None = None,
-        image: str | None = None,
-        token: str | None = None,
-        host: str = "127.0.0.1",
-        container_port: int = DEFAULT_PORT,
-        container_name: str | None = None,
-        docker_client=None,
-        auto_remove: bool = True,
-        workdir: str | None = None,
+        server_url: str | None = None,
+        kernel_id: str | None = None,
+        proxy_token: str | None = None,
+        channels_url: str | None = None,
+        client_agent: str = "code-sandboxes",
         **kwargs,
     ):
         super().__init__(config)
-        self._image = image or DEFAULT_IMAGE
-        self._token = token or uuid.uuid4().hex
-        self._host = host
-        self._container_port = container_port
-        self._container_name = container_name
-        self._docker = docker_client
-        self._auto_remove = auto_remove
-        self._container = None
+        # Allow configuration via SandboxConfig extras as a fallback.
+        extras = getattr(self.config, "model_extra", None) or {}
+        self._server_url = server_url or extras.get("server_url")
+        self._kernel_id = kernel_id or extras.get("kernel_id")
+        self._proxy_token = proxy_token or extras.get("proxy_token")
+        self._channels_url = channels_url or extras.get("channels_url")
+        self._client_agent = client_agent
         self._client = None
         self._sandbox_id = str(uuid.uuid4())
-        self._workdir = workdir
-        self._workdir_tmp: str | None = None
-        self._server_url: str | None = None
         self._extra_kwargs = kwargs
 
     @classmethod
     def list_environments(cls) -> list[SandboxEnvironment]:
         return [
             SandboxEnvironment(
-                name="docker",
-                title="Docker (Jupyter)",
+                name="colab",
+                title="Google Colab",
                 language="python",
-                owner="local",
-                visibility="local",
+                owner="google",
+                visibility="cloud",
                 burning_rate=0.0,
-                metadata={"variant": "docker", "image": DEFAULT_IMAGE},
+                metadata={"variant": "colab"},
             )
         ]
-
-    def _ensure_docker(self):
-        if self._docker is not None:
-            return
-        try:
-            import docker  # type: ignore
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise SandboxConfigurationError(
-                "docker package is required for DockerSandbox. "
-                "Install it with: pip install code-sandboxes[docker]"
-            ) from exc
-        self._docker = docker.from_env()
-
-    def _resolve_workdir(self) -> str:
-        if self._workdir:
-            return self._workdir
-        self._workdir_tmp = tempfile.mkdtemp(prefix="code-sandbox-")
-        return self._workdir_tmp
-
-    def _wait_for_server(self, timeout: float = 30.0) -> None:
-        if not self._server_url:
-            raise SandboxConfigurationError("Server URL not available")
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            try:
-                response = requests.get(
-                    f"{self._server_url}/api/status",
-                    params={"token": self._token},
-                    timeout=2,
-                )
-                if response.ok:
-                    return
-            except Exception:
-                time.sleep(0.5)
-        raise SandboxConfigurationError("Timed out waiting for Jupyter Server")
 
     def start(self) -> None:
         if self._started:
             return
 
-        self._ensure_docker()
-        try:
-            from jupyter_kernel_client import KernelClient
-        except ImportError as exc:  # pragma: no cover - optional dependency
+        if self._channels_url and (
+            not self._server_url or not self._kernel_id or not self._proxy_token
+        ):
+            try:
+                from jupyter_kernel_client import parse_colab_channels_url
+            except ImportError as exc:
+                raise SandboxConfigurationError(
+                    "jupyter-kernel-client>=0.14.0 is required for Colab channels_url parsing. "
+                    "Install it with: pip install jupyter-kernel-client"
+                ) from exc
+
+            parsed_server_url, parsed_kernel_id, parsed_proxy_token = parse_colab_channels_url(
+                self._channels_url
+            )
+            self._server_url = self._server_url or parsed_server_url
+            self._kernel_id = self._kernel_id or parsed_kernel_id
+            self._proxy_token = self._proxy_token or parsed_proxy_token
+
+        if not self._server_url or not self._kernel_id or not self._proxy_token:
             raise SandboxConfigurationError(
-                "jupyter-kernel-client is required for DockerSandbox. "
-                "Install it with: pip install code-sandboxes"
+                "ColabSandbox requires 'server_url', 'kernel_id', and 'proxy_token'. "
+                "Provide them directly, or pass 'channels_url' from an active Colab session."
+            )
+
+        try:
+            from jupyter_kernel_client import ColabKernelClient
+        except ImportError as exc:
+            raise SandboxConfigurationError(
+                "jupyter-kernel-client>=0.12.0 is required for ColabSandbox. "
+                "Install it with: pip install jupyter-kernel-client"
             ) from exc
 
-        workdir = self._resolve_workdir()
-        env = {"JUPYTER_TOKEN": self._token}
-        env.update(self.config.env_vars)
-
-        mem_limit = self.config.memory_limit
-        nano_cpus = None
-        if self.config.cpu_limit:
-            nano_cpus = int(self.config.cpu_limit * 1_000_000_000)
-
-        ports = {f"{self._container_port}/tcp": (self._host, None)}
-
-        self._container = self._docker.containers.run(
-            self._image,
-            detach=True,
-            environment=env,
-            ports=ports,
-            volumes={workdir: {"bind": "/workspace", "mode": "rw"}},
-            name=self._container_name,
-            auto_remove=self._auto_remove,
-            mem_limit=mem_limit,
-            nano_cpus=nano_cpus,
-            **self._extra_kwargs,
+        self._client = ColabKernelClient(
+            server_url=self._server_url,
+            kernel_id=self._kernel_id,
+            proxy_token=self._proxy_token,
+            client_agent=self._client_agent,
         )
-
-        self._container.reload()
-        port_info = self._container.attrs["NetworkSettings"]["Ports"].get(
-            f"{self._container_port}/tcp"
-        )
-        if not port_info:
-            raise SandboxConfigurationError("Failed to expose Jupyter Server port")
-
-        host_port = port_info[0]["HostPort"]
-        self._server_url = f"http://{self._host}:{host_port}"
-
-        self._wait_for_server(timeout=self.config.timeout or 30.0)
-
-        self._client = KernelClient(server_url=self._server_url, token=self._token)
         self._client.start()
 
         self._default_context = self.create_context("default")
         self._info = SandboxInfo(
             id=self._sandbox_id,
-            variant="docker",
+            variant="colab",
             status=SandboxStatus.RUNNING,
             created_at=time.time(),
             name=self.config.name,
-            metadata={
-                "image": self._image,
-                "server_url": self._server_url,
-                "container_id": self._container.id if self._container else None,
-            },
+            metadata={"server_url": self._server_url, "kernel_id": self._kernel_id},
             config=self.config,
         )
         self._started = True
 
+    def _setup_tool_caller(self) -> None:
+        """Keep tool calling on the client side for Colab sandboxes."""
+        return
+
     def stop(self) -> None:
         if not self._started:
             return
-
         if self._client is not None:
             try:
-                self._client.stop()
+                # Do not shut down the Colab kernel; we only disconnect.
+                self._client.stop(shutdown_kernel=False)
             except Exception:
-                pass
+                logger.debug("Ignoring error while stopping Colab client", exc_info=True)
             self._client = None
-
-        if self._container is not None:
-            try:
-                self._container.stop()
-            except Exception:
-                pass
-            self._container = None
-
-        if self._workdir_tmp and os.path.isdir(self._workdir_tmp):
-            try:
-                import shutil
-
-                shutil.rmtree(self._workdir_tmp, ignore_errors=True)
-            except Exception:
-                pass
-            self._workdir_tmp = None
-
         self._started = False
         if self._info:
             self._info.status = SandboxStatus.STOPPED
 
-    def run_code(
+    def run_code(  # noqa: C901
         self,
         code: str,
         language: str = "python",
@@ -233,9 +177,11 @@ class DockerSandbox(Sandbox):
             raise SandboxNotStartedError()
 
         if language != "python":
-            raise ValueError(f"DockerSandbox only supports Python, got: {language}")
+            raise ValueError(f"ColabSandbox only supports Python, got: {language}")
 
         started_at = time.time()
+        self._interrupt_requested.clear()
+        self._executing_event.set()
 
         if envs:
             env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
@@ -244,13 +190,16 @@ class DockerSandbox(Sandbox):
         try:
             reply = self._client.execute(code, timeout=timeout or self.config.timeout)
         except Exception as e:
-            # Infrastructure failure - couldn't execute the code
+            self._executing_event.clear()
+            was_interrupted = self._interrupt_requested.is_set()
+            self._interrupt_requested.clear()
             return ExecutionResult(
                 execution_ok=False,
-                execution_error=f"Failed to execute code: {e}",
+                execution_error=f"Failed to execute code: {e}" if not was_interrupted else None,
                 started_at=started_at,
                 completed_at=time.time(),
                 context_id=context.id if context else "default",
+                interrupted=was_interrupted,
             )
 
         stdout_messages: list[OutputMessage] = []
@@ -287,8 +236,6 @@ class DockerSandbox(Sandbox):
             elif output_type == "error":
                 ename = output.get("ename", "Error")
                 evalue = output.get("evalue", "")
-
-                # Handle SystemExit specially - extract exit code
                 if ename == "SystemExit":
                     try:
                         exit_code = int(evalue) if evalue else 0
@@ -303,6 +250,10 @@ class DockerSandbox(Sandbox):
                     if on_error:
                         on_error(code_error)
 
+        self._executing_event.clear()
+        was_interrupted = self._interrupt_requested.is_set()
+        self._interrupt_requested.clear()
+
         return ExecutionResult(
             results=results,
             logs=Logs(stdout=stdout_messages, stderr=stderr_messages),
@@ -313,6 +264,7 @@ class DockerSandbox(Sandbox):
             context_id=context.id if context else "default",
             started_at=started_at,
             completed_at=time.time(),
+            interrupted=was_interrupted,
         )
 
     def _get_internal_variable(self, name: str, context: Context | None = None):

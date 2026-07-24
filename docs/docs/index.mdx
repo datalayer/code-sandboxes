@@ -48,6 +48,7 @@ This section clarifies what the package owns versus what is delegated to adjacen
 - **🐍 Python Code Execution**: Execute Python code with streaming output and rich results
 - **📁 Filesystem Operations**: Read, write, list, upload, and download files
 - **💻 Command Execution**: Run shell commands with streaming support
+- **🧭 Unified Client API**: Use `CodeSandboxClient` for variant-agnostic execution and streaming
 - **📊 Detailed Status Reporting**: Distinguish between infrastructure and code-level failures
 - **🎯 Pydantic Models**: Type-safe models with automatic validation and JSON serialization
 - **⚡ Multiple Backends**: eval, Docker containers, Jupyter kernels, or cloud runtimes
@@ -66,12 +67,16 @@ Execute code in-process, sharing memory with the host Python process.
 | Variant | Isolation Level | Best For |
 |---------|-----------------|----------|
 | `eval` | None (Python exec) | Development, testing |
+| `monty` | In-process secure interpreter | safe, fast LLM snippets |
 
 ### Remote Sandboxes
 Execute code out-of-process via Jupyter kernel protocol, providing better isolation.
 
 | Variant | Isolation Level | Best For |
 |---------|-----------------|----------|
+| `kaggle` | Kaggle notebook runtime | hosted interactive and batch execution |
+| `colab` | Google Colab runtime | hosted interactive execution |
+| `modal` | Cloud container | isolated, ephemeral cloud execution |
 | `docker` | Container | isolated execution |
 | `jupyter` | Process (Jupyter kernel) | persistent state |
 | `datalayer` | Cloud VM | Production, GPU workloads |

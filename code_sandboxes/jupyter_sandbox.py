@@ -21,7 +21,6 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Optional
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 import requests
@@ -54,12 +53,12 @@ class JupyterSandbox(Sandbox):
 
     def __init__(
         self,
-        config: Optional[SandboxConfig] = None,
-        server_url: Optional[str] = None,
-        token: Optional[str] = None,
+        config: SandboxConfig | None = None,
+        server_url: str | None = None,
+        token: str | None = None,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
-        python_executable: Optional[str] = None,
+        python_executable: str | None = None,
         separate_process: bool = True,
         **kwargs,
     ):
@@ -83,12 +82,12 @@ class JupyterSandbox(Sandbox):
         self._python_executable = python_executable or os.environ.get("PYTHON", "python")
         self._separate_process = separate_process
         self._server_app = None
-        self._server_thread: Optional[threading.Thread] = None
-        self._server_process: Optional[subprocess.Popen] = None
+        self._server_thread: threading.Thread | None = None
+        self._server_process: subprocess.Popen | None = None
         self._client = None
         self._sandbox_id = str(uuid.uuid4())
-        self._workdir: Optional[str] = None
-        self._workdir_tmp: Optional[str] = None
+        self._workdir: str | None = None
+        self._workdir_tmp: str | None = None
         self._extra_kwargs = kwargs
         self._owns_server = server_url is None
 
@@ -447,13 +446,13 @@ class JupyterSandbox(Sandbox):
         self,
         code: str,
         language: str = "python",
-        context: Optional[Context] = None,
-        on_stdout: Optional[OutputHandler[OutputMessage]] = None,
-        on_stderr: Optional[OutputHandler[OutputMessage]] = None,
-        on_result: Optional[OutputHandler[Result]] = None,
-        on_error: Optional[OutputHandler[CodeError]] = None,
-        envs: Optional[dict[str, str]] = None,
-        timeout: Optional[float] = None,
+        context: Context | None = None,
+        on_stdout: OutputHandler[OutputMessage] | None = None,
+        on_stderr: OutputHandler[OutputMessage] | None = None,
+        on_result: OutputHandler[Result] | None = None,
+        on_error: OutputHandler[CodeError] | None = None,
+        envs: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> ExecutionResult:
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
@@ -497,8 +496,8 @@ class JupyterSandbox(Sandbox):
         stdout_messages: list[OutputMessage] = []
         stderr_messages: list[OutputMessage] = []
         results: list[Result] = []
-        code_error: Optional[CodeError] = None
-        exit_code: Optional[int] = None
+        code_error: CodeError | None = None
+        exit_code: int | None = None
 
         current_time = time.time()
         for output in reply.get("outputs", []):
@@ -562,12 +561,12 @@ class JupyterSandbox(Sandbox):
             interrupted=was_interrupted,
         )
 
-    def _get_internal_variable(self, name: str, context: Optional[Context] = None):
+    def _get_internal_variable(self, name: str, context: Context | None = None):
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
         return self._client.get_variable(name)
 
-    def _set_internal_variable(self, name: str, value, context: Optional[Context] = None) -> None:
+    def _set_internal_variable(self, name: str, value, context: Context | None = None) -> None:
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
         self._client.set_variable(name, value)

@@ -4,10 +4,12 @@
 """Example: jupyter sandbox (Jupyter kernel isolation with persistent state).
 
 Run with:
-  python examples/local_jupyter_example.py
+    python examples/jupyter_sandbox_example.py
 
 Note: This requires jupyter_server and jupyter-kernel-client.
 """
+
+from exec_common import show_and_run
 
 from code_sandboxes import Sandbox
 
@@ -16,12 +18,12 @@ def main() -> None:
     try:
         with Sandbox.create(variant="jupyter", timeout=30) as sandbox:
             # Test persistent state across executions
-            sandbox.run_code("x = 40")
-            result = sandbox.run_code("x + 2")
+            show_and_run(sandbox, "x = 40")
+            result = show_and_run(sandbox, "x + 2")
             print("result:", result.text)  # Should print 42
 
             # Test stdout
-            result = sandbox.run_code("print('hello from jupyter')")
+            result = show_and_run(sandbox, "print('hello from jupyter')")
             print("stdout:", result.stdout)
 
             # Test file operations

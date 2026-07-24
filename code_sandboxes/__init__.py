@@ -9,11 +9,17 @@ code safely.
 
 sandboxes (in-process execution):
     - EvalSandbox: Simple Python exec() based, for development/testing
+    - MontySandbox: Minimal secure Python interpreter (pydantic-monty)
 
 Remote sandboxes (out-of-process execution via Jupyter kernel protocol):
     - DockerSandbox: Docker container based, good isolation
     - JupyterSandbox: Jupyter Server with persistent kernel state
     - DatalayerSandbox: Cloud-based Datalayer runtime, full isolation
+    - ColabSandbox: Google Colab runtime, connects to an assigned kernel
+    - KaggleSandbox: Kaggle runtime, connects to an interactive notebook kernel
+
+Cloud container sandboxes:
+    - ModalSandbox: Modal cloud containers, per-snippet process execution
 
 Features:
 - Code execution with streaming support
@@ -53,6 +59,7 @@ Style usage:
 
 from .base import Sandbox
 from .client import CodeExecutionOutcome, CodeSandboxClient
+from .colab_sandbox import ColabSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .datalayer_sandbox import DatalayerSandbox
 from .docker_sandbox import DockerSandbox
@@ -80,6 +87,8 @@ from .filesystem import (
     SandboxFilesystem,
 )
 from .jupyter_sandbox import JupyterSandbox
+from .kaggle_sandbox import KaggleSandbox
+from .modal_sandbox import ModalSandbox
 from .models import (
     CodeError,
     Context,
@@ -99,12 +108,14 @@ from .models import (
     SnapshotInfo,
     TunnelInfo,
 )
+from .monty_sandbox import MontySandbox
 
 __all__ = [
     # Models
     "CodeError",
     "CodeExecutionOutcome",
     "CodeSandboxClient",
+    "ColabSandbox",
     "CommandResult",
     "Context",
     "ContextNotFoundError",
@@ -119,8 +130,11 @@ __all__ = [
     "FileWatchEventType",
     "GPUType",
     "JupyterSandbox",
+    "KaggleSandbox",
     "Logs",
     "MIMEType",
+    "ModalSandbox",
+    "MontySandbox",
     "OutputHandler",
     "OutputMessage",
     "ProcessHandle",

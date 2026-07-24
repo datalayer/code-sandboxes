@@ -125,7 +125,7 @@ class DatalayerSandbox(Sandbox):
         sandbox = cls(**kwargs)
         sandbox._sandbox_id = sandbox_id
         # Connect to existing runtime - this would need runtime lookup
-        # For now, this is a placeholder that would need datalayer_core support
+        # For now, this is a placeholder that would need agent-runtimes support
         return sandbox
 
     @classmethod
@@ -148,7 +148,7 @@ class DatalayerSandbox(Sandbox):
             DatalayerSandbox instances.
         """
         try:
-            from datalayer_core import DatalayerClient
+            from agent_runtimes.client import AgentClient
             from datalayer_core.utils.urls import DatalayerURLs
         except ImportError:
             return
@@ -156,9 +156,9 @@ class DatalayerSandbox(Sandbox):
         try:
             if run_url:
                 urls = DatalayerURLs.from_run_url(run_url)
-                client = DatalayerClient(urls=urls, token=token)
+                client = AgentClient(urls=urls, api_key=token)
             else:
-                client = DatalayerClient(token=token)
+                client = AgentClient(api_key=token)
 
             runtimes = client.list_runtimes()
 
@@ -190,7 +190,7 @@ class DatalayerSandbox(Sandbox):
         run_url: Optional[str] = None,
     ) -> list[SandboxEnvironment]:
         try:
-            from datalayer_core import DatalayerClient
+            from agent_runtimes.client import AgentClient
             from datalayer_core.utils.urls import DatalayerURLs
         except ImportError:
             return []
@@ -198,9 +198,9 @@ class DatalayerSandbox(Sandbox):
         try:
             if run_url:
                 urls = DatalayerURLs.from_run_url(run_url)
-                client = DatalayerClient(urls=urls, token=token)
+                client = AgentClient(urls=urls, api_key=token)
             else:
-                client = DatalayerClient(token=token)
+                client = AgentClient(api_key=token)
 
             environments = client.list_environments()
             return [
@@ -230,26 +230,25 @@ class DatalayerSandbox(Sandbox):
 
         try:
             # Import here to avoid hard dependency
-            from datalayer_core import DatalayerClient
+            from agent_runtimes.client import AgentClient
+            from agent_runtimes.client.agent_client import DEFAULT_TIME_RESERVATION
             from datalayer_core.utils.urls import DatalayerURLs
         except ImportError as e:
             raise SandboxConfigurationError(
-                "datalayer_core package is required for DatalayerSandbox. "
-                "Install it with: pip install datalayer_core"
+                "agent-runtimes package is required for DatalayerSandbox. "
+                "Install it with: pip install code-sandboxes[datalayer]"
             ) from e
 
         try:
             # Create client with optional custom URL
             if self._run_url:
                 urls = DatalayerURLs.from_run_url(self._run_url)
-                self._client = DatalayerClient(urls=urls, token=self._token)
+                self._client = AgentClient(urls=urls, api_key=self._token)
             else:
-                self._client = DatalayerClient(token=self._token)
+                self._client = AgentClient(api_key=self._token)
 
-            # Calculate time reservation
-            # Default to the platform default (10 minutes) unless max_lifetime is explicitly set
-            from datalayer_core.utils.defaults import DEFAULT_TIME_RESERVATION
-
+            # Calculate time reservation.
+            # Default to the platform default (10 minutes) unless max_lifetime is explicitly set.
             default_max_lifetime = SandboxConfig().max_lifetime
             if self.config.max_lifetime != default_max_lifetime:
                 lifetime_minutes = int(self.config.max_lifetime / 60)
@@ -282,7 +281,10 @@ class DatalayerSandbox(Sandbox):
                 )
 
             # Start the runtime
-            self._runtime._start()
+            if hasattr(self._runtime, "start"):
+                self._runtime.start()
+            else:  # pragma: no cover - compatibility fallback
+                self._runtime._start()
 
             self._default_context = self.create_context("default")
 
@@ -328,7 +330,10 @@ class DatalayerSandbox(Sandbox):
 
         try:
             if self._runtime:
-                self._runtime._stop()
+                if hasattr(self._runtime, "stop"):
+                    self._runtime.stop()
+                else:  # pragma: no cover - compatibility fallback
+                    self._runtime._stop()
         except Exception:
             pass  # Best effort cleanup
 

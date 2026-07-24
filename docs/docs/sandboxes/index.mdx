@@ -11,8 +11,8 @@ A sandbox is an isolated environment where code can be executed safely. Code San
 
 Use `Sandbox.create()` to create a new sandbox:
 
-Canonical variant names are `eval`, `docker`, `jupyter`, and `datalayer`.
-Older `local-*` names are no longer supported.
+Canonical variant names are `jupyter`, `docker`, `eval`, `monty`, `kaggle`,
+`colab`, `modal`, and `datalayer`. Older `local-*` names are no longer supported.
 
 ```python
 from code_sandboxes import Sandbox
@@ -50,44 +50,124 @@ sandbox = Sandbox.create(
 Concrete implementations are available from top-level modules:
 
 ```python
-from code_sandboxes.eval_sandbox import EvalSandbox
 from code_sandboxes.jupyter_sandbox import JupyterSandbox
 from code_sandboxes.docker_sandbox import DockerSandbox
+from code_sandboxes.eval_sandbox import EvalSandbox
 from code_sandboxes.datalayer_sandbox import DatalayerSandbox
 ```
 
-Code Sandboxes provides two categories of execution backends:
+Code Sandboxes provides local (in-process) and remote (out-of-process / cloud)
+execution backends. Each section below explains **how to obtain the credentials
+and parameters** required by that variant.
 
-### Sandboxes
+### Local Sandboxes
 
-sandboxes execute code in-process, sharing memory with the host Python process.
+Local sandboxes run on your machine with no external accounts.
+
+#### jupyter
+
+Runs code against a local or remote Jupyter Server and connects using
+`jupyter-kernel-client`. This variant provides process isolation via the Jupyter
+kernel and persistent state across requests.
+
+- **Requirements:** `jupyter_server` and `jupyter-kernel-client` (included by default).
+- **Parameters:** `server_url`, `token`, `host`/`port` (when the sandbox starts
+  its own server), `python_executable`.
+
+**How to obtain the `token`:**
+
+- If you start the server yourself, you choose the token:
+  ```bash
+  jupyter server --port 8888 --IdentityProvider.token MY_TOKEN
+  ```
+- For an already-running server, list servers and read the `token=...` value:
+  ```bash
+  jupyter server list
+  # http://localhost:8888/?token=abcd1234...  :: /home/you/notebooks
+  ```
+  You can also pass the full `http://host:port/?token=...` URL as `server_url`;
+  the token is parsed automatically.
+- If you omit `server_url`, `JupyterSandbox` **starts and manages its own local
+  Jupyter Server** and generates the token for you — no configuration needed.
+
+```python
+# Connect to an existing server:
+with Sandbox.create(
+    variant="jupyter",
+    server_url="http://localhost:8888",
+    token="MY_TOKEN",
+) as sandbox:
+    sandbox.run_code("x = 40")
+    result = sandbox.run_code("x + 2")
+    print(result.text)  # 42
+
+# Or let the sandbox manage a local server automatically:
+with Sandbox.create(variant="jupyter") as sandbox:
+    print(sandbox.run_code("1 + 1").text)  # 2
+```
 
 #### eval
 
 Uses Python's `exec()` for code execution. No isolation, but fast and simple for development.
 
+- **Credentials / parameters:** none — nothing to configure.
+- ⚠️ `eval` shares memory with the host process and provides no sandboxing. Never
+    run untrusted code with it.
+
 ```python
 with Sandbox.create(variant="eval") as sandbox:
-    result = sandbox.run_code("x = 1 + 1")
-    result = sandbox.run_code("print(x)")  # prints 2
+        result = sandbox.run_code("x = 1 + 1")
+        result = sandbox.run_code("print(x)")  # prints 2
 ```
 
-### Remote Sandboxes
+#### monty
 
-Remote sandboxes execute code out-of-process via the Jupyter kernel protocol, providing
-better isolation and persistent kernel state.
+Runs code in [Monty](https://github.com/pydantic/monty), a minimal, secure Python
+interpreter written in Rust (`pydantic-monty`). Monty runs a restricted subset of
+Python in-process with microsecond startup and no access to the host filesystem,
+environment, or network unless explicitly granted. It is ideal for short,
+LLM-generated snippets where a full container or kernel would be overkill.
+
+Session state (variables, imports, definitions) persists across `run_code` calls.
+Note that Monty supports only a subset of Python — third-party libraries and rich
+display outputs are not available.
+
+- **Requirements:** `code-sandboxes[monty]` (installs `pydantic-monty`).
+- **Credentials:** none required (fully local, in-process).
+- **Optional parameters** (on `MontySandbox`): `type_check` (type-check before
+    running), `type_check_stubs`, `external_functions` (`{name: callable}` host
+    functions the code may call), `limits` (memory / stack / time limits).
+
+```python
+with Sandbox.create(variant="monty") as sandbox:
+        sandbox.run_code("x = 21")
+        result = sandbox.run_code("x * 2")
+        print(result.text)  # 42
+```
+
+You can expose host callables to the sandboxed code and enable type checking:
+
+```python
+from code_sandboxes.monty_sandbox import MontySandbox
+
+sandbox = MontySandbox(
+        type_check=True,
+        external_functions={"now": lambda: "2026-01-01"},
+)
+sandbox.start()
+sandbox.run_code("print(now())")
+```
 
 #### docker
 
-Runs code in a Docker container for local isolated execution.
+Runs a Jupyter Server inside a Docker container for local isolated execution and
+connects using `jupyter-kernel-client`.
 
-This variant runs a Jupyter Server inside the container and connects using
-`jupyter-kernel-client`.
-
-```python
-with Sandbox.create(variant="docker", image="code-sandboxes-jupyter:latest") as sandbox:
-    result = sandbox.run_code("import sys; print(sys.version)")
-```
+- **Requirements:** `code-sandboxes[docker]` plus a running Docker Engine
+  (verify with `docker version`).
+- **Credentials:** none — the kernel `token` is generated automatically.
+- **Parameters:** `image` (default `code-sandboxes-jupyter:latest`),
+  `container_name`, `host`/`container_port`, `auto_remove`, `workdir`.
 
 Build the default image used by `DockerSandbox`:
 
@@ -95,26 +175,196 @@ Build the default image used by `DockerSandbox`:
 docker build -t code-sandboxes-jupyter:latest -f docker/Dockerfile .
 ```
 
-#### jupyter
+```python
+with Sandbox.create(variant="docker", image="code-sandboxes-jupyter:latest") as sandbox:
+    result = sandbox.run_code("import sys; print(sys.version)")
+    print(result.stdout)
+```
 
-Runs code against a local Jupyter Server and connects using `jupyter-kernel-client`.
-This variant provides process isolation via the Jupyter kernel and persistent
-state across requests.
+### Cloud Sandboxes
 
-Requirements: `jupyter_server` and `jupyter-kernel-client`.
+Cloud sandboxes run on managed infrastructure and require credentials.
+
+#### kaggle
+
+Runs code on Kaggle with two transparent modes:
+
+1. **Interactive kernel mode** using `KaggleKernelClient` (runtime proxy URL).
+2. **Batch job mode** using `KaggleKernelExecutor` when no runtime connection
+     details are supplied.
+
+- **Requirements:** `code-sandboxes[kaggle]`.
+- **Interactive parameters:** `server_url`, optional `kernel_id`, optional
+    `channels_url`, optional `token`.
+- **Batch credentials:** `~/.kaggle/kaggle.json` or
+    `KAGGLE_USERNAME` + `KAGGLE_KEY`.
 
 ```python
-with Sandbox.create(variant="jupyter") as sandbox:
+from code_sandboxes import Sandbox
+
+# Interactive mode (existing session / runtime proxy)
+with Sandbox.create(
+        variant="kaggle",
+        channels_url="wss://kkb-production.jupyter-proxy.kaggle.net/k/.../proxy/api/kernels/.../channels?session_id=...",
+) as sandbox:
+        print(sandbox.run_code("print(1 + 1)").text)
+
+# Transparent batch mode (no runtime URL required)
+with Sandbox.create(variant="kaggle") as sandbox:
+        result = sandbox.run_code("print('hello from kaggle batch')")
+        print(result.text or result.stdout)
+
+# Stream status updates and outputs while the Kaggle job runs.
+with Sandbox.create(variant="kaggle") as sandbox:
+    for event in sandbox.run_code_streaming("print('hello from kaggle stream')"):
+        if hasattr(event, "line"):
+            print(event.line)
+```
+
+#### colab
+
+Runs code against a Google Colab runtime. Colab exposes a Jupyter-compatible
+kernel behind an authenticating proxy, so this variant connects using
+`jupyter-kernel-client`'s `ColabKernelClient` under the hood.
+
+- **Requirements:** `code-sandboxes[colab]` (installs `jupyter-kernel-client`).
+- **Parameters:** `server_url`, `kernel_id`, `proxy_token` (pass as keyword
+    arguments or through the sandbox configuration). You can also pass
+    `channels_url` and let the client parse the values.
+
+**How to obtain these values** — they are the pieces of the WebSocket URL Colab's
+own frontend uses to reach your runtime:
+
+```
+wss://<host>/api/kernels/<kernel_id>/channels?session_id=<...>&colab-runtime-proxy-token=<proxy_token>&colab-client-agent=web
+```
+
+Read them from your browser's developer tools while a Colab runtime is connected:
+
+1. Open your notebook on [colab.research.google.com](https://colab.research.google.com)
+   and **connect to a runtime** (*Runtime → Connect*, or run any cell).
+2. Open DevTools (`F12`) → **Network** tab → **WS** filter, then run a cell to
+   trigger kernel traffic.
+3. Click the `.../api/kernels/<kernel_id>/channels?...` request and read off:
+   - **`server_url`** — scheme + host *before* `/api/kernels` (change `wss://` to
+     `https://`). Colab assigns a per-session host such as
+     `https://8080-m-s-kkb-...-d.us-east1-0.prod.colab.dev`; there is usually **no**
+     `/tun/m/...` path segment.
+   - **`kernel_id`** — the UUID right after `/api/kernels/`.
+   - **`proxy_token`** — the `colab-runtime-proxy-token` query parameter (same
+     value as the `X-Colab-Runtime-Proxy-Token` request header). Ignore the
+     `session_id` and `colab-client-agent` parameters.
+
+Consumer Colab does not expose an official third-party API to provision runtimes
+from scratch. Start/connect a runtime in the Colab UI first, then reuse it here.
+The values are tied to your Colab session and are short-lived — refresh them
+after the runtime is reassigned or reconnected.
+
+```python
+with Sandbox.create(
+    variant="colab",
+    server_url="https://8080-m-s-kkb-...-d.us-east1-0.prod.colab.dev",
+    kernel_id="c9bba548-3995-4f26-8e1a-7b8fbb10c578",
+    proxy_token="eyJhbGci....",
+) as sandbox:
     sandbox.run_code("x = 40")
     result = sandbox.run_code("x + 2")
     print(result.text)  # 42
 ```
 
-#### datalayer
-
-Cloud-based execution with full isolation, GPU support, and persistence.
+Or pass a channels URL directly:
 
 ```python
+with Sandbox.create(
+    variant="colab",
+    channels_url=(
+        "wss://<host>/api/kernels/<kernel_id>/channels"
+        "?session_id=<...>&colab-runtime-proxy-token=<proxy_token>&colab-client-agent=web"
+    ),
+) as sandbox:
+    print(sandbox.run_code("print(1 + 1)").text)
+```
+
+#### modal
+
+Runs code in a [Modal](https://modal.com/docs/guide) cloud sandbox, providing
+fully isolated, on-demand containers with configurable images and secrets.
+
+Each `run_code` call executes in a fresh `python -c` process, so state does **not**
+persist across calls (use a single multi-statement snippet if you need shared
+state). Configure the image with additional pip packages as needed.
+
+- **Requirements:** `code-sandboxes[modal]` (installs `modal`).
+- **Parameters:** `app_name`, `image` (a prebuilt `modal.Image`), `pip_packages`,
+  `python_executable`.
+
+**How to obtain Modal credentials:**
+
+1. Create a free account at [modal.com](https://modal.com).
+2. Authenticate the CLI (opens a browser, writes `~/.modal.toml`):
+   ```bash
+   modal token new
+   ```
+    This is enough for local use: the Modal SDK reads credentials from
+    `~/.modal.toml` automatically.
+3. Alternatively, create a token in the Modal dashboard (**Settings → API Tokens**)
+   and export `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`.
+
+**Do you need both `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`?**
+
+- For environment-based auth (CI/CD, containers, hosted runners): **yes**,
+  you need both values because Modal authenticates with a token pair
+  (public id + secret).
+- For local development with `modal token new`: **not necessarily**. The SDK can
+  authenticate directly from `~/.modal.toml`.
+
+If you need environment variables, you can export them from your local config:
+
+```bash
+python - <<'PY'
+import pathlib
+import tomllib
+
+cfg = tomllib.loads(pathlib.Path("~/.modal.toml").expanduser().read_text())
+profile = cfg.get("default", cfg)
+token_id = profile.get("token_id")
+token_secret = profile.get("token_secret")
+if token_id and token_secret:
+     print(f"export MODAL_TOKEN_ID={token_id}")
+     print(f"export MODAL_TOKEN_SECRET={token_secret}")
+else:
+     raise SystemExit("Could not find token_id/token_secret in ~/.modal.toml")
+PY
+```
+
+```python
+with Sandbox.create(
+    variant="modal",
+    pip_packages=["numpy"],
+) as sandbox:
+    result = sandbox.run_code("import numpy as np; print(np.arange(3).sum())")
+    print(result.stdout)  # "3"
+```
+
+#### datalayer
+
+Cloud-based execution with full isolation, GPU support, snapshots, and persistence.
+
+- **Requirements:** `code-sandboxes[datalayer]` (installs `agent_runtimes`).
+- **Parameters:** `token` (defaults to `DATALAYER_API_KEY`), `run_url`,
+  `snapshot_name`, plus creation options like `environment`, `gpu`, `cpu`, `memory`.
+
+**How to obtain Datalayer credentials:**
+
+1. Create an account at [datalayer.ai](https://datalayer.ai).
+2. Generate an API token from your account settings (**IAM → Tokens / API Keys**).
+3. Export `DATALAYER_API_KEY` (or pass it as the `token` parameter). Set
+   `DATALAYER_RUN_URL` only for a self-hosted / custom deployment.
+
+```python
+import os
+os.environ["DATALAYER_API_KEY"] = "your-datalayer-token"
+
 with Sandbox.create(
     variant="datalayer",
     gpu="A100",

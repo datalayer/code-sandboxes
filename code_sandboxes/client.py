@@ -43,14 +43,17 @@ Kubernetes / colocated-sidecar contract:
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Union
 
 from .base import Sandbox
 from .commands import CommandResult
-from .models import ExecutionResult, SandboxConfig, SandboxVariant
+from .models import CodeError, ExecutionResult, OutputMessage, Result, SandboxConfig, SandboxVariant
 
 __all__ = ["CodeExecutionOutcome", "CodeSandboxClient"]
+
+StreamingItem = Union[OutputMessage, Result, CodeError]
 
 
 @dataclass
@@ -88,14 +91,14 @@ class CodeExecutionOutcome:
     stdout: str = ""
     stderr: str = ""
     results: list[str] = field(default_factory=list)
-    error: Optional[str] = None
-    execution_error: Optional[str] = None
-    code_error: Optional[dict[str, str]] = None
-    exit_code: Optional[int] = None
+    error: str | None = None
+    execution_error: str | None = None
+    code_error: dict[str, str] | None = None
+    exit_code: int | None = None
     interrupted: bool = False
 
     @classmethod
-    def from_execution_result(cls, execution: ExecutionResult) -> "CodeExecutionOutcome":
+    def from_execution_result(cls, execution: ExecutionResult) -> CodeExecutionOutcome:
         """Build a normalized outcome from a raw :class:`ExecutionResult`."""
         results: list[str] = []
         for result in execution.results:
@@ -103,7 +106,7 @@ class CodeExecutionOutcome:
             if text:
                 results.append(text)
 
-        code_error_dict: Optional[dict[str, str]] = None
+        code_error_dict: dict[str, str] | None = None
         if execution.code_error is not None:
             code_error = execution.code_error
             code_error_dict = {
@@ -114,7 +117,7 @@ class CodeExecutionOutcome:
 
         exit_code = getattr(execution, "exit_code", None)
 
-        error: Optional[str] = None
+        error: str | None = None
         if not execution.execution_ok:
             error = execution.execution_error or "Sandbox infrastructure failure"
         elif code_error_dict is not None:
@@ -165,9 +168,9 @@ class CodeSandboxClient:
     def create(
         cls,
         variant: SandboxVariant | str = SandboxVariant.EVAL,
-        config: Optional[SandboxConfig] = None,
+        config: SandboxConfig | None = None,
         **kwargs,
-    ) -> "CodeSandboxClient":
+    ) -> CodeSandboxClient:
         """Create a client that owns a freshly created sandbox of ``variant``.
 
         Accepts the same keyword arguments as :meth:`Sandbox.create`.
@@ -181,7 +184,7 @@ class CodeSandboxClient:
         return self._sandbox
 
     @property
-    def variant(self) -> Optional[SandboxVariant]:
+    def variant(self) -> SandboxVariant | None:
         """The variant of the wrapped sandbox, if known."""
         return getattr(self._sandbox.config, "variant", None)
 
@@ -230,25 +233,23 @@ class CodeSandboxClient:
         self,
         code: str,
         language: str = "python",
-        timeout: Optional[float] = None,
-        envs: Optional[dict[str, str]] = None,
+        timeout: float | None = None,
+        envs: dict[str, str] | None = None,
     ) -> CodeExecutionOutcome:
         """Execute code and return a normalized outcome.
 
         The sandbox is started automatically if needed.
         """
         self.start()
-        execution = self._sandbox.run_code(
-            code, language=language, timeout=timeout, envs=envs
-        )
+        execution = self._sandbox.run_code(code, language=language, timeout=timeout, envs=envs)
         return CodeExecutionOutcome.from_execution_result(execution)
 
     async def execute_code_async(
         self,
         code: str,
         language: str = "python",
-        timeout: Optional[float] = None,
-        envs: Optional[dict[str, str]] = None,
+        timeout: float | None = None,
+        envs: dict[str, str] | None = None,
     ) -> CodeExecutionOutcome:
         """Async variant of :meth:`execute_code`."""
         await self.start_async()
@@ -257,19 +258,56 @@ class CodeSandboxClient:
         )
         return CodeExecutionOutcome.from_execution_result(execution)
 
-    def run_command(self, command: str, timeout: Optional[float] = None) -> CommandResult:
+    def execute_code_streaming(
+        self,
+        code: str,
+        language: str = "python",
+        timeout: float | None = None,
+        envs: dict[str, str] | None = None,
+    ) -> Iterator[StreamingItem]:
+        """Execute code and stream output events.
+
+        This is a thin variant-agnostic wrapper over
+        ``Sandbox.run_code_streaming``.
+        """
+        self.start()
+        yield from self._sandbox.run_code_streaming(
+            code,
+            language=language,
+            timeout=timeout,
+            envs=envs,
+        )
+
+    async def execute_code_streaming_async(
+        self,
+        code: str,
+        language: str = "python",
+        timeout: float | None = None,
+        envs: dict[str, str] | None = None,
+    ) -> AsyncIterator[StreamingItem]:
+        """Async variant of :meth:`execute_code_streaming`."""
+        await self.start_async()
+        async for item in self._sandbox.run_code_streaming_async(
+            code,
+            language=language,
+            timeout=timeout,
+            envs=envs,
+        ):
+            yield item
+
+    def run_command(self, command: str, timeout: float | None = None) -> CommandResult:
         """Run a shell command inside the sandbox."""
         self.start()
         return self._sandbox.commands.run(command, timeout=timeout)
 
-    def __enter__(self) -> "CodeSandboxClient":
+    def __enter__(self) -> CodeSandboxClient:
         self.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
 
-    async def __aenter__(self) -> "CodeSandboxClient":
+    async def __aenter__(self) -> CodeSandboxClient:
         await self.start_async()
         return self
 
