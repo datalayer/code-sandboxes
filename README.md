@@ -204,7 +204,7 @@ with Sandbox.create(variant="datalayer", snapshot_name="my-setup") as sandbox:
 
 ### Streaming Output
 
-```python
+````python
 from code_sandboxes import Sandbox, OutputMessage
 
 def handle_stdout(msg: OutputMessage):
@@ -246,7 +246,7 @@ with Sandbox.create(variant="kaggle") as sandbox:
     for event in client.execute_code_streaming("print('streaming')"):
         if hasattr(event, "line"):
             print(event.line)
-```
+````
 
 ```python
 import asyncio
@@ -261,7 +261,8 @@ async def main():
 
 asyncio.run(main())
 ```
-```
+
+````
 
 ## CLI REPL
 
@@ -274,7 +275,7 @@ sandbox repl --variant jupyter
 sandbox repl --variant monty
 sandbox repl --variant modal
 sandbox repl --variant colab
-```
+````
 
 If `--variant` is omitted, the CLI prompts for one.
 
@@ -477,9 +478,9 @@ sandbox.run_code("print(now())")
 Runs code against Kaggle with two transparent modes:
 
 1. **Interactive kernel mode** via `jupyter-kernel-client`'s
-    `KaggleKernelClient` (connect/create kernel on a runtime proxy).
-2. **Batch job mode** via `jupyter-kernel-client`'s `KaggleKernelExecutor`
-    (submit code as a Kaggle notebook job and return logs/results).
+   `KaggleKernelClient` (connect/create kernel on a runtime proxy).
+1. **Batch job mode** via `jupyter-kernel-client`'s `KaggleKernelExecutor`
+   (submit code as a Kaggle notebook job and return logs/results).
 
 This makes the `kaggle` sandbox usable directly from higher-level systems such
 as `jupyter-mcp-server` without requiring special routing logic.
@@ -501,12 +502,12 @@ pip install code-sandboxes[kaggle]
 
 **Parameters:**
 
-| Parameter      | Description |
-| -------------- | ----------- |
-| `server_url`   | The Kaggle runtime proxy URL (ending in `/proxy`) for interactive mode |
-| `kernel_id`    | The kernel identifier (omit to create a new kernel with a token in interactive mode) |
-| `channels_url` | A notebook session channels URL to parse `server_url`/`kernel_id` from |
-| `token`        | Kaggle API token for interactive kernel mode (falls back to `KAGGLE_API_TOKEN`) |
+| Parameter             | Description                                                                                                                                                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `server_url`          | The Kaggle runtime proxy URL (ending in `/proxy`) for interactive mode                                                                                                                                                                                       |
+| `kernel_id`           | The kernel identifier (omit to create a new kernel with a token in interactive mode)                                                                                                                                                                         |
+| `channels_url`        | A notebook session channels URL to parse `server_url`/`kernel_id` from                                                                                                                                                                                       |
+| `token`               | Kaggle API token for interactive kernel mode (falls back to `KAGGLE_API_TOKEN`)                                                                                                                                                                              |
 | `gpu` / `accelerator` | Optional batch-mode accelerator. Supports Kaggle API values (`NvidiaTeslaT4`, `NvidiaTeslaP100`, `NvidiaTeslaT4Highmem`, `NvidiaL4`, `NvidiaL4X1`, `NvidiaTeslaA100`, `NvidiaH100`, `NvidiaRtxPro6000`) and friendly aliases (`T4`, `P100`, `A100`, `H100`). |
 
 For **batch mode** (no `server_url`/`channels_url`), configure credentials as
@@ -598,11 +599,11 @@ pip install code-sandboxes[colab]
 
 **Parameters:**
 
-| Parameter     | Description                           |
-| ------------- | ------------------------------------- |
-| `server_url`  | The Colab runtime proxy/tunnel URL    |
-| `kernel_id`   | The assigned kernel identifier        |
-| `proxy_token` | The `colab-runtime-proxy-token` value |
+| Parameter      | Description                                                |
+| -------------- | ---------------------------------------------------------- |
+| `server_url`   | The Colab runtime proxy/tunnel URL                         |
+| `kernel_id`    | The assigned kernel identifier                             |
+| `proxy_token`  | The `colab-runtime-proxy-token` value                      |
 | `channels_url` | Optional Colab channels URL to parse the above values from |
 
 **How to obtain these values** — they are the pieces of the WebSocket URL that

@@ -355,7 +355,7 @@ class KaggleSandbox(Sandbox):
             interrupted=was_interrupted,
         )
 
-    def run_code_streaming(
+    def run_code_streaming(  # noqa: C901
         self,
         code: str,
         language: str = "python",
@@ -388,7 +388,6 @@ class KaggleSandbox(Sandbox):
             env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
             code = f"{env_code}\n{code}"
 
-        started_at = time.time()
         self._interrupt_requested.clear()
         self._executing_event.set()
 
@@ -411,7 +410,11 @@ class KaggleSandbox(Sandbox):
         except Exception as exc:
             self._executing_event.clear()
             self._interrupt_requested.clear()
-            yield CodeError(name="SandboxExecutionError", value=f"Failed to submit Kaggle batch job: {exc}", traceback="")
+            yield CodeError(
+                name="SandboxExecutionError",
+                value=f"Failed to submit Kaggle batch job: {exc}",
+                traceback="",
+            )
             return
 
         now = time.time()
@@ -524,7 +527,7 @@ class KaggleSandbox(Sandbox):
         ):
             yield item
 
-    def _run_code_batch(
+    def _run_code_batch(  # noqa: C901
         self,
         code: str,
         language: str,
@@ -568,9 +571,13 @@ class KaggleSandbox(Sandbox):
             self._executing_event.clear()
             was_interrupted = self._interrupt_requested.is_set()
             self._interrupt_requested.clear()
+            execution_error = None
+            if not was_interrupted:
+                execution_error = f"Failed to execute Kaggle batch job: {e}"
+
             return ExecutionResult(
                 execution_ok=False,
-                execution_error=f"Failed to execute Kaggle batch job: {e}" if not was_interrupted else None,
+                execution_error=execution_error,
                 started_at=started_at,
                 completed_at=time.time(),
                 context_id=context.id if context else "default",
@@ -642,8 +649,14 @@ class KaggleSandbox(Sandbox):
                 on_result(output_result)
 
         if not result.succeeded and code_error is None:
-            failure = result.failure_message or f"Kaggle execution failed with status: {result.status}"
-            code_error = CodeError(name="KaggleExecutionError", value=failure, traceback=result.log or "")
+            failure = result.failure_message or (
+                f"Kaggle execution failed with status: {result.status}"
+            )
+            code_error = CodeError(
+                name="KaggleExecutionError",
+                value=failure,
+                traceback=result.log or "",
+            )
             if on_error:
                 on_error(code_error)
             err_msg = OutputMessage(line=failure, timestamp=now, error=True)

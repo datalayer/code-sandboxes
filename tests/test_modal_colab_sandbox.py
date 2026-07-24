@@ -7,6 +7,7 @@
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import pytest
@@ -258,7 +259,7 @@ def test_kaggle_batch_mode_consumes_kernel_like_reply(monkeypatch):
         version_number = 1
         failure_message = None
         output_dir = None
-        output_files = []
+        output_files: ClassVar[list[str]] = []
         log = None
         succeeded = True
 
@@ -328,7 +329,7 @@ def test_kaggle_batch_mode_streaming_emits_status_and_stdout(monkeypatch):
         log = None
         notebook = None
         output_dir = None
-        output_files = []
+        output_files: ClassVar[list[str]] = []
 
         @staticmethod
         def to_kernel_reply():
