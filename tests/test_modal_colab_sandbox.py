@@ -5,9 +5,14 @@
 """Unit tests for Modal/Colab sandbox execution edge cases."""
 
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from code_sandboxes.colab_sandbox import ColabSandbox
+from code_sandboxes.kaggle_sandbox import KaggleSandbox
 from code_sandboxes.modal_sandbox import ModalSandbox
 from code_sandboxes.models import SandboxConfig
 
@@ -30,11 +35,20 @@ class _FakeProcess:
         return None
 
 
+class _FakeModalRuntime:
+    def __init__(self, process: _FakeProcess):
+        self._process = process
+        self.exec_kwargs: dict | None = None
+
+    def exec(self, *_args, **kwargs):
+        self.exec_kwargs = kwargs
+        return self._process
+
+
 def _started_modal_with_process(process: _FakeProcess) -> ModalSandbox:
     sandbox = ModalSandbox(config=SandboxConfig(timeout=10.0))
     sandbox._started = True
-    sandbox._sandbox = MagicMock()
-    sandbox._sandbox.exec.return_value = process
+    sandbox._sandbox = _FakeModalRuntime(process)
     return sandbox
 
 
@@ -44,9 +58,11 @@ def test_modal_sub_second_timeout_is_rounded_for_modal_exec():
 
     sandbox.run_code("print('ok')", timeout=0.5)
 
-    assert sandbox._sandbox.exec.call_args.kwargs["timeout"] == 1
+    assert sandbox._sandbox.exec_kwargs is not None
+    assert sandbox._sandbox.exec_kwargs["timeout"] == 1
 
 
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 def test_modal_code_error_does_not_set_exit_code():
     """Python exceptions should be surfaced as code_error, not exit_code."""
     sandbox = _started_modal_with_process(
@@ -87,6 +103,278 @@ def test_colab_execute_exception_sets_execution_ok_false():
     assert result.execution_ok is False
     assert result.execution_error is not None
     assert "Failed to execute code" in result.execution_error
+
+
+def test_kaggle_execute_exception_sets_execution_ok_false():
+    """Infrastructure execute errors must set execution_ok to False."""
+    sandbox = KaggleSandbox(
+        config=SandboxConfig(timeout=10.0),
+        server_url="https://kaggle-host.example/proxy",
+        kernel_id="kernel-id",
+    )
+    sandbox._started = True
+    sandbox._client = MagicMock()
+    sandbox._client.execute.side_effect = RuntimeError("connection dropped")
+
+    result = sandbox.run_code("print('ok')")
+
+    assert result.execution_ok is False
+    assert result.execution_error is not None
+    assert "Failed to execute code" in result.execution_error
+
+
+def test_kaggle_batch_mode_runs_without_runtime_connection(monkeypatch):
+    """Without runtime URL/channels, KaggleSandbox falls back to batch executor."""
+
+    class _FakeKaggleExecutor:
+        def __init__(self, username=None, quiet=True):
+            self.username = username
+            self.quiet = quiet
+
+        def execute(self, code, wait=True, timeout=0.0, download_output=True, accelerator=None):
+            assert "print('ok')" in code
+            return SimpleNamespace(
+                slug="demo-slug",
+                status="complete",
+                url="https://www.kaggle.com/code/demo/demo-slug",
+                version_number=1,
+                failure_message=None,
+                output_dir=None,
+                output_files=[],
+                log="ok\n42",
+                notebook=None,
+                succeeded=True,
+            )
+
+    monkeypatch.setitem(
+        sys.modules,
+        "jupyter_kernel_client",
+        SimpleNamespace(KaggleKernelExecutor=_FakeKaggleExecutor),
+    )
+
+    sandbox = KaggleSandbox(config=SandboxConfig(timeout=10.0))
+    sandbox.start()
+
+    result = sandbox.run_code("print('ok')")
+
+    assert result.execution_ok is True
+    assert result.code_error is None
+    assert "ok" in result.stdout
+    assert result.text == "ok\n42"
+    assert sandbox.info is not None
+    assert sandbox.info.metadata["mode"] == "batch"
+
+    sandbox.stop()
+
+
+def test_kaggle_batch_mode_maps_job_failure_to_code_error(monkeypatch):
+    """A failed Kaggle batch job is returned as a code-level execution error."""
+
+    class _FakeKaggleExecutor:
+        def __init__(self, username=None, quiet=True):
+            self.username = username
+            self.quiet = quiet
+
+        def execute(self, code, wait=True, timeout=0.0, download_output=True, accelerator=None):
+            return SimpleNamespace(
+                slug="demo-slug",
+                status="error",
+                url="https://www.kaggle.com/code/demo/demo-slug",
+                version_number=1,
+                failure_message="Notebook failed",
+                output_dir=None,
+                output_files=[],
+                log="Traceback\nValueError: boom",
+                notebook=None,
+                succeeded=False,
+            )
+
+    monkeypatch.setitem(
+        sys.modules,
+        "jupyter_kernel_client",
+        SimpleNamespace(KaggleKernelExecutor=_FakeKaggleExecutor),
+    )
+
+    sandbox = KaggleSandbox(config=SandboxConfig(timeout=10.0))
+    sandbox.start()
+
+    result = sandbox.run_code("raise ValueError('boom')")
+
+    assert result.execution_ok is True
+    assert result.code_error is not None
+    assert result.code_error.name == "KaggleExecutionError"
+    assert result.stderr == "Notebook failed"
+
+    sandbox.stop()
+
+
+def test_kaggle_batch_mode_forwards_gpu_as_accelerator(monkeypatch):
+    """Kaggle batch mode should map sandbox gpu setting to executor accelerator."""
+
+    captured: dict[str, str | None] = {}
+
+    class _FakeKaggleExecutor:
+        def __init__(self, username=None, quiet=True):
+            self.username = username
+            self.quiet = quiet
+
+        def execute(self, code, wait=True, timeout=0.0, download_output=True, accelerator=None):
+            captured["accelerator"] = accelerator
+            return SimpleNamespace(
+                slug="demo-slug",
+                status="complete",
+                url="https://www.kaggle.com/code/demo/demo-slug",
+                version_number=1,
+                failure_message=None,
+                output_dir=None,
+                output_files=[],
+                log="ok",
+                notebook=None,
+                succeeded=True,
+            )
+
+    monkeypatch.setitem(
+        sys.modules,
+        "jupyter_kernel_client",
+        SimpleNamespace(KaggleKernelExecutor=_FakeKaggleExecutor),
+    )
+
+    sandbox = KaggleSandbox(config=SandboxConfig(timeout=10.0, gpu="T4"))
+    sandbox.start()
+    sandbox.run_code("print('ok')")
+
+    assert captured["accelerator"] == "T4"
+
+    sandbox.stop()
+
+
+def test_kaggle_batch_mode_consumes_kernel_like_reply(monkeypatch):
+    """Batch mode should map kernel-like reply to logs/results like interactive mode."""
+
+    class _FakeKaggleResult:
+        slug = "demo-slug"
+        status = "COMPLETE"
+        url = "https://www.kaggle.com/code/demo/demo-slug"
+        version_number = 1
+        failure_message = None
+        output_dir = None
+        output_files = []
+        log = None
+        succeeded = True
+
+        @staticmethod
+        def to_kernel_reply():
+            return {
+                "execution_count": 7,
+                "status": "ok",
+                "outputs": [
+                    {"output_type": "stream", "name": "stdout", "text": "hello from kaggle\\n"},
+                    {
+                        "output_type": "execute_result",
+                        "data": {"text/plain": "42"},
+                        "metadata": {},
+                    },
+                ],
+            }
+
+    class _FakeKaggleExecutor:
+        def __init__(self, username=None, quiet=True):
+            self.username = username
+            self.quiet = quiet
+
+        def execute(self, code, wait=True, timeout=0.0, download_output=True, accelerator=None):
+            return _FakeKaggleResult()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "jupyter_kernel_client",
+        SimpleNamespace(KaggleKernelExecutor=_FakeKaggleExecutor),
+    )
+
+    sandbox = KaggleSandbox(config=SandboxConfig(timeout=10.0))
+    sandbox.start()
+
+    result = sandbox.run_code("print('ok')")
+
+    assert result.execution_ok is True
+    assert result.code_error is None
+    assert result.execution_count == 7
+    assert "hello from kaggle" in result.stdout
+    assert result.text == "42"
+
+    sandbox.stop()
+
+
+def test_kaggle_batch_mode_streaming_emits_status_and_stdout(monkeypatch):
+    """run_code_streaming should emit Kaggle status updates and final output lines."""
+
+    class _FakeStatus:
+        def __init__(self, status, failure_message=None):
+            self.status = status
+            self.failure_message = failure_message
+
+    class _FakeApi:
+        def __init__(self):
+            self._statuses = ["RUNNING", "COMPLETE"]
+
+        def kernels_status(self, _slug):
+            status = self._statuses.pop(0) if len(self._statuses) > 1 else self._statuses[0]
+            return _FakeStatus(status)
+
+    class _FakeKaggleResult:
+        slug = "demo/demo-slug"
+        status = "QUEUED"
+        failure_message = None
+        log = None
+        notebook = None
+        output_dir = None
+        output_files = []
+
+        @staticmethod
+        def to_kernel_reply():
+            return {
+                "execution_count": 1,
+                "status": "ok",
+                "outputs": [
+                    {"output_type": "stream", "name": "stdout", "text": "hello from kaggle\\n"}
+                ],
+            }
+
+    class _FakeKaggleExecutor:
+        def __init__(self, username=None, quiet=True):
+            self.username = username
+            self.quiet = quiet
+            self.api = _FakeApi()
+
+        def execute(self, code, wait=True, timeout=0.0, download_output=True, accelerator=None):
+            assert "print('ok')" in code
+            assert wait is False
+            return _FakeKaggleResult()
+
+        def output(self, slug, dest, force=True, quiet=None):
+            _ = (slug, force, quiet)
+            path = Path(dest) / "run.log"
+            path.write_text("[]", encoding="utf-8")
+            return [str(path)]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "jupyter_kernel_client",
+        SimpleNamespace(KaggleKernelExecutor=_FakeKaggleExecutor),
+    )
+
+    sandbox = KaggleSandbox(config=SandboxConfig(timeout=10.0), poll_interval=0.0)
+    sandbox.start()
+
+    items = list(sandbox.run_code_streaming("print('ok')"))
+    lines = [item.line for item in items if hasattr(item, "line")]
+
+    assert any("submitted job" in line for line in lines)
+    assert any("status: RUNNING" in line for line in lines)
+    assert any("status: COMPLETE" in line for line in lines)
+    assert any("hello from kaggle" in line for line in lines)
+
+    sandbox.stop()
 
 
 def test_modal_start_uses_supported_default_python_version(monkeypatch):

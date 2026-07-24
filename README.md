@@ -25,9 +25,9 @@ This package provides a unified API for code execution with features like:
 
 ## Sandbox Variants
 
-Seven variants are available. Canonical variant names are `jupyter`, `docker`,
-`eval`, `monty`, `colab`, `modal`, and `datalayer`. The older `local-*` names
-are no longer supported.
+Eight variants are available. Canonical variant names are `jupyter`, `docker`,
+`eval`, `monty`, `kaggle`, `colab`, `modal`, and `datalayer`. The older `local-*`
+names are no longer supported.
 
 | Variant     | Isolation                     | Use Case                         |
 | ----------- | ----------------------------- | -------------------------------- |
@@ -35,6 +35,7 @@ are no longer supported.
 | `docker`    | Container (Jupyter Server)    | Local isolated execution         |
 | `eval`      | None (Python exec)            | Development, testing             |
 | `monty`     | In-process secure interpreter | Fast, safe LLM snippets          |
+| `kaggle`    | Kaggle notebook runtime       | Free hosted GPU/CPU kernels      |
 | `colab`     | Google Colab runtime          | Free hosted GPU/CPU kernels      |
 | `modal`     | Modal cloud container         | On-demand isolated cloud compute |
 | `datalayer` | Cloud VM                      | Production, GPU workloads        |
@@ -50,6 +51,7 @@ Sandbox implementations are exposed as top-level modules:
 - `code_sandboxes.docker_sandbox`
 - `code_sandboxes.eval_sandbox`
 - `code_sandboxes.monty_sandbox`
+- `code_sandboxes.kaggle_sandbox`
 - `code_sandboxes.colab_sandbox`
 - `code_sandboxes.modal_sandbox`
 - `code_sandboxes.datalayer_sandbox`
@@ -61,6 +63,7 @@ from code_sandboxes.jupyter_sandbox import JupyterSandbox
 from code_sandboxes.docker_sandbox import DockerSandbox
 from code_sandboxes.eval_sandbox import EvalSandbox
 from code_sandboxes.monty_sandbox import MontySandbox
+from code_sandboxes.kaggle_sandbox import KaggleSandbox
 from code_sandboxes.colab_sandbox import ColabSandbox
 from code_sandboxes.modal_sandbox import ModalSandbox
 from code_sandboxes.datalayer_sandbox import DatalayerSandbox
@@ -77,6 +80,9 @@ pip install code-sandboxes[datalayer]
 
 # With Docker support
 pip install code-sandboxes[docker]
+
+# With Kaggle support
+pip install code-sandboxes[kaggle]
 
 # With Google Colab support
 pip install code-sandboxes[colab]
@@ -213,6 +219,48 @@ with Sandbox.create() as sandbox:
         on_stdout=handle_stdout,
         on_stderr=handle_stderr,
     )
+
+# Kaggle batch mode also supports streaming status/output events.
+with Sandbox.create(variant="kaggle") as sandbox:
+    for event in sandbox.run_code_streaming("print('hello from kaggle stream')"):
+        if hasattr(event, "line"):
+            print(event.line)
+
+### High-level Client API
+
+`CodeSandboxClient` provides a variant-agnostic facade with normalized outcomes.
+It is useful in higher-level systems that need a stable API across all sandbox
+engines.
+
+```python
+from code_sandboxes import Sandbox, CodeSandboxClient
+
+with Sandbox.create(variant="kaggle") as sandbox:
+    client = CodeSandboxClient(sandbox)
+
+    # One-shot normalized outcome.
+    outcome = client.execute_code("print('hello')")
+    print(outcome.success, outcome.stdout, outcome.stderr)
+
+    # Stream normalized events (sync).
+    for event in client.execute_code_streaming("print('streaming')"):
+        if hasattr(event, "line"):
+            print(event.line)
+```
+
+```python
+import asyncio
+from code_sandboxes import Sandbox, CodeSandboxClient
+
+async def main():
+    with Sandbox.create(variant="kaggle") as sandbox:
+        client = CodeSandboxClient(sandbox)
+        async for event in client.execute_code_streaming_async("print('async stream')"):
+            if hasattr(event, "line"):
+                print(event.line)
+
+asyncio.run(main())
+```
 ```
 
 ## CLI REPL
@@ -233,6 +281,7 @@ If `--variant` is omitted, the CLI prompts for one.
 Variant notes:
 
 - `jupyter`: starts a managed local Jupyter server on a random port.
+- `kaggle`: supports interactive runtime mode and batch mode (credentials based).
 - `monty`: starts a Monty REPL-backed sandbox.
 - `modal`: starts a Modal sandbox container.
 - `colab`: prompts for runtime URL, kernel ID, and proxy token.
@@ -423,7 +472,119 @@ sandbox.run_code("print(now())")
 > Monty supports only a subset of Python — third-party libraries and rich display
 > outputs are not available.
 
-### 5. Google Colab
+### 5. Kaggle
+
+Runs code against Kaggle with two transparent modes:
+
+1. **Interactive kernel mode** via `jupyter-kernel-client`'s
+    `KaggleKernelClient` (connect/create kernel on a runtime proxy).
+2. **Batch job mode** via `jupyter-kernel-client`'s `KaggleKernelExecutor`
+    (submit code as a Kaggle notebook job and return logs/results).
+
+This makes the `kaggle` sandbox usable directly from higher-level systems such
+as `jupyter-mcp-server` without requiring special routing logic.
+
+Interactive-kernel authentication supports:
+
+- **API token (default).** Provide a Kaggle API token via `token` or the
+  `KAGGLE_API_TOKEN` environment variable. When `kernel_id` is omitted, a new
+  kernel is created on the runtime.
+- **Signed proxy URL.** Connect to an already-running notebook session using its
+  `server_url` and `kernel_id`; the signed JWT embedded in the proxied
+  `server_url` provides the authentication (no token needed).
+
+**Install:**
+
+```bash
+pip install code-sandboxes[kaggle]
+```
+
+**Parameters:**
+
+| Parameter      | Description |
+| -------------- | ----------- |
+| `server_url`   | The Kaggle runtime proxy URL (ending in `/proxy`) for interactive mode |
+| `kernel_id`    | The kernel identifier (omit to create a new kernel with a token in interactive mode) |
+| `channels_url` | A notebook session channels URL to parse `server_url`/`kernel_id` from |
+| `token`        | Kaggle API token for interactive kernel mode (falls back to `KAGGLE_API_TOKEN`) |
+| `gpu` / `accelerator` | Optional batch-mode accelerator. Supports Kaggle API values (`NvidiaTeslaT4`, `NvidiaTeslaP100`, `NvidiaTeslaT4Highmem`, `NvidiaL4`, `NvidiaL4X1`, `NvidiaTeslaA100`, `NvidiaH100`, `NvidiaRtxPro6000`) and friendly aliases (`T4`, `P100`, `A100`, `H100`). |
+
+For **batch mode** (no `server_url`/`channels_url`), configure credentials as
+the official `kaggle` package expects (`~/.kaggle/kaggle.json` or
+`KAGGLE_USERNAME` + `KAGGLE_KEY`).
+
+**Obtaining connection values** — to connect to an existing session, the
+`server_url` / `kernel_id` come from an active browser session. The official
+Kaggle API (`kaggle` CLI / `kagglehub`) only exposes *batch* kernel operations
+(push/pull/status/output) for running notebooks as jobs, not an interactive
+WebSocket kernel. Read the values from the WebSocket *channels* URL:
+
+```
+wss://kkb-production.jupyter-proxy.kaggle.net/k/<n>/<jwt>/proxy/api/kernels/<kernel_id>/channels?session_id=<...>
+```
+
+1. Open your notebook on [kaggle.com](https://www.kaggle.com) and start a session
+   (run any cell).
+1. Open DevTools (`F12`) → **Network** tab, select the **WS** filter (or type
+   `channels`), then run a cell to trigger kernel traffic.
+1. Click the `.../proxy/api/kernels/<kernel_id>/channels?...` request and copy its
+   URL. The signed JWT in the `/k/<n>/<jwt>/proxy` path segment carries the
+   authentication. These values are tied to your session and are short-lived —
+   refresh them after reconnecting.
+
+**Usage:**
+
+```python
+import os
+from code_sandboxes import Sandbox
+
+# Option A: create a kernel with a Kaggle API token (omit kernel_id).
+os.environ["KAGGLE_API_TOKEN"] = "..."  # or export it in your shell
+with Sandbox.create(
+    variant="kaggle",
+    server_url="https://kkb-production.jupyter-proxy.kaggle.net/k/12345678/eyJ.../proxy",
+) as sandbox:
+    sandbox.run_code("x = 40")
+    print(sandbox.run_code("x + 2").text)  # 42
+
+# Option B: pass an existing session's channels URL and let the sandbox parse it.
+with Sandbox.create(
+    variant="kaggle",
+    channels_url="wss://kkb-production.jupyter-proxy.kaggle.net/k/12345678/eyJ.../proxy/api/kernels/11e073f0-.../channels?session_id=...",
+) as sandbox:
+    print(sandbox.run_code("print(1 + 1)").text)
+
+# Option C: pass the server_url and kernel_id explicitly.
+with Sandbox.create(
+    variant="kaggle",
+    server_url="https://kkb-production.jupyter-proxy.kaggle.net/k/12345678/eyJ.../proxy",
+    kernel_id="11e073f0-e82d-4029-be8d-3918f7ed1a9e",
+) as sandbox:
+    print(sandbox.run_code("print(1 + 1)").text)
+
+# Option D: transparent batch mode (no runtime URL needed).
+# Requires kaggle.json or KAGGLE_USERNAME/KAGGLE_KEY credentials.
+with Sandbox.create(variant="kaggle") as sandbox:
+    result = sandbox.run_code("print('hello from kaggle batch')")
+    print(result.text or result.stdout)
+
+# Option E: batch mode with a specific accelerator.
+with Sandbox.create(variant="kaggle", gpu="T4") as sandbox:
+    result = sandbox.run_code("import torch; print(torch.cuda.is_available())")
+    print(result.text or result.stdout)
+
+# Option F: stream batch progress + outputs.
+with Sandbox.create(variant="kaggle") as sandbox:
+    for event in sandbox.run_code_streaming("print('hello from kaggle stream')"):
+        if hasattr(event, "line"):
+            print(event.line)
+```
+
+> Note: Kaggle free-tier availability usually includes `P100` and `T4`.
+> Accelerators like `A100`, `H100`, and `L4` are often restricted to specific
+> competitions or internal Kaggle workloads.
+
+### 6. Google Colab
 
 Runs code against a Google Colab runtime. Colab exposes a Jupyter-compatible
 kernel behind an authenticating proxy, so this variant connects using
@@ -442,6 +603,7 @@ pip install code-sandboxes[colab]
 | `server_url`  | The Colab runtime proxy/tunnel URL    |
 | `kernel_id`   | The assigned kernel identifier        |
 | `proxy_token` | The `colab-runtime-proxy-token` value |
+| `channels_url` | Optional Colab channels URL to parse the above values from |
 
 **How to obtain these values** — they are the pieces of the WebSocket URL that
 Colab's own frontend uses to reach your assigned runtime:
@@ -466,11 +628,10 @@ Read them from your browser's developer tools:
      value as the `X-Colab-Runtime-Proxy-Token` request header). Ignore the
      `session_id` and `colab-client-agent` parameters.
 
-The programmatic "runtime assignment API" is the internal endpoint Colab's
-frontend calls (authenticated with your Google session); it is not an officially
-published public API, so the DevTools method above is the practical approach. The
-values are tied to your Colab session and are short-lived — refresh them after the
-runtime is reassigned or reconnected.
+Consumer Colab does not expose an official third-party API to provision runtimes
+from scratch. Start/connect a runtime in the Colab UI first, then reuse it here.
+The values are tied to your Colab session and are short-lived — refresh them
+after the runtime is reassigned or reconnected.
 
 **Usage:**
 
@@ -487,27 +648,22 @@ with Sandbox.create(
     print(sandbox.run_code("x + 2").text)  # 42
 ```
 
-**Browser bridge (no manual DevTools):** instead of copying the values by hand,
-set `use_browser_bridge=True` to obtain them from an authenticated Colab browser
-session. This reuses `jupyter-kernel-client`'s browser bridge: a short-lived
-localhost WebSocket server is opened with a one-time token, a Colab page is
-launched, and the authenticated tab posts the runtime `server_url` /
-`kernel_id` / `proxy_token` back to the process. Google credentials never leave
-the browser.
+You can also pass the channels URL directly and let the sandbox parse it:
 
 ```python
 from code_sandboxes import Sandbox
 
-with Sandbox.create(variant="colab", use_browser_bridge=True) as sandbox:
+with Sandbox.create(
+    variant="colab",
+    channels_url=(
+        "wss://<host>/api/kernels/<kernel_id>/channels"
+        "?session_id=<...>&colab-runtime-proxy-token=<proxy_token>&colab-client-agent=web"
+    ),
+) as sandbox:
     print(sandbox.run_code("print(1 + 1)").text)
 ```
 
-Install the bridge extra with `pip install 'jupyter-kernel-client[bridge]'`. The
-browser side must run a cooperating page/extension/userscript that reads the
-token and port from the launch URL and sends the payload (see the
-`jupyter-kernel-client` README for the contract).
-
-### 6. Modal
+### 7. Modal
 
 Runs code in a [Modal](https://modal.com/docs/guide) cloud sandbox, providing
 fully isolated, on-demand containers with configurable images and secrets.
@@ -588,7 +744,7 @@ with Sandbox.create(
 > persist across calls. Use a single multi-statement snippet when you need shared
 > state.
 
-### 7. Datalayer
+### 8. Datalayer
 
 Cloud-based execution with full isolation, GPU support, snapshots, and
 persistence via the [Datalayer](https://datalayer.ai) runtime, powered by the

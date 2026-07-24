@@ -46,6 +46,7 @@ class TestModels:
         assert SandboxVariantEnum.JUPYTER.value == "jupyter"
         assert SandboxVariantEnum.DATALAYER.value == "datalayer"
         assert SandboxVariantEnum.COLAB.value == "colab"
+        assert SandboxVariantEnum.KAGGLE.value == "kaggle"
         assert SandboxVariantEnum.MONTY.value == "monty"
         assert SandboxVariantEnum.MODAL.value == "modal"
 

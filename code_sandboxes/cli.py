@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import typer
@@ -21,6 +22,7 @@ _SUPPORTED_REPL_VARIANTS = {
     "eval",
     "monty",
     "colab",
+    "kaggle",
     "modal",
     "datalayer",
 }
@@ -104,13 +106,27 @@ def _resolve_variant_kwargs(
             hide_input=True,
         )
 
+    if variant == "kaggle":
+        kwargs["server_url"] = server_url or typer.prompt("Kaggle runtime proxy URL (RUNTIME_URL)")
+        # kernel_id is optional: leave empty to create a new kernel (needs a token).
+        resolved_kernel_id = kernel_id or typer.prompt(
+            "Kaggle kernel id (RUNTIME_ID, leave empty to create a new kernel)",
+            default="",
+            show_default=False,
+        )
+        if resolved_kernel_id:
+            kwargs["kernel_id"] = resolved_kernel_id
+        resolved_token = token or os.environ.get("KAGGLE_API_TOKEN")
+        if resolved_token:
+            kwargs["token"] = resolved_token
+
     if variant == "datalayer":
         if token:
             kwargs["token"] = token
         if run_url:
             kwargs["run_url"] = run_url
 
-    if variant in {"modal", "datalayer"} and gpu:
+    if variant in {"modal", "datalayer", "kaggle"} and gpu:
         kwargs["gpu"] = gpu
 
     return kwargs
@@ -192,7 +208,7 @@ def repl(
         None,
         "--variant",
         "-v",
-        help="Sandbox variant (jupyter, docker, eval, monty, colab, modal, datalayer).",
+        help="Sandbox variant (jupyter, docker, eval, monty, colab, kaggle, modal, datalayer).",
     ),
     timeout: float = typer.Option(60.0, help="Default code execution timeout (seconds)."),
     environment: str | None = typer.Option(
@@ -207,7 +223,11 @@ def repl(
     gpu: str | None = typer.Option(
         None,
         "--gpu",
-        help="GPU flavor for supported variants (e.g., modal/datalayer: T4, A10G, A100, H100).",
+        help=(
+            "GPU flavor / accelerator for supported variants "
+            "(modal/datalayer examples: T4, A10G, A100, H100; "
+            "kaggle examples: NvidiaTeslaT4, NvidiaTeslaP100, or aliases T4/P100)."
+        ),
     ),
 ) -> None:
     """Launch an interactive REPL against the selected sandbox variant.

@@ -72,6 +72,50 @@ def test_repl_colab_prompts_and_forwards_credentials(monkeypatch):
     assert captured["kwargs"]["proxy_token"] == "proxy-xyz"  # noqa: S105
 
 
+def test_repl_kaggle_prompts_and_forwards_credentials(monkeypatch):
+    runner = CliRunner()
+    captured: dict = {}
+
+    def _fake_create(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return _FakeSandbox()
+
+    monkeypatch.setattr(sandbox_cli.Sandbox, "create", staticmethod(_fake_create))
+    monkeypatch.setenv("KAGGLE_API_TOKEN", "env-token")
+
+    # Prompts: server_url, kernel_id, then repl command.
+    user_input = "https://kaggle-host.example/proxy\nkernel-abc\n:exit\n"
+    result = runner.invoke(sandbox_cli.app, ["repl", "--variant", "kaggle"], input=user_input)
+
+    assert result.exit_code == 0
+    assert captured["kwargs"]["variant"] == "kaggle"
+    assert captured["kwargs"]["server_url"] == "https://kaggle-host.example/proxy"
+    assert captured["kwargs"]["kernel_id"] == "kernel-abc"
+    assert captured["kwargs"]["token"] == "env-token"  # noqa: S105
+
+
+def test_repl_kaggle_creates_kernel_without_kernel_id(monkeypatch):
+    runner = CliRunner()
+    captured: dict = {}
+
+    def _fake_create(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return _FakeSandbox()
+
+    monkeypatch.setattr(sandbox_cli.Sandbox, "create", staticmethod(_fake_create))
+    monkeypatch.setenv("KAGGLE_API_TOKEN", "env-token")
+
+    # Prompts: server_url, empty kernel_id (create new), then repl command.
+    user_input = "https://kaggle-host.example/proxy\n\n:exit\n"
+    result = runner.invoke(sandbox_cli.app, ["repl", "--variant", "kaggle"], input=user_input)
+
+    assert result.exit_code == 0
+    assert captured["kwargs"]["variant"] == "kaggle"
+    assert captured["kwargs"]["server_url"] == "https://kaggle-host.example/proxy"
+    assert "kernel_id" not in captured["kwargs"]
+    assert captured["kwargs"]["token"] == "env-token"  # noqa: S105
+
+
 def test_root_defaults_to_jupyter_repl(monkeypatch):
     runner = CliRunner()
     captured: dict = {}
@@ -108,3 +152,27 @@ def test_repl_modal_gpu_is_forwarded(monkeypatch):
     assert result.exit_code == 0
     assert captured["kwargs"]["variant"] == "modal"
     assert captured["kwargs"]["gpu"] == "A100"
+
+
+def test_repl_kaggle_gpu_is_forwarded(monkeypatch):
+    runner = CliRunner()
+    captured: dict = {}
+
+    def _fake_create(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return _FakeSandbox()
+
+    monkeypatch.setattr(sandbox_cli.Sandbox, "create", staticmethod(_fake_create))
+    monkeypatch.setenv("KAGGLE_API_TOKEN", "env-token")
+
+    # Prompts: server_url, empty kernel_id (create new), then repl command.
+    user_input = "https://kaggle-host.example/proxy\n\n:exit\n"
+    result = runner.invoke(
+        sandbox_cli.app,
+        ["repl", "--variant", "kaggle", "--gpu", "T4"],
+        input=user_input,
+    )
+
+    assert result.exit_code == 0
+    assert captured["kwargs"]["variant"] == "kaggle"
+    assert captured["kwargs"]["gpu"] == "T4"

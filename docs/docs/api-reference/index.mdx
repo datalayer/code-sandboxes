@@ -36,7 +36,7 @@ def create(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter"`, or `"datalayer"`. Defaults to `"datalayer"`. |
+| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter"`, `"monty"`, `"kaggle"`, `"colab"`, `"modal"`, or `"datalayer"`. Defaults to `"datalayer"`. |
 | `timeout` | `float` | Execution timeout in seconds |
 | `environment` | `str` | Runtime environment name |
 | `gpu` | `str` | GPU type (e.g., `"T4"`, `"A100"`, `"H100"`) |
@@ -82,7 +82,7 @@ def list_environments(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter"`, or `"datalayer"` |
+| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter"`, `"monty"`, `"kaggle"`, `"colab"`, `"modal"`, or `"datalayer"` |
 | `**kwargs` | `dict` | Variant-specific arguments (e.g., credentials, run URL) |
 
 Legacy `local-eval`, `local-docker`, and `local-jupyter` variant names are not supported.
@@ -105,6 +105,34 @@ def run_code(
     envs: dict[str, str] | None = None,
     timeout: float | None = None,
 ) -> ExecutionResult
+```
+
+#### `run_code_streaming()`
+
+Executes Python code and yields output/result/error events as they arrive.
+
+```python
+def run_code_streaming(
+    code: str,
+    language: str = "python",
+    context: Context | None = None,
+    envs: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> Iterator[OutputMessage | Result | CodeError]
+```
+
+#### `run_code_streaming_async()`
+
+Async version of `run_code_streaming()`.
+
+```python
+async def run_code_streaming_async(
+    code: str,
+    language: str = "python",
+    context: Context | None = None,
+    envs: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> AsyncIterator[OutputMessage | Result | CodeError]
 ```
 
 #### `start()`
@@ -155,6 +183,73 @@ def set_timeout(timeout: float) -> None
 | `files` | `SandboxFilesystem` | Filesystem interface |
 | `commands` | `SandboxCommands` | Command execution interface |
 | `tags` | `dict[str, str]` | Metadata tags |
+
+---
+
+## CodeSandboxClient
+
+`CodeSandboxClient` is a high-level, variant-agnostic facade over a sandbox.
+It normalizes one-shot outcomes and streaming events across all variants.
+
+### Methods
+
+#### `execute_code()`
+
+```python
+def execute_code(
+    code: str,
+    language: str = "python",
+    envs: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> CodeExecutionOutcome
+```
+
+#### `execute_code_async()`
+
+```python
+async def execute_code_async(
+    code: str,
+    language: str = "python",
+    envs: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> CodeExecutionOutcome
+```
+
+#### `execute_code_streaming()`
+
+```python
+def execute_code_streaming(
+    code: str,
+    language: str = "python",
+    envs: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> Iterator[OutputMessage | Result | CodeError]
+```
+
+#### `execute_code_streaming_async()`
+
+```python
+async def execute_code_streaming_async(
+    code: str,
+    language: str = "python",
+    envs: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> AsyncIterator[OutputMessage | Result | CodeError]
+```
+
+### Outcome model
+
+`CodeExecutionOutcome` includes normalized fields such as:
+
+- `success`
+- `execution_ok`
+- `stdout`
+- `stderr`
+- `results`
+- `execution_error`
+- `code_error`
+- `exit_code`
+- `interrupted`
 
 ---
 

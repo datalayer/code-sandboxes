@@ -11,8 +11,8 @@ A sandbox is an isolated environment where code can be executed safely. Code San
 
 Use `Sandbox.create()` to create a new sandbox:
 
-Canonical variant names are `jupyter`, `docker`, `eval`, `monty`, `colab`,
-`modal`, and `datalayer`. Older `local-*` names are no longer supported.
+Canonical variant names are `jupyter`, `docker`, `eval`, `monty`, `kaggle`,
+`colab`, `modal`, and `datalayer`. Older `local-*` names are no longer supported.
 
 ```python
 from code_sandboxes import Sandbox
@@ -185,6 +185,42 @@ with Sandbox.create(variant="docker", image="code-sandboxes-jupyter:latest") as 
 
 Cloud sandboxes run on managed infrastructure and require credentials.
 
+#### kaggle
+
+Runs code on Kaggle with two transparent modes:
+
+1. **Interactive kernel mode** using `KaggleKernelClient` (runtime proxy URL).
+2. **Batch job mode** using `KaggleKernelExecutor` when no runtime connection
+     details are supplied.
+
+- **Requirements:** `code-sandboxes[kaggle]`.
+- **Interactive parameters:** `server_url`, optional `kernel_id`, optional
+    `channels_url`, optional `token`.
+- **Batch credentials:** `~/.kaggle/kaggle.json` or
+    `KAGGLE_USERNAME` + `KAGGLE_KEY`.
+
+```python
+from code_sandboxes import Sandbox
+
+# Interactive mode (existing session / runtime proxy)
+with Sandbox.create(
+        variant="kaggle",
+        channels_url="wss://kkb-production.jupyter-proxy.kaggle.net/k/.../proxy/api/kernels/.../channels?session_id=...",
+) as sandbox:
+        print(sandbox.run_code("print(1 + 1)").text)
+
+# Transparent batch mode (no runtime URL required)
+with Sandbox.create(variant="kaggle") as sandbox:
+        result = sandbox.run_code("print('hello from kaggle batch')")
+        print(result.text or result.stdout)
+
+# Stream status updates and outputs while the Kaggle job runs.
+with Sandbox.create(variant="kaggle") as sandbox:
+    for event in sandbox.run_code_streaming("print('hello from kaggle stream')"):
+        if hasattr(event, "line"):
+            print(event.line)
+```
+
 #### colab
 
 Runs code against a Google Colab runtime. Colab exposes a Jupyter-compatible
@@ -193,7 +229,8 @@ kernel behind an authenticating proxy, so this variant connects using
 
 - **Requirements:** `code-sandboxes[colab]` (installs `jupyter-kernel-client`).
 - **Parameters:** `server_url`, `kernel_id`, `proxy_token` (pass as keyword
-  arguments or through the sandbox configuration).
+    arguments or through the sandbox configuration). You can also pass
+    `channels_url` and let the client parse the values.
 
 **How to obtain these values** — they are the pieces of the WebSocket URL Colab's
 own frontend uses to reach your runtime:
@@ -218,10 +255,10 @@ Read them from your browser's developer tools while a Colab runtime is connected
      value as the `X-Colab-Runtime-Proxy-Token` request header). Ignore the
      `session_id` and `colab-client-agent` parameters.
 
-The internal "runtime assignment API" that returns these values is not an
-officially published public API, so the DevTools method above is the practical
-approach. The values are tied to your Colab session and are short-lived — refresh
-them after the runtime is reassigned or reconnected.
+Consumer Colab does not expose an official third-party API to provision runtimes
+from scratch. Start/connect a runtime in the Colab UI first, then reuse it here.
+The values are tied to your Colab session and are short-lived — refresh them
+after the runtime is reassigned or reconnected.
 
 ```python
 with Sandbox.create(
@@ -233,6 +270,19 @@ with Sandbox.create(
     sandbox.run_code("x = 40")
     result = sandbox.run_code("x + 2")
     print(result.text)  # 42
+```
+
+Or pass a channels URL directly:
+
+```python
+with Sandbox.create(
+    variant="colab",
+    channels_url=(
+        "wss://<host>/api/kernels/<kernel_id>/channels"
+        "?session_id=<...>&colab-runtime-proxy-token=<proxy_token>&colab-client-agent=web"
+    ),
+) as sandbox:
+    print(sandbox.run_code("print(1 + 1)").text)
 ```
 
 #### modal

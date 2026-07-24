@@ -2,7 +2,7 @@
 
 PYTHON ?= python
 
-.PHONY: all eval docker jupyter monty colab modal modal-gpu datalayer
+.PHONY: all eval docker jupyter monty colab kaggle modal modal-gpu datalayer
 
 all: eval docker jupyter monty colab modal datalayer
 
@@ -20,6 +20,9 @@ monty:
 
 colab:
 	$(PYTHON) colab_sandbox_example.py
+
+kaggle:
+	$(PYTHON) kaggle_sandbox_example.py
 
 modal:
 	@if [ -n "$$MODAL_GPU" ]; then \

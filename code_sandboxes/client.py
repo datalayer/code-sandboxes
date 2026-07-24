@@ -43,13 +43,17 @@ Kubernetes / colocated-sidecar contract:
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
+from typing import Union
 
 from .base import Sandbox
 from .commands import CommandResult
-from .models import ExecutionResult, SandboxConfig, SandboxVariant
+from .models import CodeError, ExecutionResult, OutputMessage, Result, SandboxConfig, SandboxVariant
 
 __all__ = ["CodeExecutionOutcome", "CodeSandboxClient"]
+
+StreamingItem = Union[OutputMessage, Result, CodeError]
 
 
 @dataclass
@@ -253,6 +257,43 @@ class CodeSandboxClient:
             code, language=language, timeout=timeout, envs=envs
         )
         return CodeExecutionOutcome.from_execution_result(execution)
+
+    def execute_code_streaming(
+        self,
+        code: str,
+        language: str = "python",
+        timeout: float | None = None,
+        envs: dict[str, str] | None = None,
+    ) -> Iterator[StreamingItem]:
+        """Execute code and stream output events.
+
+        This is a thin variant-agnostic wrapper over
+        ``Sandbox.run_code_streaming``.
+        """
+        self.start()
+        yield from self._sandbox.run_code_streaming(
+            code,
+            language=language,
+            timeout=timeout,
+            envs=envs,
+        )
+
+    async def execute_code_streaming_async(
+        self,
+        code: str,
+        language: str = "python",
+        timeout: float | None = None,
+        envs: dict[str, str] | None = None,
+    ) -> AsyncIterator[StreamingItem]:
+        """Async variant of :meth:`execute_code_streaming`."""
+        await self.start_async()
+        async for item in self._sandbox.run_code_streaming_async(
+            code,
+            language=language,
+            timeout=timeout,
+            envs=envs,
+        ):
+            yield item
 
     def run_command(self, command: str, timeout: float | None = None) -> CommandResult:
         """Run a shell command inside the sandbox."""

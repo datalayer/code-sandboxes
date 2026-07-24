@@ -168,7 +168,7 @@ class Sandbox(ABC):
         self._tags.update(tags)
 
     @classmethod
-    def create(
+    def create(  # noqa: C901
         cls,
         variant: SandboxVariant | str = SandboxVariant.DATALAYER,
         config: SandboxConfig | None = None,
@@ -266,6 +266,10 @@ class Sandbox(ABC):
             from .colab_sandbox import ColabSandbox
 
             sandbox = ColabSandbox(config=config, **kwargs)
+        elif variant_value == "kaggle":
+            from .kaggle_sandbox import KaggleSandbox
+
+            sandbox = KaggleSandbox(config=config, **kwargs)
         elif variant_value == "monty":
             from .monty_sandbox import MontySandbox
 
@@ -278,7 +282,7 @@ class Sandbox(ABC):
             raise ValueError(
                 f"Unknown sandbox variant: {variant}. "
                 "Supported variants: eval, docker, jupyter, "
-                "datalayer, colab, monty, modal"
+                "datalayer, colab, kaggle, monty, modal"
             )
 
         # Set tags if provided

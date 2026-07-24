@@ -16,6 +16,7 @@ Remote sandboxes (out-of-process execution via Jupyter kernel protocol):
     - JupyterSandbox: Jupyter Server with persistent kernel state
     - DatalayerSandbox: Cloud-based Datalayer runtime, full isolation
     - ColabSandbox: Google Colab runtime, connects to an assigned kernel
+    - KaggleSandbox: Kaggle runtime, connects to an interactive notebook kernel
 
 Cloud container sandboxes:
     - ModalSandbox: Modal cloud containers, per-snippet process execution
@@ -86,6 +87,7 @@ from .filesystem import (
     SandboxFilesystem,
 )
 from .jupyter_sandbox import JupyterSandbox
+from .kaggle_sandbox import KaggleSandbox
 from .modal_sandbox import ModalSandbox
 from .models import (
     CodeError,
@@ -128,6 +130,7 @@ __all__ = [
     "FileWatchEventType",
     "GPUType",
     "JupyterSandbox",
+    "KaggleSandbox",
     "Logs",
     "MIMEType",
     "ModalSandbox",
