@@ -56,15 +56,20 @@ from code_sandboxes.eval_sandbox import EvalSandbox
 from code_sandboxes.datalayer_sandbox import DatalayerSandbox
 ```
 
-Code Sandboxes provides local (in-process) and remote (out-of-process / cloud)
-execution backends. Each section below explains **how to obtain the credentials
-and parameters** required by that variant.
+Each section below explains how to configure each variant.
 
-### Local Sandboxes
+| Variant | Summary |
+|---------|---------|
+| `jupyter` | Jupyter kernel-backed execution with persistent state |
+| `eval` | In-process `exec()` for fast development-only runs |
+| `monty` | Secure in-process Python subset via Monty |
+| `docker` | Jupyter execution in a Docker container |
+| `kaggle` | Kaggle runtime (interactive or batch) |
+| `colab` | Google Colab runtime via runtime proxy |
+| `modal` | Modal container execution |
+| `datalayer` | Datalayer managed runtime with optional GPU |
 
-Local sandboxes run on your machine with no external accounts.
-
-#### jupyter
+### jupyter
 
 Runs code against a local or remote Jupyter Server and connects using
 `jupyter-kernel-client`. This variant provides process isolation via the Jupyter
@@ -106,7 +111,7 @@ with Sandbox.create(variant="jupyter") as sandbox:
     print(sandbox.run_code("1 + 1").text)  # 2
 ```
 
-#### eval
+### eval
 
 Uses Python's `exec()` for code execution. No isolation, but fast and simple for development.
 
@@ -120,7 +125,7 @@ with Sandbox.create(variant="eval") as sandbox:
         result = sandbox.run_code("print(x)")  # prints 2
 ```
 
-#### monty
+### monty
 
 Runs code in [Monty](https://github.com/pydantic/monty), a minimal, secure Python
 interpreter written in Rust (`pydantic-monty`). Monty runs a restricted subset of
@@ -158,7 +163,7 @@ sandbox.start()
 sandbox.run_code("print(now())")
 ```
 
-#### docker
+### Docker
 
 Runs a Jupyter Server inside a Docker container for local isolated execution and
 connects using `jupyter-kernel-client`.
@@ -181,11 +186,7 @@ with Sandbox.create(variant="docker", image="code-sandboxes-jupyter:latest") as 
     print(result.stdout)
 ```
 
-### Cloud Sandboxes
-
-Cloud sandboxes run on managed infrastructure and require credentials.
-
-#### kaggle
+### Kaggle
 
 Runs code on Kaggle with two transparent modes:
 
@@ -221,7 +222,7 @@ with Sandbox.create(variant="kaggle") as sandbox:
             print(event.line)
 ```
 
-#### colab
+### Colab
 
 Runs code against a Google Colab runtime. Colab exposes a Jupyter-compatible
 kernel behind an authenticating proxy, so this variant connects using
@@ -285,7 +286,7 @@ with Sandbox.create(
     print(sandbox.run_code("print(1 + 1)").text)
 ```
 
-#### modal
+### Modal
 
 Runs code in a [Modal](https://modal.com/docs/guide) cloud sandbox, providing
 fully isolated, on-demand containers with configurable images and secrets.
@@ -346,7 +347,7 @@ with Sandbox.create(
     print(result.stdout)  # "3"
 ```
 
-#### datalayer
+### datalayer
 
 Cloud-based execution with full isolation, GPU support, snapshots, and persistence.
 

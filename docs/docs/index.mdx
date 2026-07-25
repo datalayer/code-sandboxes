@@ -35,7 +35,7 @@ This section clarifies what the package owns versus what is delegated to adjacen
 - ✅ Provide filesystem operations (read, write, list, upload, download)
 - ✅ Run shell commands with streaming output
 - ✅ Manage sandbox lifecycle (start, stop, snapshot)
-- ✅ Support multiple isolation levels (local, Docker, cloud)
+- ✅ Support multiple execution variants through one API
 
 **Not Responsible For:**
 - ❌ MCP tool discovery or binding generation (→ agent-codemode)
@@ -51,7 +51,7 @@ This section clarifies what the package owns versus what is delegated to adjacen
 - **🧭 Unified Client API**: Use `CodeSandboxClient` for variant-agnostic execution and streaming
 - **📊 Detailed Status Reporting**: Distinguish between infrastructure and code-level failures
 - **🎯 Pydantic Models**: Type-safe models with automatic validation and JSON serialization
-- **⚡ Multiple Backends**: eval, Docker containers, Jupyter kernels, or cloud runtimes
+- **⚡ Multiple Backends**: eval, Docker, Jupyter, Monty, Kaggle, Colab, Modal, and Datalayer
 - **🔄 State Persistence**: Maintain variables and context between executions
 - **📊 Rich Output**: Support for text, HTML, images, and structured data
 - **📸 Snapshots**: Save and restore sandbox state
@@ -59,27 +59,18 @@ This section clarifies what the package owns versus what is delegated to adjacen
 
 ## Sandbox Variants
 
-Code Sandboxes supports multiple execution backends organized into two categories:
-
-### Sandboxes
-Execute code in-process, sharing memory with the host Python process.
+Code Sandboxes supports these execution variants:
 
 | Variant | Isolation Level | Best For |
 |---------|-----------------|----------|
 | `eval` | None (Python exec) | Development, testing |
-| `monty` | In-process secure interpreter | safe, fast LLM snippets |
-
-### Remote Sandboxes
-Execute code out-of-process via Jupyter kernel protocol, providing better isolation.
-
-| Variant | Isolation Level | Best For |
-|---------|-----------------|----------|
-| `kaggle` | Kaggle notebook runtime | hosted interactive and batch execution |
-| `colab` | Google Colab runtime | hosted interactive execution |
-| `modal` | Cloud container | isolated, ephemeral cloud execution |
-| `docker` | Container | isolated execution |
-| `jupyter` | Process (Jupyter kernel) | persistent state |
-| `datalayer` | Cloud VM | Production, GPU workloads |
+| `monty` | In-process secure interpreter | Safe, fast LLM snippets |
+| `docker` | Container | Isolated execution |
+| `jupyter` | Process (Jupyter kernel) | Persistent notebook-style state |
+| `kaggle` | Managed notebook runtime | Interactive and batch runs |
+| `colab` | Managed notebook runtime | Interactive Colab-connected runs |
+| `modal` | Managed container runtime | Ephemeral compute tasks |
+| `datalayer` | Managed VM/runtime | Production and GPU workloads |
 
 ## Quick Start
 
