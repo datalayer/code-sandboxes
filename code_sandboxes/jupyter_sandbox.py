@@ -94,9 +94,10 @@ class JupyterSandbox(Sandbox):
         self._workdir_tmp: str | None = None
         self._extra_kwargs = kwargs
         self._owns_server = server_url is None
-        # Explicit kernel to connect to. When None and ``reuse_kernel`` is True
-        # the sandbox reuses a pre-warmed kernel on the server; when None and
-        # ``reuse_kernel`` is False a brand-new kernel is created.
+        # Explicit kernel to connect to. When ``kernel_id`` is None and
+        # ``reuse_kernel`` is True, the sandbox attempts to reuse a pre-warmed
+        # kernel on the server; when ``kernel_id`` is None and
+        # ``reuse_kernel`` is False, a brand-new kernel is created.
         self._kernel_id = kernel_id
         self._kernel_path = kernel_path
         self._client_kwargs = client_kwargs
@@ -368,6 +369,7 @@ class JupyterSandbox(Sandbox):
             kernel_id=kernel_id,
             client_kwargs=self._client_kwargs or None,
         )
+
         self._client.start(path=self._kernel_path)
 
         self._default_context = self.create_context("default")

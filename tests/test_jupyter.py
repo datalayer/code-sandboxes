@@ -5,12 +5,145 @@
 """jupyter sandbox tests."""
 
 import os
+import sys
+import types
 from pathlib import Path
 
 import pytest
 
 from code_sandboxes.jupyter_sandbox import JupyterSandbox
 from code_sandboxes.models import SandboxConfig
+
+
+def test_explicit_kernel_id_wins_over_reuse(monkeypatch):
+    """Explicit kernel_id takes precedence even when reuse is enabled."""
+
+    captured: dict[str, object] = {}
+
+    class _KernelClientStub:
+        def __init__(self, server_url, token, kernel_id, client_kwargs=None):
+            captured["server_url"] = server_url
+            captured["token"] = token
+            captured["kernel_id"] = kernel_id
+            captured["client_kwargs"] = client_kwargs
+
+        def start(self, path=None):
+            captured["path"] = path
+
+        def stop(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "jupyter_kernel_client",
+        types.SimpleNamespace(KernelClient=_KernelClientStub),
+    )
+
+    sandbox = JupyterSandbox(
+        server_url="http://localhost:8888",
+        token="tok",
+        kernel_id="explicit-kernel",
+        reuse_kernel=True,
+    )
+
+    monkeypatch.setattr(sandbox, "_wait_for_server", lambda timeout=None: None)
+
+    def _should_not_be_called():
+        raise AssertionError("_find_existing_kernel should not be called with explicit kernel_id")
+
+    monkeypatch.setattr(sandbox, "_find_existing_kernel", _should_not_be_called)
+
+    sandbox.start()
+    try:
+        assert captured["kernel_id"] == "explicit-kernel"
+    finally:
+        sandbox.stop()
+
+
+def test_reuse_kernel_false_forces_new_kernel(monkeypatch):
+    """When reuse_kernel is False and no kernel_id is provided, connect with kernel_id=None."""
+
+    captured: dict[str, object] = {}
+
+    class _KernelClientStub:
+        def __init__(self, server_url, token, kernel_id, client_kwargs=None):
+            captured["kernel_id"] = kernel_id
+
+        def start(self, path=None):
+            return None
+
+        def stop(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "jupyter_kernel_client",
+        types.SimpleNamespace(KernelClient=_KernelClientStub),
+    )
+
+    sandbox = JupyterSandbox(
+        server_url="http://localhost:8888",
+        token="tok",
+        kernel_id=None,
+        reuse_kernel=False,
+    )
+
+    monkeypatch.setattr(sandbox, "_wait_for_server", lambda timeout=None: None)
+
+    def _should_not_be_called():
+        raise AssertionError("_find_existing_kernel should not be called when reuse_kernel=False")
+
+    monkeypatch.setattr(sandbox, "_find_existing_kernel", _should_not_be_called)
+
+    sandbox.start()
+    try:
+        assert captured["kernel_id"] is None
+    finally:
+        sandbox.stop()
+
+
+def test_kernel_client_forwards_client_kwargs(monkeypatch):
+    """JupyterSandbox forwards client_kwargs to KernelClient."""
+
+    captured: dict[str, object] = {}
+
+    class _KernelClientStub:
+        def __init__(self, server_url, token, kernel_id, client_kwargs=None):
+            captured["server_url"] = server_url
+            captured["token"] = token
+            captured["kernel_id"] = kernel_id
+            captured["client_kwargs"] = client_kwargs
+
+        def start(self, path=None):
+            captured["start_path"] = path
+
+        def stop(self):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "jupyter_kernel_client",
+        types.SimpleNamespace(KernelClient=_KernelClientStub),
+    )
+
+    sandbox = JupyterSandbox(
+        server_url="http://localhost:8888",
+        token="tok",
+        kernel_id="kernel-1",
+        kernel_path="/tmp/notebook.ipynb",
+        client_kwargs={"reconnect_interval": 5},
+        reuse_kernel=False,
+    )
+
+    monkeypatch.setattr(sandbox, "_wait_for_server", lambda timeout=None: None)
+
+    sandbox.start()
+    try:
+        assert captured["kernel_id"] == "kernel-1"
+        assert captured.get("client_kwargs") == {"reconnect_interval": 5}
+        assert captured.get("start_path") == "/tmp/notebook.ipynb"
+    finally:
+        sandbox.stop()
 
 
 class TestJupyterSandbox:
