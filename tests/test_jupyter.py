@@ -41,7 +41,6 @@ def test_explicit_kernel_id_wins_over_reuse(monkeypatch):
 
     sandbox = JupyterSandbox(
         server_url="http://localhost:8888",
-        token="tok",
         kernel_id="explicit-kernel",
         reuse_kernel=True,
     )
@@ -83,7 +82,6 @@ def test_reuse_kernel_false_forces_new_kernel(monkeypatch):
 
     sandbox = JupyterSandbox(
         server_url="http://localhost:8888",
-        token="tok",
         kernel_id=None,
         reuse_kernel=False,
     )
@@ -102,7 +100,7 @@ def test_reuse_kernel_false_forces_new_kernel(monkeypatch):
         sandbox.stop()
 
 
-def test_kernel_client_forwards_client_kwargs(monkeypatch):
+def test_kernel_client_forwards_client_kwargs(monkeypatch, tmp_path: Path):
     """JupyterSandbox forwards client_kwargs to KernelClient."""
 
     captured: dict[str, object] = {}
@@ -126,11 +124,12 @@ def test_kernel_client_forwards_client_kwargs(monkeypatch):
         types.SimpleNamespace(KernelClient=_KernelClientStub),
     )
 
+    notebook_path = str(tmp_path / "notebook.ipynb")
+
     sandbox = JupyterSandbox(
         server_url="http://localhost:8888",
-        token="tok",
         kernel_id="kernel-1",
-        kernel_path="/tmp/notebook.ipynb",
+        kernel_path=notebook_path,
         client_kwargs={"reconnect_interval": 5},
         reuse_kernel=False,
     )
@@ -141,7 +140,7 @@ def test_kernel_client_forwards_client_kwargs(monkeypatch):
     try:
         assert captured["kernel_id"] == "kernel-1"
         assert captured.get("client_kwargs") == {"reconnect_interval": 5}
-        assert captured.get("start_path") == "/tmp/notebook.ipynb"
+        assert captured.get("start_path") == notebook_path
     finally:
         sandbox.stop()
 
