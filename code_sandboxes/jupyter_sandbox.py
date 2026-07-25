@@ -60,6 +60,10 @@ class JupyterSandbox(Sandbox):
         port: int = DEFAULT_PORT,
         python_executable: str | None = None,
         separate_process: bool = True,
+        kernel_id: str | None = None,
+        kernel_path: str | None = None,
+        client_kwargs: dict | None = None,
+        reuse_kernel: bool = True,
         **kwargs,
     ):
         super().__init__(config)
@@ -90,6 +94,14 @@ class JupyterSandbox(Sandbox):
         self._workdir_tmp: str | None = None
         self._extra_kwargs = kwargs
         self._owns_server = server_url is None
+        # Explicit kernel to connect to. When ``kernel_id`` is None and
+        # ``reuse_kernel`` is True, the sandbox attempts to reuse a pre-warmed
+        # kernel on the server; when ``kernel_id`` is None and
+        # ``reuse_kernel`` is False, a brand-new kernel is created.
+        self._kernel_id = kernel_id
+        self._kernel_path = kernel_path
+        self._client_kwargs = client_kwargs
+        self._reuse_kernel = reuse_kernel
 
     @classmethod
     def list_environments(cls) -> list[SandboxEnvironment]:
@@ -339,15 +351,26 @@ class JupyterSandbox(Sandbox):
 
         self._wait_for_server(timeout=self.config.timeout or DEFAULT_STARTUP_TIMEOUT)
 
-        # Try to reuse an existing pre-warmed kernel instead of creating a new one.
-        # Jupyter runtimes pre-warm a kernel at startup; connecting to it avoids
-        # unnecessary kernel proliferation (3 kernels → 2, or 2 → 1).
-        kernel_id = self._find_existing_kernel()
+        # Decide which kernel to connect to:
+        # - an explicit kernel_id always wins;
+        # - otherwise, when reuse is enabled, reuse a pre-warmed kernel (Jupyter
+        #   runtimes pre-warm one at startup) to avoid kernel proliferation;
+        # - otherwise connect with no id so the client starts a brand-new kernel.
+        if self._kernel_id is not None:
+            kernel_id = self._kernel_id
+        elif self._reuse_kernel:
+            kernel_id = self._find_existing_kernel()
+        else:
+            kernel_id = None
 
         self._client = KernelClient(
-            server_url=self._server_url, token=self._token, kernel_id=kernel_id
+            server_url=self._server_url,
+            token=self._token,
+            kernel_id=kernel_id,
+            client_kwargs=self._client_kwargs or None,
         )
-        self._client.start()
+
+        self._client.start(path=self._kernel_path)
 
         self._default_context = self.create_context("default")
         self._info = SandboxInfo(
@@ -360,6 +383,17 @@ class JupyterSandbox(Sandbox):
             config=self.config,
         )
         self._started = True
+
+    @property
+    def kernel_client(self):
+        """The underlying ``jupyter_kernel_client.KernelClient``.
+
+        Exposed so callers that need the full low-level kernel API (for
+        example streaming execution via ``execute_interactive``) can delegate
+        to the same client the sandbox uses internally. ``None`` until
+        :meth:`start` has been called.
+        """
+        return self._client
 
     def _setup_tool_caller(self) -> None:
         """Keep tool calling on the client side for Jupyter sandboxes."""
