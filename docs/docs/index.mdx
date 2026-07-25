@@ -7,7 +7,7 @@ slug: /
 import DocCardList from '@theme/DocCardList';
 import { useDocsSidebar } from '@docusaurus/plugin-content-docs/client';
 
-# Code Sandboxes
+# &#123; &#125; Code Sandboxes
 
 **Code Sandboxes** is a Python package for creating safe, isolated environments where AI systems can write, run, and test code without affecting the real world or the user's device.
 
@@ -142,6 +142,49 @@ from agent_skills import SandboxExecutor
 sandbox = EvalSandbox()
 executor = SandboxExecutor(sandbox)
 ```
+
+## Development
+
+Run the local test suite:
+
+```bash
+pytest tests/
+```
+
+Default local test suite environment variables:
+
+- None for core local suites (`eval`, factory, model, and local Jupyter tests).
+
+Optional integration test variables:
+
+- `DATALAYER_API_KEY` for Datalayer runtime smoke tests.
+- `DATALAYER_RUN_URL` for a custom Datalayer runtime URL.
+- `DATALAYER_ENVIRONMENT` for Datalayer environment override.
+- `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` for Modal integration tests.
+
+## CI Workflows
+
+This repository uses a reusable GitHub Actions workflow at
+`.github/workflows/reusable-python.yml`.
+
+Workflows that call it:
+
+- `.github/workflows/build.yml`
+- `.github/workflows/py-tests.yml`
+- `.github/workflows/py-code-style.yml`
+- `.github/workflows/py-typing.yml`
+
+Reusable workflow inputs:
+
+- `python-version`
+- `install-system-deps`
+- `install-extras`
+- `extra-packages`
+- `run-tests`
+- `test-command`
+- `run-mypy`
+- `mypy-target`
+- `run-pre-commit`
 
 ## Learn More
 
