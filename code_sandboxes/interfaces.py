@@ -8,11 +8,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-try:
-    from jupyter_kernel_client.interfaces import IJupyterKernelClient
-except Exception:  # pragma: no cover - fallback for optional dependency contexts
-    class IJupyterKernelClient(Protocol):
-        """Fallback protocol when jupyter-kernel-client is unavailable."""
+from jupyter_kernel_client.interfaces import IJupyterKernelClient
 
 
 @runtime_checkable

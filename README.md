@@ -15,6 +15,7 @@
 Code Sandboxes (`code_sandboxes`) is a Python package for running code in isolated sandbox variants through a unified API.
 
 Canonical variant names:
+
 - `jupyter`
 - `docker`
 - `eval`
@@ -37,6 +38,7 @@ The full documentation is the single source of truth:
 - Comparison: [https://code-sandboxes.datalayer.tech/comparison](https://code-sandboxes.datalayer.tech/comparison)
 
 Published site:
+
 - [https://code-sandboxes.datalayer.tech](https://code-sandboxes.datalayer.tech)
 
 ## Install

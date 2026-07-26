@@ -13,8 +13,8 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any, Union
 
 from .commands import SandboxCommands
-from .interfaces import ISandboxClient
 from .filesystem import SandboxFilesystem
+from .interfaces import ISandboxClient
 from .models import (
     CodeError,
     Context,
