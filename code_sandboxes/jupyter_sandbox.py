@@ -27,6 +27,7 @@ import requests
 
 from .base import Sandbox
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
+from .interfaces import ISandboxClient
 from .models import (
     CodeError,
     Context,
@@ -88,7 +89,7 @@ class JupyterSandbox(Sandbox):
         self._server_app = None
         self._server_thread: threading.Thread | None = None
         self._server_process: subprocess.Popen | None = None
-        self._client = None
+        self._client: ISandboxClient | None = None
         self._sandbox_id = str(uuid.uuid4())
         self._workdir: str | None = None
         self._workdir_tmp: str | None = None
@@ -339,7 +340,7 @@ class JupyterSandbox(Sandbox):
             return
 
         try:
-            from jupyter_kernel_client import KernelClient
+            from jupyter_kernel_client import JupyterKernelClient
         except ImportError as exc:
             raise SandboxConfigurationError(
                 "jupyter-kernel-client is required for JupyterSandbox. "
@@ -363,7 +364,7 @@ class JupyterSandbox(Sandbox):
         else:
             kernel_id = None
 
-        self._client = KernelClient(
+        self._client = JupyterKernelClient(
             server_url=self._server_url,
             token=self._token,
             kernel_id=kernel_id,
@@ -385,8 +386,8 @@ class JupyterSandbox(Sandbox):
         self._started = True
 
     @property
-    def kernel_client(self):
-        """The underlying ``jupyter_kernel_client.KernelClient``.
+    def kernel_client(self) -> ISandboxClient | None:
+        """The underlying ``jupyter_kernel_client.JupyterKernelClient``.
 
         Exposed so callers that need the full low-level kernel API (for
         example streaming execution via ``execute_interactive``) can delegate
@@ -462,7 +463,7 @@ class JupyterSandbox(Sandbox):
         if not self._server_url or not self._client:
             return False
         try:
-            # KernelClient exposes the kernel ID as the `.id` property
+            # JupyterKernelClient exposes the kernel ID as the `.id` property
             kernel_id = getattr(self._client, "id", None)
             if kernel_id:
                 resp = requests.post(
