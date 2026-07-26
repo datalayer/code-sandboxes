@@ -27,6 +27,7 @@ import requests
 
 from .base import Sandbox
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
+from .interfaces import ISandboxClient
 from .models import (
     CodeError,
     Context,
@@ -88,7 +89,7 @@ class JupyterSandbox(Sandbox):
         self._server_app = None
         self._server_thread: threading.Thread | None = None
         self._server_process: subprocess.Popen | None = None
-        self._client = None
+        self._client: ISandboxClient | None = None
         self._sandbox_id = str(uuid.uuid4())
         self._workdir: str | None = None
         self._workdir_tmp: str | None = None
@@ -385,7 +386,7 @@ class JupyterSandbox(Sandbox):
         self._started = True
 
     @property
-    def kernel_client(self):
+    def kernel_client(self) -> ISandboxClient | None:
         """The underlying ``jupyter_kernel_client.KernelClient``.
 
         Exposed so callers that need the full low-level kernel API (for

@@ -19,6 +19,7 @@ import requests
 
 from .base import Sandbox
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
+from .interfaces import ISandboxClient
 from .models import (
     CodeError,
     Context,
@@ -185,6 +186,11 @@ class DockerSandbox(Sandbox):
             config=self.config,
         )
         self._started = True
+
+    @property
+    def kernel_client(self) -> ISandboxClient | None:
+        """The underlying kernel client for this sandbox, if started."""
+        return self._client
 
     def stop(self) -> None:
         if not self._started:

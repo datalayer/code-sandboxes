@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any, Union
 
 from .commands import SandboxCommands
+from .interfaces import ISandboxClient
 from .filesystem import SandboxFilesystem
 from .models import (
     CodeError,
@@ -99,6 +100,11 @@ class Sandbox(ABC):
     def is_executing(self) -> bool:
         """Check if the sandbox is currently executing code."""
         return self._executing_event.is_set()
+
+    @property
+    def kernel_client(self) -> ISandboxClient | None:
+        """Expose an optional kernel client interface for kernel-backed variants."""
+        return None
 
     def interrupt(self) -> bool:
         """Request interruption of the currently running code.

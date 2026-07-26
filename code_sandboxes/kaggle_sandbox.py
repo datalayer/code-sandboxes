@@ -35,6 +35,7 @@ from typing import Any
 
 from .base import Sandbox
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
+from .interfaces import ISandboxClient
 from .models import (
     CodeError,
     Context,
@@ -181,6 +182,11 @@ class KaggleSandbox(Sandbox):
             config=self.config,
         )
         self._started = True
+
+    @property
+    def kernel_client(self) -> ISandboxClient | None:
+        """The underlying Kaggle kernel client, if started."""
+        return self._client
 
     def _setup_tool_caller(self) -> None:
         """Keep tool calling on the client side for Kaggle sandboxes."""
