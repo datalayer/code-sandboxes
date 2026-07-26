@@ -340,7 +340,7 @@ class JupyterSandbox(Sandbox):
             return
 
         try:
-            from jupyter_kernel_client import KernelClient
+            from jupyter_kernel_client import JupyterKernelClient
         except ImportError as exc:
             raise SandboxConfigurationError(
                 "jupyter-kernel-client is required for JupyterSandbox. "
@@ -364,7 +364,7 @@ class JupyterSandbox(Sandbox):
         else:
             kernel_id = None
 
-        self._client = KernelClient(
+        self._client = JupyterKernelClient(
             server_url=self._server_url,
             token=self._token,
             kernel_id=kernel_id,
@@ -387,7 +387,7 @@ class JupyterSandbox(Sandbox):
 
     @property
     def kernel_client(self) -> ISandboxClient | None:
-        """The underlying ``jupyter_kernel_client.KernelClient``.
+        """The underlying ``jupyter_kernel_client.JupyterKernelClient``.
 
         Exposed so callers that need the full low-level kernel API (for
         example streaming execution via ``execute_interactive``) can delegate
@@ -463,7 +463,7 @@ class JupyterSandbox(Sandbox):
         if not self._server_url or not self._client:
             return False
         try:
-            # KernelClient exposes the kernel ID as the `.id` property
+            # JupyterKernelClient exposes the kernel ID as the `.id` property
             kernel_id = getattr(self._client, "id", None)
             if kernel_id:
                 resp = requests.post(

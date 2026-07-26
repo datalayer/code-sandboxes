@@ -86,7 +86,7 @@ from .filesystem import (
     SandboxFileHandle,
     SandboxFilesystem,
 )
-from .interfaces import IKernelClient, ISandboxClient
+from .interfaces import IJupyterKernelClient, ISandboxClient
 from .jupyter_sandbox import JupyterSandbox
 from .kaggle_sandbox import KaggleSandbox
 from .modal_sandbox import ModalSandbox
@@ -131,7 +131,7 @@ __all__ = [
     "FileWatchEventType",
     "GPUType",
     "JupyterSandbox",
-    "IKernelClient",
+    "IJupyterKernelClient",
     "ISandboxClient",
     "KaggleSandbox",
     "Logs",

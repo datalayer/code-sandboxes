@@ -125,7 +125,7 @@ class DockerSandbox(Sandbox):
 
         self._ensure_docker()
         try:
-            from jupyter_kernel_client import KernelClient
+            from jupyter_kernel_client import JupyterKernelClient
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise SandboxConfigurationError(
                 "jupyter-kernel-client is required for DockerSandbox. "
@@ -168,7 +168,7 @@ class DockerSandbox(Sandbox):
 
         self._wait_for_server(timeout=self.config.timeout or 30.0)
 
-        self._client = KernelClient(server_url=self._server_url, token=self._token)
+        self._client = JupyterKernelClient(server_url=self._server_url, token=self._token)
         self._client.start()
 
         self._default_context = self.create_context("default")

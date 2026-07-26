@@ -36,7 +36,7 @@ def test_explicit_kernel_id_wins_over_reuse(monkeypatch):
     monkeypatch.setitem(
         sys.modules,
         "jupyter_kernel_client",
-        types.SimpleNamespace(KernelClient=_KernelClientStub),
+        types.SimpleNamespace(JupyterKernelClient=_KernelClientStub),
     )
 
     sandbox = JupyterSandbox(
@@ -77,7 +77,7 @@ def test_reuse_kernel_false_forces_new_kernel(monkeypatch):
     monkeypatch.setitem(
         sys.modules,
         "jupyter_kernel_client",
-        types.SimpleNamespace(KernelClient=_KernelClientStub),
+        types.SimpleNamespace(JupyterKernelClient=_KernelClientStub),
     )
 
     sandbox = JupyterSandbox(
@@ -101,7 +101,7 @@ def test_reuse_kernel_false_forces_new_kernel(monkeypatch):
 
 
 def test_kernel_client_forwards_client_kwargs(monkeypatch, tmp_path: Path):
-    """JupyterSandbox forwards client_kwargs to KernelClient."""
+    """JupyterSandbox forwards client_kwargs to JupyterKernelClient."""
 
     captured: dict[str, object] = {}
 
@@ -121,7 +121,7 @@ def test_kernel_client_forwards_client_kwargs(monkeypatch, tmp_path: Path):
     monkeypatch.setitem(
         sys.modules,
         "jupyter_kernel_client",
-        types.SimpleNamespace(KernelClient=_KernelClientStub),
+        types.SimpleNamespace(JupyterKernelClient=_KernelClientStub),
     )
 
     notebook_path = str(tmp_path / "notebook.ipynb")
