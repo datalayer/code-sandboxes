@@ -5,7 +5,7 @@
 
 /** @type {import('@docusaurus/types').DocusaurusConfig} */
 module.exports = {
-  title: '☰ Code Sandboxes',
+  title: '{ } 📦 Code Sandboxes',
   tagline: 'Code Sandboxes',
   url: 'https://code-sandboxes.datalayer.tech',
   baseUrl: '/',
