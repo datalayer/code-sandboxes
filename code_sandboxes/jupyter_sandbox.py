@@ -50,7 +50,15 @@ logger = logging.getLogger(__name__)
 
 
 class JupyterSandbox(Sandbox):
-    """Jupyter Server sandbox using a persistent kernel."""
+    """Jupyter Server sandbox using a persistent kernel.
+
+    Pass ``headers`` to send extra HTTP headers on every request to an external
+    Jupyter Server, for deployments whose credentials are not a token — for
+    example a session ``Cookie`` plus ``X-XSRFToken`` from a password login.
+    Such a deployment has no token to send, so pass ``token=None`` and let the
+    headers authenticate: a token is only generated for a server this sandbox
+    starts itself.
+    """
 
     def __init__(
         self,
@@ -65,6 +73,7 @@ class JupyterSandbox(Sandbox):
         kernel_path: str | None = None,
         client_kwargs: dict | None = None,
         reuse_kernel: bool = True,
+        headers: dict[str, str] | None = None,
         **kwargs,
     ):
         super().__init__(config)
@@ -81,7 +90,19 @@ class JupyterSandbox(Sandbox):
         if parsed_url and parsed_token:
             cleaned = parsed_url._replace(query="", fragment="")
             self._server_url = urlunparse(cleaned)
-        self._token = token or uuid.uuid4().hex
+        self._headers = dict(headers) if headers else {}
+        # A generated token only means something for a server this sandbox
+        # starts itself, where it is passed as --ServerApp.token. When talking to
+        # an external server, honor the caller's token as given — including None,
+        # so that other credentials (for example the session cookie and XSRF
+        # header supplied via ``headers``) are what authenticate the requests
+        # instead of a fabricated token the server has never seen.
+        if token:
+            self._token = token
+        elif server_url is None:
+            self._token = uuid.uuid4().hex
+        else:
+            self._token = None
         self._host = host
         self._port = port
         self._python_executable = python_executable or os.environ.get("PYTHON", "python")
@@ -283,6 +304,7 @@ class JupyterSandbox(Sandbox):
                 response = requests.get(
                     f"{self._server_url}/api/status",
                     params={"token": self._token},
+                    headers=self._headers or None,
                     timeout=2,
                 )
                 if response.ok:
@@ -308,7 +330,11 @@ class JupyterSandbox(Sandbox):
             return None
 
         try:
-            jsc = JupyterServerClient(base_url=self._server_url, token=self._token)
+            jsc = JupyterServerClient(
+                base_url=self._server_url,
+                token=self._token,
+                headers=self._headers or None,
+            )
             kernels = jsc.kernels.list_kernels()
             if not kernels:
                 logger.info("No existing kernels found, will create a new one")
@@ -364,12 +390,17 @@ class JupyterSandbox(Sandbox):
         else:
             kernel_id = None
 
-        self._client = JupyterKernelClient(
-            server_url=self._server_url,
-            token=self._token,
-            kernel_id=kernel_id,
-            client_kwargs=self._client_kwargs or None,
-        )
+        client_kwargs: dict = {
+            "server_url": self._server_url,
+            "token": self._token,
+            "kernel_id": kernel_id,
+            "client_kwargs": self._client_kwargs or None,
+        }
+        # Only forward headers when the caller supplied some, so the call stays
+        # byte-identical for the common token/anonymous case.
+        if self._headers:
+            client_kwargs["headers"] = self._headers
+        self._client = JupyterKernelClient(**client_kwargs)
 
         self._client.start(path=self._kernel_path)
 
@@ -469,6 +500,7 @@ class JupyterSandbox(Sandbox):
                 resp = requests.post(
                     f"{self._server_url}/api/kernels/{kernel_id}/interrupt",
                     params={"token": self._token},
+                    headers=self._headers or None,
                     timeout=5,
                 )
                 return resp.ok

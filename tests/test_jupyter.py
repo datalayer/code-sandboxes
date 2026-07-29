@@ -7,6 +7,7 @@
 import os
 import sys
 import types
+import uuid
 from pathlib import Path
 
 import pytest
@@ -169,3 +170,99 @@ class TestJupyterSandbox:
             assert "8" in execution.results[0].data.get("text/plain", "")
         finally:
             sandbox.stop()
+
+
+def _kernel_client_stub(captured: dict):
+    """Build a JupyterKernelClient stub that records the kwargs it was built with."""
+
+    class _KernelClientStub:
+        def __init__(self, server_url, token, kernel_id, client_kwargs=None, **kwargs):
+            captured["server_url"] = server_url
+            captured["token"] = token
+            captured["kernel_id"] = kernel_id
+            captured["client_kwargs"] = client_kwargs
+            captured["headers"] = kwargs.get("headers")
+
+        def start(self, path=None):
+            captured["start_path"] = path
+
+        def stop(self):
+            return None
+
+    return _KernelClientStub
+
+
+def test_headers_are_forwarded_to_the_kernel_client(monkeypatch):
+    """Extra headers reach the kernel client, for cookie/XSRF authenticated servers."""
+
+    captured: dict[str, object] = {}
+    monkeypatch.setitem(
+        sys.modules,
+        "jupyter_kernel_client",
+        types.SimpleNamespace(JupyterKernelClient=_kernel_client_stub(captured)),
+    )
+
+    auth_headers = {"Cookie": "username-localhost=abc; _xsrf=tok", "X-XSRFToken": "tok"}
+    sandbox = JupyterSandbox(
+        server_url="http://localhost:8888",
+        token=None,
+        kernel_id="kernel-1",
+        reuse_kernel=False,
+        headers=auth_headers,
+    )
+
+    monkeypatch.setattr(sandbox, "_wait_for_server", lambda timeout=None: None)
+
+    sandbox.start()
+    try:
+        assert captured["headers"] == auth_headers
+    finally:
+        sandbox.stop()
+
+
+def test_no_headers_kwarg_when_none_supplied(monkeypatch):
+    """Without headers the kernel client is built exactly as before."""
+
+    captured: dict[str, object] = {}
+    monkeypatch.setitem(
+        sys.modules,
+        "jupyter_kernel_client",
+        types.SimpleNamespace(JupyterKernelClient=_kernel_client_stub(captured)),
+    )
+
+    credential = uuid.uuid4().hex
+    sandbox = JupyterSandbox(
+        server_url="http://localhost:8888",
+        token=credential,
+        kernel_id="kernel-1",
+        reuse_kernel=False,
+    )
+
+    monkeypatch.setattr(sandbox, "_wait_for_server", lambda timeout=None: None)
+
+    sandbox.start()
+    try:
+        assert captured["headers"] is None
+        assert captured["token"] == credential
+    finally:
+        sandbox.stop()
+
+
+def test_external_server_keeps_token_none():
+    """An external server with no token must not get a fabricated one.
+
+    Password-authenticated deployments have no token to send; generating one
+    would put a credential the server never issued on every request.
+    """
+
+    sandbox = JupyterSandbox(server_url="http://localhost:8888", token=None)
+
+    assert sandbox._token is None
+
+
+def test_owned_server_still_generates_a_token():
+    """A sandbox that starts its own server still needs a token to secure it."""
+
+    sandbox = JupyterSandbox()
+
+    assert sandbox._token
