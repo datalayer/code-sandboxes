@@ -237,6 +237,39 @@ async def execute_code_streaming_async(
 ) -> AsyncIterator[OutputMessage | Result | CodeError]
 ```
 
+#### Compatibility-free execution facade
+
+Consumers that need a Jupyter-shaped reply can stay on the sandbox client
+without accessing a variant's underlying kernel implementation:
+
+```python
+reply = client.execute(code, timeout=60)
+reply = client.execute_interactive(code, output_hook=handle_output)
+```
+
+The client also exposes variant-neutral lifecycle and variable operations:
+
+```python
+client.start()
+client.interrupt()
+client.restart()
+client.set_variable("name", value)
+client.set_variables({"one": 1, "two": 2})
+value = client.get_variable("name")
+client.stop()
+```
+
+### Properties
+
+| Property | Description |
+|----------|-------------|
+| `id` | Active backend identifier, including a remote kernel ID when applicable |
+| `variant` | Configured sandbox variant |
+| `config` | Variant-neutral sandbox configuration |
+| `info` | Runtime sandbox information after startup |
+| `kernel_info` | Language metadata without exposing the underlying kernel client |
+| `is_started` | Whether the sandbox has been started |
+
 ### Outcome model
 
 `CodeExecutionOutcome` includes normalized fields such as:
@@ -250,6 +283,33 @@ async def execute_code_streaming_async(
 - `code_error`
 - `exit_code`
 - `interrupted`
+
+---
+
+## Kaggle and Colab Clients
+
+Code Sandboxes owns the provider-specific clients used by its managed notebook
+variants. They are exported from `code_sandboxes`:
+
+```python
+from code_sandboxes import (
+    ColabKernelClient,
+    KaggleExecutionResult,
+    KaggleKernelClient,
+    KaggleKernelExecutor,
+    parse_colab_channels_url,
+    parse_kaggle_channels_url,
+)
+```
+
+- `KaggleKernelClient` connects to an interactive Kaggle notebook kernel.
+- `KaggleKernelExecutor` submits and monitors Kaggle batch notebook jobs.
+- `KaggleExecutionResult` normalizes batch output into a Jupyter-like reply.
+- `ColabKernelClient` connects to an already-running Google Colab kernel.
+- The parser helpers extract connection details from browser channels URLs.
+
+See [Kaggle](/sandboxes/kaggle) and [Google Colab](/sandboxes/google-colab) for
+authentication and complete examples.
 
 ---
 

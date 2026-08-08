@@ -5,7 +5,7 @@
 """Kaggle sandbox implementation.
 
 This sandbox connects to a Kaggle interactive notebook runtime and executes code
-in its kernel using ``jupyter-kernel-client``'s :class:`KaggleKernelClient`.
+in its kernel using :class:`code_sandboxes.kaggle.KaggleKernelClient`.
 
 When runtime connection details are not provided, it transparently falls back to
 Kaggle's batch execution API via ``KaggleKernelExecutor``. This mode is useful
@@ -36,6 +36,8 @@ from typing import Any
 from .base import Sandbox
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
 from .interfaces import ISandboxClient
+from .kaggle import KaggleKernelClient, parse_kaggle_channels_url
+from .kaggle_execute import KaggleKernelExecutor
 from .models import (
     CodeError,
     Context,
@@ -114,14 +116,6 @@ class KaggleSandbox(Sandbox):
         # Transparent batch mode: when no interactive runtime connection details
         # are available, fall back to Kaggle's official job API.
         if not self._server_url and not self._channels_url:
-            try:
-                from jupyter_kernel_client import KaggleKernelExecutor
-            except ImportError as exc:
-                raise SandboxConfigurationError(
-                    "jupyter-kernel-client>=0.14.0 is required for Kaggle batch execution. "
-                    "Install it with: pip install jupyter-kernel-client"
-                ) from exc
-
             self._executor = KaggleKernelExecutor(
                 username=self._extra_kwargs.get("username"),
                 quiet=True,
@@ -139,17 +133,6 @@ class KaggleSandbox(Sandbox):
             )
             self._started = True
             return
-
-        try:
-            from jupyter_kernel_client import (
-                KaggleKernelClient,
-                parse_kaggle_channels_url,
-            )
-        except ImportError as exc:
-            raise SandboxConfigurationError(
-                "jupyter-kernel-client>=0.12.0 is required for KaggleSandbox. "
-                "Install it with: pip install jupyter-kernel-client"
-            ) from exc
 
         # Derive server_url / kernel_id from a channels URL when provided.
         if self._channels_url and (not self._server_url or not self._kernel_id):
@@ -178,7 +161,7 @@ class KaggleSandbox(Sandbox):
             status=SandboxStatus.RUNNING,
             created_at=time.time(),
             name=self.config.name,
-            metadata={"server_url": self._server_url, "kernel_id": self._kernel_id},
+            metadata={"server_url": self._server_url, "kernel_id": self._client.id},
             config=self.config,
         )
         self._started = True
@@ -634,7 +617,7 @@ class KaggleSandbox(Sandbox):
                     if on_error:
                         on_error(code_error)
         elif result.log:
-            # Backward-compatible fallback for older jupyter-kernel-client versions.
+            # Preserve plain log output when no normalized kernel reply is available.
             for line in result.log.splitlines():
                 msg = OutputMessage(line=line, timestamp=now, error=False)
                 stdout_messages.append(msg)

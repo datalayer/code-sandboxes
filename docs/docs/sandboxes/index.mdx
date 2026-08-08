@@ -71,8 +71,8 @@ Each section below explains how to configure each variant.
 
 ### jupyter
 
-Runs code against a local or remote Jupyter Server and connects using
-`jupyter-kernel-client`. This variant provides process isolation via the Jupyter
+Runs code against a local or remote Jupyter Server and connects through its
+Jupyter kernel client. This variant provides process isolation via the Jupyter
 kernel and persistent state across requests.
 
 - **Requirements:** `jupyter_server` and `jupyter-kernel-client` (included by default).
@@ -166,7 +166,7 @@ sandbox.run_code("print(now())")
 ### Docker
 
 Runs a Jupyter Server inside a Docker container for local isolated execution and
-connects using `jupyter-kernel-client`.
+connects through its Jupyter kernel client.
 
 - **Requirements:** `code-sandboxes[docker]` plus a running Docker Engine
   (verify with `docker version`).
@@ -187,6 +187,9 @@ with Sandbox.create(variant="docker", image="code-sandboxes-jupyter:latest") as 
 ```
 
 ### Kaggle
+
+For the complete authentication, channels URL, batch execution, and accelerator
+reference, see [Kaggle](./kaggle).
 
 Runs code on Kaggle with two transparent modes:
 
@@ -224,10 +227,13 @@ with Sandbox.create(variant="kaggle") as sandbox:
 ### Colab
 
 Runs code against a Google Colab runtime. Colab exposes a Jupyter-compatible
-kernel behind an authenticating proxy, so this variant connects using
-`jupyter-kernel-client`'s `ColabKernelClient` under the hood.
+kernel behind an authenticating proxy, using the `ColabKernelClient` implemented
+by Code Sandboxes.
 
-- **Requirements:** `code-sandboxes[colab]` (installs `jupyter-kernel-client`).
+For the complete proxy authentication and channels URL guide, see
+[Google Colab](./google-colab).
+
+- **Requirements:** the base `code-sandboxes` installation.
 - **Parameters:** `server_url`, `kernel_id`, `proxy_token` (pass as keyword
     arguments or through the sandbox configuration). You can also pass
     `channels_url` and let the client parse the values.

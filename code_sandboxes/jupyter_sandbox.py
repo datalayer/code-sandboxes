@@ -411,7 +411,7 @@ class JupyterSandbox(Sandbox):
             status=SandboxStatus.RUNNING,
             created_at=time.time(),
             name=self.config.name,
-            metadata={"server_url": self._server_url},
+            metadata={"server_url": self._server_url, "kernel_id": self._client.id},
             config=self.config,
         )
         self._started = True
