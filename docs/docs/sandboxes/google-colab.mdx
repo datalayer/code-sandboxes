@@ -1,0 +1,141 @@
+---
+sidebar_position: 7
+title: Google Colab
+---
+
+# Google Colab
+
+Runs code against a Google Colab runtime. Colab exposes a Jupyter-compatible
+kernel behind an authenticating proxy, using the `ColabKernelClient` implemented
+by Code Sandboxes.
+
+- **Requirements:** the base `code-sandboxes` installation.
+- **Parameters:** `server_url`, `kernel_id`, `proxy_token` (pass as keyword
+  arguments or through the sandbox configuration). You can also pass
+  `channels_url` and let the client parse the values.
+
+Consumer Colab does not expose an official third-party API to provision runtimes
+from scratch. Start/connect a runtime in the Colab UI first, then reuse it here.
+The values are tied to your Colab session and are short-lived — refresh them
+after the runtime is reassigned or reconnected.
+
+## Sandbox Usage
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(
+    variant="colab",
+    server_url="https://8080-m-s-kkb-...-d.us-east1-0.prod.colab.dev",
+    kernel_id="c9bba548-3995-4f26-8e1a-7b8fbb10c578",
+    proxy_token="eyJhbGci....",
+) as sandbox:
+    sandbox.run_code("x = 40")
+    result = sandbox.run_code("x + 2")
+    print(result.text)  # 42
+```
+
+Or pass a channels URL directly:
+
+```python
+with Sandbox.create(
+    variant="colab",
+    channels_url=(
+        "wss://<host>/api/kernels/<kernel_id>/channels"
+        "?session_id=<...>&colab-runtime-proxy-token=<proxy_token>&colab-client-agent=web"
+    ),
+) as sandbox:
+    print(sandbox.run_code("print(1 + 1)").text)
+```
+
+## Kernel Client
+
+Use `ColabKernelClient` to connect to a kernel that is already running in Colab.
+
+This client reuses an existing Colab runtime; it does not create a Colab runtime
+from scratch.
+
+You need three values to connect:
+
+- `server_url`
+- `kernel_id`
+- `proxy_token`
+
+All three are available in Colab's channels WebSocket URL.
+
+## Option A: Connect With Explicit Values
+
+```python
+from code_sandboxes import ColabKernelClient
+
+kernel = ColabKernelClient(
+    server_url="https://<colab-host>",
+    kernel_id="<kernel_id>",
+    proxy_token="<proxy_token>",
+)
+kernel.start()
+reply = kernel.execute("x = 1")
+print(reply)
+# Disconnect only; do not shut down shared Colab runtime kernels.
+kernel.stop(shutdown_kernel=False)
+```
+
+## Option B: Connect From Channels URL
+
+```python
+from code_sandboxes import ColabKernelClient
+
+channels_url = (
+    "wss://<colab-host>/api/kernels/<kernel_id>/channels"
+    "?session_id=<...>&colab-runtime-proxy-token=<proxy_token>&colab-client-agent=web"
+)
+
+with ColabKernelClient.from_channels_url(channels_url) as kernel:
+    reply = kernel.execute("x = 1 + 1; print(x)")
+    print(reply)
+```
+
+You can also parse values directly:
+
+```python
+from code_sandboxes import parse_colab_channels_url
+
+server_url, kernel_id, proxy_token = parse_colab_channels_url(channels_url)
+```
+
+`ColabKernelClient` forwards the proxy token as both the
+`X-Colab-Runtime-Proxy-Token` HTTP header and the
+`colab-runtime-proxy-token` WebSocket query parameter.
+
+## How To Obtain The Colab Channels URL
+
+The `server_url`, `kernel_id`, and `proxy_token` are in the WebSocket channels URL
+used by Colab itself:
+
+```text
+wss://<host>/api/kernels/<kernel_id>/channels?session_id=<...>&colab-runtime-proxy-token=<proxy_token>&colab-client-agent=web
+```
+
+Values are tied to your browser session and are short-lived.
+
+1. Open your notebook on https://colab.research.google.com and connect a runtime.
+2. Open DevTools (`F12`) and switch to Network with the WS filter.
+3. Run a cell to generate traffic.
+4. Open the `.../api/kernels/<kernel_id>/channels?...` request and copy the full URL.
+
+If you extract values manually:
+
+- `server_url`: scheme+host before `/api/kernels` (use `https://`). Colab assigns
+  a per-session host such as
+  `https://8080-m-s-kkb-...-d.us-east1-0.prod.colab.dev`; there is usually **no**
+  `/tun/m/...` path segment.
+- `kernel_id`: UUID path segment after `/api/kernels/`
+- `proxy_token`: `colab-runtime-proxy-token` query parameter (same value as the
+  `X-Colab-Runtime-Proxy-Token` request header). Ignore the `session_id` and
+  `colab-client-agent` parameters.
+
+Consumer Colab does not provide a public API key based flow to create runtimes
+from standalone scripts.
+
+For a true programmatic runtime provisioning flow, use Colab Enterprise on
+Google Cloud.

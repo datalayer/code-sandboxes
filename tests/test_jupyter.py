@@ -23,6 +23,7 @@ def test_explicit_kernel_id_wins_over_reuse(monkeypatch):
 
     class _KernelClientStub:
         def __init__(self, server_url, token, kernel_id, client_kwargs=None):
+            self.id = kernel_id or "started-kernel"
             captured["server_url"] = server_url
             captured["token"] = token
             captured["kernel_id"] = kernel_id
@@ -67,6 +68,7 @@ def test_reuse_kernel_false_forces_new_kernel(monkeypatch):
 
     class _KernelClientStub:
         def __init__(self, server_url, token, kernel_id, client_kwargs=None):
+            self.id = kernel_id or "started-kernel"
             captured["kernel_id"] = kernel_id
 
         def start(self, path=None):
@@ -108,6 +110,7 @@ def test_kernel_client_forwards_client_kwargs(monkeypatch, tmp_path: Path):
 
     class _KernelClientStub:
         def __init__(self, server_url, token, kernel_id, client_kwargs=None):
+            self.id = kernel_id or "started-kernel"
             captured["server_url"] = server_url
             captured["token"] = token
             captured["kernel_id"] = kernel_id
@@ -177,6 +180,7 @@ def _kernel_client_stub(captured: dict):
 
     class _KernelClientStub:
         def __init__(self, server_url, token, kernel_id, client_kwargs=None, **kwargs):
+            self.id = kernel_id or "started-kernel"
             captured["server_url"] = server_url
             captured["token"] = token
             captured["kernel_id"] = kernel_id

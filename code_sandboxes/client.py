@@ -45,15 +45,71 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Any, Callable, Union
 
 from .base import Sandbox
 from .commands import CommandResult
-from .models import CodeError, ExecutionResult, OutputMessage, Result, SandboxConfig, SandboxVariant
+from .models import (
+    CodeError,
+    ExecutionResult,
+    OutputMessage,
+    Result,
+    SandboxConfig,
+    SandboxInfo,
+    SandboxVariant,
+)
 
-__all__ = ["CodeExecutionOutcome", "CodeSandboxClient"]
+__all__ = ["CodeExecutionOutcome", "CodeSandboxClient", "execution_result_to_reply"]
 
 StreamingItem = Union[OutputMessage, Result, CodeError]
+
+
+def execution_result_to_reply(execution: ExecutionResult) -> dict[str, Any]:
+    """Convert a variant-neutral execution result to a Jupyter-shaped reply."""
+    outputs: list[dict[str, Any]] = []
+
+    if execution.logs.stdout:
+        outputs.append(
+            {
+                "output_type": "stream",
+                "name": "stdout",
+                "text": "\n".join(message.line for message in execution.logs.stdout) + "\n",
+            }
+        )
+    if execution.logs.stderr:
+        outputs.append(
+            {
+                "output_type": "stream",
+                "name": "stderr",
+                "text": "\n".join(message.line for message in execution.logs.stderr) + "\n",
+            }
+        )
+
+    for result in execution.results:
+        outputs.append(
+            {
+                "output_type": "execute_result" if result.is_main_result else "display_data",
+                "data": result.data,
+                "metadata": result.extra,
+            }
+        )
+
+    if execution.code_error is not None:
+        traceback = execution.code_error.traceback or ""
+        outputs.append(
+            {
+                "output_type": "error",
+                "ename": execution.code_error.name,
+                "evalue": execution.code_error.value,
+                "traceback": traceback.splitlines(),
+            }
+        )
+
+    return {
+        "execution_count": execution.execution_count,
+        "outputs": outputs,
+        "status": "ok" if execution.success else "error",
+    }
 
 
 @dataclass
@@ -184,6 +240,39 @@ class CodeSandboxClient:
         return self._sandbox
 
     @property
+    def config(self) -> SandboxConfig:
+        """Variant-neutral configuration for the wrapped sandbox."""
+        return self._sandbox.config
+
+    @property
+    def info(self) -> SandboxInfo | None:
+        """Runtime information for the wrapped sandbox, when started."""
+        return self._sandbox.info
+
+    @property
+    def id(self) -> str | None:
+        """Stable execution-backend identifier when the variant exposes one."""
+        info = getattr(self._sandbox, "info", None)
+        metadata = getattr(info, "metadata", None) or {}
+        kernel_id = metadata.get("kernel_id")
+        if kernel_id:
+            return str(kernel_id)
+        backend = getattr(self._sandbox, "kernel_client", None)
+        backend_id = getattr(backend, "id", None)
+        return str(backend_id) if backend_id else self._sandbox.sandbox_id
+
+    @property
+    def kernel_info(self) -> dict[str, Any]:
+        """Language metadata without exposing a variant's underlying client."""
+        backend = getattr(self._sandbox, "kernel_client", None)
+        info = getattr(backend, "kernel_info", None)
+        if isinstance(info, dict):
+            return info
+        environments = self._sandbox.list_environments()
+        language = environments[0].language if environments else "python"
+        return {"language_info": {"name": language}}
+
+    @property
     def variant(self) -> SandboxVariant | None:
         """The variant of the wrapped sandbox, if known."""
         return getattr(self._sandbox.config, "variant", None)
@@ -219,6 +308,22 @@ class CodeSandboxClient:
         if self._owns_sandbox and callable(stop_fn) and self.is_started:
             stop_fn()
 
+    def stop(self, shutdown_kernel: bool = True) -> None:
+        """Release the client, optionally preserving a borrowed remote backend."""
+        if shutdown_kernel:
+            self.close()
+            return
+        backend = getattr(self._sandbox, "kernel_client", None)
+        backend_stop = getattr(backend, "stop", None)
+        if callable(backend_stop):
+            backend_stop(shutdown_kernel=False)
+        # The backend connection is now closed, so the sandbox must no longer
+        # report itself as started; otherwise start() would no-op and later
+        # executions would run against a closed backend.
+        mark_stopped = getattr(self._sandbox, "mark_stopped", None)
+        if callable(mark_stopped):
+            mark_stopped()
+
     async def close_async(self) -> None:
         """Async variant of :meth:`close`."""
         if not (self._owns_sandbox and self.is_started):
@@ -243,6 +348,72 @@ class CodeSandboxClient:
         self.start()
         execution = self._sandbox.run_code(code, language=language, timeout=timeout, envs=envs)
         return CodeExecutionOutcome.from_execution_result(execution)
+
+    def execute(
+        self,
+        code: str,
+        silent: bool = False,
+        timeout: float | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Execute code and return a backend-neutral Jupyter-shaped reply."""
+        del silent, kwargs
+        self.start()
+        execution = self._sandbox.run_code(code, timeout=timeout)
+        return execution_result_to_reply(execution)
+
+    def execute_interactive(
+        self,
+        code: str,
+        silent: bool = False,
+        timeout: float | None = None,
+        output_hook: Callable[[dict[str, Any]], None] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Execute code and optionally emit each normalized output to a callback."""
+        reply = self.execute(code, silent=silent, timeout=timeout, **kwargs)
+        if output_hook is not None:
+            for output in reply["outputs"]:
+                output_hook(
+                    {
+                        "msg_type": output.get("output_type", "display_data"),
+                        "content": output,
+                    }
+                )
+        return reply
+
+    def get_variable(self, name: str) -> Any:
+        """Read a variable through the wrapped sandbox."""
+        self.start()
+        return self._sandbox.get_variable(name)
+
+    def set_variable(self, name: str, value: Any) -> None:
+        """Set a variable through the wrapped sandbox."""
+        self.start()
+        self._sandbox.set_variable(name, value)
+
+    def set_variables(self, variables: dict[str, Any]) -> None:
+        """Set multiple variables through the wrapped sandbox."""
+        self.start()
+        self._sandbox.set_variables(variables)
+
+    def register_tool_caller(self, caller: Callable[..., Any]) -> None:
+        """Register the callable used by generated tools inside the sandbox."""
+        self.start()
+        self._sandbox.register_tool_caller(caller)
+
+    def interrupt(self) -> bool:
+        """Interrupt the active execution when supported by the variant."""
+        return self._sandbox.interrupt()
+
+    def is_alive(self) -> bool:
+        """Whether the sandbox is started and available for execution."""
+        return self.is_started
+
+    def restart(self) -> None:
+        """Restart the wrapped sandbox through its public lifecycle."""
+        self._sandbox.stop()
+        self._sandbox.start()
 
     async def execute_code_async(
         self,

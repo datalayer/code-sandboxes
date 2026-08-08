@@ -90,6 +90,81 @@ export KAGGLE_API_KEY="<your-kaggle-api-key>"
 sandbox repl --variant kaggle
 ```
 
+### Kaggle
+
+Kaggle supports both batch execution and interactive connections through the
+`kaggle` sandbox. Install its optional dependency first:
+
+```bash
+pip install "code-sandboxes[kaggle]"
+```
+
+For batch execution, configure Kaggle credentials and create the sandbox
+without a runtime URL:
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="kaggle") as sandbox:
+    result = sandbox.run_code("print('hello from kaggle')")
+    print(result.stdout)
+```
+
+The lower-level batch API is also available directly:
+
+```python
+from code_sandboxes import KaggleKernelExecutor
+
+executor = KaggleKernelExecutor()
+result = executor.execute(
+    "print('hello from kaggle')",
+    title="code-sandboxes-demo",
+    accelerator="NvidiaTeslaT4",
+    wait=True,
+)
+print(result.status, result.stdout)
+print(result.to_kernel_reply())
+```
+
+For interactive execution, copy the WebSocket channels URL from an active
+Kaggle notebook session and pass it to the sandbox or client:
+
+```python
+from code_sandboxes import KaggleKernelClient
+
+with KaggleKernelClient.from_channels_url(channels_url, token=None) as kernel:
+    print(kernel.execute("x = 1 + 1; print(x)"))
+```
+
+See the [complete Kaggle guide](docs/docs/sandboxes/kaggle.mdx) for authentication,
+accelerators, channels URL retrieval, and execution options.
+
+### Google Colab
+
+Google Colab exposes an already-running kernel through an authenticating proxy.
+Copy its WebSocket channels URL from the browser's Network tools, then pass it
+directly to the sandbox:
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="colab", channels_url=channels_url) as sandbox:
+    print(sandbox.run_code("x = 1 + 1; print(x)").stdout)
+```
+
+The lower-level client and parser are owned by Code Sandboxes as well:
+
+```python
+from code_sandboxes import ColabKernelClient, parse_colab_channels_url
+
+server_url, kernel_id, proxy_token = parse_colab_channels_url(channels_url)
+with ColabKernelClient.from_channels_url(channels_url) as kernel:
+    print(kernel.execute("print('hello from colab')"))
+```
+
+See the [complete Google Colab guide](docs/docs/sandboxes/google-colab.mdx) for
+proxy authentication, explicit connection values, and channels URL retrieval.
+
 For full setup and parameters for all variants, see:
 
 - [https://code-sandboxes.datalayer.tech/sandboxes](https://code-sandboxes.datalayer.tech/sandboxes)

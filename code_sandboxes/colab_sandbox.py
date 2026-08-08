@@ -5,7 +5,7 @@
 """Google Colab sandbox implementation.
 
 This sandbox connects to an existing Google Colab runtime and executes code in
-its kernel using ``jupyter-kernel-client``'s :class:`ColabKernelClient`.
+its kernel using :class:`code_sandboxes.colab.ColabKernelClient`.
 
 Unlike the Jupyter/Docker sandboxes, this sandbox does **not** provision a
 runtime: a Colab runtime must already be running in a browser session. Reuse it
@@ -20,6 +20,7 @@ import time
 import uuid
 
 from .base import Sandbox
+from .colab import ColabKernelClient, parse_colab_channels_url
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
 from .interfaces import ISandboxClient
 from .models import (
@@ -95,14 +96,6 @@ class ColabSandbox(Sandbox):
         if self._channels_url and (
             not self._server_url or not self._kernel_id or not self._proxy_token
         ):
-            try:
-                from jupyter_kernel_client import parse_colab_channels_url
-            except ImportError as exc:
-                raise SandboxConfigurationError(
-                    "jupyter-kernel-client>=0.14.0 is required for Colab channels_url parsing. "
-                    "Install it with: pip install jupyter-kernel-client"
-                ) from exc
-
             parsed_server_url, parsed_kernel_id, parsed_proxy_token = parse_colab_channels_url(
                 self._channels_url
             )
@@ -115,14 +108,6 @@ class ColabSandbox(Sandbox):
                 "ColabSandbox requires 'server_url', 'kernel_id', and 'proxy_token'. "
                 "Provide them directly, or pass 'channels_url' from an active Colab session."
             )
-
-        try:
-            from jupyter_kernel_client import ColabKernelClient
-        except ImportError as exc:
-            raise SandboxConfigurationError(
-                "jupyter-kernel-client>=0.12.0 is required for ColabSandbox. "
-                "Install it with: pip install jupyter-kernel-client"
-            ) from exc
 
         self._client = ColabKernelClient(
             server_url=self._server_url,
@@ -139,7 +124,7 @@ class ColabSandbox(Sandbox):
             status=SandboxStatus.RUNNING,
             created_at=time.time(),
             name=self.config.name,
-            metadata={"server_url": self._server_url, "kernel_id": self._kernel_id},
+            metadata={"server_url": self._server_url, "kernel_id": self._client.id},
             config=self.config,
         )
         self._started = True

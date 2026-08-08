@@ -1,0 +1,29 @@
+---
+sidebar_position: 3
+title: Eval
+---
+
+# Eval
+
+Uses Python's `exec()` for code execution. No isolation, but fast and simple for
+development.
+
+- **Credentials / parameters:** none — nothing to configure.
+- ⚠️ `eval` shares memory with the host process and provides no sandboxing. Never
+  run untrusted code with it.
+
+## Usage
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="eval") as sandbox:
+    result = sandbox.run_code("x = 1 + 1")
+    result = sandbox.run_code("print(x)")  # prints 2
+```
+
+The concrete implementation is available from a top-level module:
+
+```python
+from code_sandboxes.eval_sandbox import EvalSandbox
+```

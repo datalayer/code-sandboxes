@@ -6,15 +6,29 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
-
-from jupyter_kernel_client.interfaces import IJupyterKernelClient
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
-class ISandboxClient(IJupyterKernelClient, Protocol):
-    """Kernel client protocol exposed by sandbox variants.
+class ISandboxClient(Protocol):
+    """Internal execution backend used by kernel-backed sandbox variants."""
 
-    This currently matches ``IJupyterKernelClient`` exactly and acts as an extension
-    point for sandbox-specific client capabilities.
-    """
+    @property
+    def id(self) -> str | None: ...
+
+    @property
+    def kernel_info(self) -> dict[str, Any] | None: ...
+
+    def start(self, **kwargs: Any) -> None: ...
+
+    def stop(self, shutdown_kernel: bool = True) -> None: ...
+
+    def execute(self, code: str, **kwargs: Any) -> dict[str, Any]: ...
+
+    def execute_interactive(self, code: str, **kwargs: Any) -> dict[str, Any]: ...
+
+    def get_variable(self, name: str) -> Any: ...
+
+    def set_variable(self, name: str, value: Any) -> None: ...
+
+    def interrupt(self) -> bool: ...

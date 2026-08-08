@@ -1,0 +1,48 @@
+---
+sidebar_position: 4
+title: Monty
+---
+
+# Monty
+
+Runs code in [Monty](https://github.com/pydantic/monty), a minimal, secure Python
+interpreter written in Rust (`pydantic-monty`). Monty runs a restricted subset of
+Python in-process with microsecond startup and no access to the host filesystem,
+environment, or network unless explicitly granted. It is ideal for short,
+LLM-generated snippets where a full container or kernel would be overkill.
+
+Session state (variables, imports, definitions) persists across `run_code` calls.
+Note that Monty supports only a subset of Python — third-party libraries and rich
+display outputs are not available.
+
+- **Requirements:** `code-sandboxes[monty]` (installs `pydantic-monty`).
+- **Credentials:** none required (fully local, in-process).
+- **Optional parameters** (on `MontySandbox`): `type_check` (type-check before
+  running), `type_check_stubs`, `external_functions` (`{name: callable}` host
+  functions the code may call), `limits` (memory / stack / time limits).
+
+## Usage
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="monty") as sandbox:
+    sandbox.run_code("x = 21")
+    result = sandbox.run_code("x * 2")
+    print(result.text)  # 42
+```
+
+## Host Callables And Type Checking
+
+You can expose host callables to the sandboxed code and enable type checking:
+
+```python
+from code_sandboxes.monty_sandbox import MontySandbox
+
+sandbox = MontySandbox(
+    type_check=True,
+    external_functions={"now": lambda: "2026-01-01"},
+)
+sandbox.start()
+sandbox.run_code("print(now())")
+```

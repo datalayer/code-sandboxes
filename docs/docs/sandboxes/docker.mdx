@@ -1,0 +1,39 @@
+---
+sidebar_position: 5
+title: Docker
+---
+
+# Docker
+
+Runs a Jupyter Server inside a Docker container for local isolated execution and
+connects through its Jupyter kernel client.
+
+- **Requirements:** `code-sandboxes[docker]` plus a running Docker Engine
+  (verify with `docker version`).
+- **Credentials:** none — the kernel `token` is generated automatically.
+- **Parameters:** `image` (default `code-sandboxes-jupyter:latest`),
+  `container_name`, `host`/`container_port`, `auto_remove`, `workdir`.
+
+## Building The Image
+
+Build the default image used by `DockerSandbox`:
+
+```bash
+docker build -t code-sandboxes-jupyter:latest -f docker/Dockerfile .
+```
+
+## Usage
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="docker", image="code-sandboxes-jupyter:latest") as sandbox:
+    result = sandbox.run_code("import sys; print(sys.version)")
+    print(result.stdout)
+```
+
+The concrete implementation is available from a top-level module:
+
+```python
+from code_sandboxes.docker_sandbox import DockerSandbox
+```

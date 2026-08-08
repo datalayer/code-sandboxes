@@ -25,6 +25,7 @@ from .models import (
     SandboxConfig,
     SandboxEnvironment,
     SandboxInfo,
+    SandboxStatus,
     SandboxVariant,
 )
 
@@ -412,6 +413,18 @@ class Sandbox(ABC):
         Called automatically when exiting the context manager.
         """
         pass
+
+    def mark_stopped(self) -> None:
+        """Mark the sandbox as stopped after its backend was disconnected externally.
+
+        Callers that bypass :meth:`stop` — for example to disconnect from a
+        borrowed remote kernel without shutting it down — use this to keep
+        :attr:`is_started` consistent, so a later :meth:`start` reconnects
+        instead of silently reusing a closed backend.
+        """
+        self._started = False
+        if self._info:
+            self._info.status = SandboxStatus.STOPPED
 
     async def start_async(self) -> None:
         """Async version of start(). Default implementation calls sync version."""

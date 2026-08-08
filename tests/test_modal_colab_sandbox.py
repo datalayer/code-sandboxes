@@ -147,10 +147,9 @@ def test_kaggle_batch_mode_runs_without_runtime_connection(monkeypatch):
                 succeeded=True,
             )
 
-    monkeypatch.setitem(
-        sys.modules,
-        "jupyter_kernel_client",
-        SimpleNamespace(KaggleKernelExecutor=_FakeKaggleExecutor),
+    monkeypatch.setattr(
+        "code_sandboxes.kaggle_sandbox.KaggleKernelExecutor",
+        _FakeKaggleExecutor,
     )
 
     sandbox = KaggleSandbox(config=SandboxConfig(timeout=10.0))
@@ -190,10 +189,9 @@ def test_kaggle_batch_mode_maps_job_failure_to_code_error(monkeypatch):
                 succeeded=False,
             )
 
-    monkeypatch.setitem(
-        sys.modules,
-        "jupyter_kernel_client",
-        SimpleNamespace(KaggleKernelExecutor=_FakeKaggleExecutor),
+    monkeypatch.setattr(
+        "code_sandboxes.kaggle_sandbox.KaggleKernelExecutor",
+        _FakeKaggleExecutor,
     )
 
     sandbox = KaggleSandbox(config=SandboxConfig(timeout=10.0))
@@ -234,10 +232,9 @@ def test_kaggle_batch_mode_forwards_gpu_as_accelerator(monkeypatch):
                 succeeded=True,
             )
 
-    monkeypatch.setitem(
-        sys.modules,
-        "jupyter_kernel_client",
-        SimpleNamespace(KaggleKernelExecutor=_FakeKaggleExecutor),
+    monkeypatch.setattr(
+        "code_sandboxes.kaggle_sandbox.KaggleKernelExecutor",
+        _FakeKaggleExecutor,
     )
 
     sandbox = KaggleSandbox(config=SandboxConfig(timeout=10.0, gpu="T4"))
@@ -286,10 +283,9 @@ def test_kaggle_batch_mode_consumes_kernel_like_reply(monkeypatch):
         def execute(self, code, wait=True, timeout=0.0, download_output=True, accelerator=None):
             return _FakeKaggleResult()
 
-    monkeypatch.setitem(
-        sys.modules,
-        "jupyter_kernel_client",
-        SimpleNamespace(KaggleKernelExecutor=_FakeKaggleExecutor),
+    monkeypatch.setattr(
+        "code_sandboxes.kaggle_sandbox.KaggleKernelExecutor",
+        _FakeKaggleExecutor,
     )
 
     sandbox = KaggleSandbox(config=SandboxConfig(timeout=10.0))
@@ -358,10 +354,9 @@ def test_kaggle_batch_mode_streaming_emits_status_and_stdout(monkeypatch):
             path.write_text("[]", encoding="utf-8")
             return [str(path)]
 
-    monkeypatch.setitem(
-        sys.modules,
-        "jupyter_kernel_client",
-        SimpleNamespace(KaggleKernelExecutor=_FakeKaggleExecutor),
+    monkeypatch.setattr(
+        "code_sandboxes.kaggle_sandbox.KaggleKernelExecutor",
+        _FakeKaggleExecutor,
     )
 
     sandbox = KaggleSandbox(config=SandboxConfig(timeout=10.0), poll_interval=0.0)

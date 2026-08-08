@@ -58,7 +58,8 @@ Style usage:
 """
 
 from .base import Sandbox
-from .client import CodeExecutionOutcome, CodeSandboxClient
+from .client import CodeExecutionOutcome, CodeSandboxClient, execution_result_to_reply
+from .colab import ColabKernelClient, parse_colab_channels_url
 from .colab_sandbox import ColabSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .datalayer_sandbox import DatalayerSandbox
@@ -86,8 +87,10 @@ from .filesystem import (
     SandboxFileHandle,
     SandboxFilesystem,
 )
-from .interfaces import IJupyterKernelClient, ISandboxClient
+from .interfaces import ISandboxClient
 from .jupyter_sandbox import JupyterSandbox
+from .kaggle import KAGGLE_API_TOKEN_ENV, KaggleKernelClient, parse_kaggle_channels_url
+from .kaggle_execute import KaggleExecutionResult, KaggleKernelExecutor
 from .kaggle_sandbox import KaggleSandbox
 from .modal_sandbox import ModalSandbox
 from .models import (
@@ -112,10 +115,12 @@ from .models import (
 from .monty_sandbox import MontySandbox
 
 __all__ = [
+    "KAGGLE_API_TOKEN_ENV",
     # Models
     "CodeError",
     "CodeExecutionOutcome",
     "CodeSandboxClient",
+    "ColabKernelClient",
     "ColabSandbox",
     "CommandResult",
     "Context",
@@ -130,9 +135,11 @@ __all__ = [
     "FileWatchEvent",
     "FileWatchEventType",
     "GPUType",
-    "IJupyterKernelClient",
     "ISandboxClient",
     "JupyterSandbox",
+    "KaggleExecutionResult",
+    "KaggleKernelClient",
+    "KaggleKernelExecutor",
     "KaggleSandbox",
     "Logs",
     "MIMEType",
@@ -166,8 +173,10 @@ __all__ = [
     "SandboxStatus",
     "SandboxTimeoutError",
     "SandboxVariant",
-    "SandboxVariant",
     "SnapshotInfo",
     "TunnelInfo",
     "VariableNotFoundError",
+    "execution_result_to_reply",
+    "parse_colab_channels_url",
+    "parse_kaggle_channels_url",
 ]
