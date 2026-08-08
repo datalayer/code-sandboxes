@@ -175,3 +175,41 @@ def test_execution_error_converts_to_error_output():
             "traceback": ["line 1", "line 2"],
         }
     ]
+
+
+class _FakeKernelClient:
+    """Minimal kernel client that records how it was stopped."""
+
+    def __init__(self):
+        self.stopped_with = None
+
+    def stop(self, shutdown_kernel=True):
+        self.stopped_with = shutdown_kernel
+
+
+class _FakeKernelBackedSandbox(_FakeSandbox):
+    """Sandbox exposing a borrowed kernel client, like colab/kaggle variants."""
+
+    def __init__(self):
+        super().__init__()
+        self.kernel_client = _FakeKernelClient()
+
+    def mark_stopped(self):
+        self._started = False
+
+
+def test_stop_without_shutdown_disconnects_backend_and_clears_started():
+    sandbox = _FakeKernelBackedSandbox()
+    client = CodeSandboxClient(sandbox)
+    client.start()
+    assert client.is_started is True
+
+    client.stop(shutdown_kernel=False)
+
+    # The borrowed kernel is disconnected, not shut down...
+    assert sandbox.kernel_client.stopped_with is False
+    # ...and the sandbox no longer claims to be started, so a later start()
+    # reconnects instead of reusing the closed backend.
+    assert client.is_started is False
+    client.start()
+    assert client.is_started is True

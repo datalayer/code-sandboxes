@@ -317,6 +317,12 @@ class CodeSandboxClient:
         backend_stop = getattr(backend, "stop", None)
         if callable(backend_stop):
             backend_stop(shutdown_kernel=False)
+        # The backend connection is now closed, so the sandbox must no longer
+        # report itself as started; otherwise start() would no-op and later
+        # executions would run against a closed backend.
+        mark_stopped = getattr(self._sandbox, "mark_stopped", None)
+        if callable(mark_stopped):
+            mark_stopped()
 
     async def close_async(self) -> None:
         """Async variant of :meth:`close`."""
