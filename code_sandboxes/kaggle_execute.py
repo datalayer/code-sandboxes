@@ -574,9 +574,7 @@ class KaggleKernelExecutor:
             self.log.warning("Could not download Kaggle output for %s: %s", slug, exc)
 
     @staticmethod
-    def _populate_log_and_notebook(
-        result: KaggleExecutionResult, files: t.Sequence[str]
-    ) -> None:
+    def _populate_log_and_notebook(result: KaggleExecutionResult, files: t.Sequence[str]) -> None:
         for path_str in files:
             path = Path(path_str)
             if path.suffix == ".log" and result.log is None:

@@ -1,0 +1,69 @@
+---
+sidebar_position: 8
+title: Modal
+---
+
+# Modal
+
+Runs code in a [Modal](https://modal.com/docs/guide) cloud sandbox, providing
+fully isolated, on-demand containers with configurable images and secrets.
+
+Each `run_code` call executes in a fresh `python -c` process, so state does **not**
+persist across calls (use a single multi-statement snippet if you need shared
+state). Configure the image with additional pip packages as needed.
+
+- **Requirements:** `code-sandboxes[modal]` (installs `modal`).
+- **Parameters:** `app_name`, `image` (a prebuilt `modal.Image`), `pip_packages`,
+  `python_executable`.
+
+## How To Obtain Modal Credentials
+
+1. Create a free account at [modal.com](https://modal.com).
+2. Authenticate the CLI (opens a browser, writes `~/.modal.toml`):
+   ```bash
+   modal token new
+   ```
+   This is enough for local use: the Modal SDK reads credentials from
+   `~/.modal.toml` automatically.
+3. Alternatively, create a token in the Modal dashboard (**Settings → API Tokens**)
+   and export `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`.
+
+**Do you need both `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`?**
+
+- For environment-based auth (CI/CD, containers, hosted runners): **yes**,
+  you need both values because Modal authenticates with a token pair
+  (public id + secret).
+- For local development with `modal token new`: **not necessarily**. The SDK can
+  authenticate directly from `~/.modal.toml`.
+
+If you need environment variables, you can export them from your local config:
+
+```bash
+python - <<'PY'
+import pathlib
+import tomllib
+
+cfg = tomllib.loads(pathlib.Path("~/.modal.toml").expanduser().read_text())
+profile = cfg.get("default", cfg)
+token_id = profile.get("token_id")
+token_secret = profile.get("token_secret")
+if token_id and token_secret:
+     print(f"export MODAL_TOKEN_ID={token_id}")
+     print(f"export MODAL_TOKEN_SECRET={token_secret}")
+else:
+     raise SystemExit("Could not find token_id/token_secret in ~/.modal.toml")
+PY
+```
+
+## Usage
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(
+    variant="modal",
+    pip_packages=["numpy"],
+) as sandbox:
+    result = sandbox.run_code("import numpy as np; print(np.arange(3).sum())")
+    print(result.stdout)  # "3"
+```

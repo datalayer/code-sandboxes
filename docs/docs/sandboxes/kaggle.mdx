@@ -1,9 +1,47 @@
 ---
-sidebar_position: 4
+sidebar_position: 6
 title: Kaggle
 ---
 
 # Kaggle
+
+Runs code on Kaggle with two transparent modes:
+
+1. **Interactive kernel mode** using `KaggleKernelClient` (runtime proxy URL).
+2. **Batch job mode** using `KaggleKernelExecutor` when no runtime connection
+   details are supplied.
+
+- **Requirements:** `code-sandboxes[kaggle]`.
+- **Interactive parameters:** `server_url`, optional `kernel_id`, optional
+  `channels_url`, optional `token`.
+- **Batch credentials:** `~/.kaggle/kaggle.json`, `KAGGLE_API_TOKEN`, or
+  `KAGGLE_USERNAME` / `KAGGLE_KEY`.
+
+## Sandbox Usage
+
+```python
+from code_sandboxes import Sandbox
+
+# Interactive mode (existing session / runtime proxy)
+with Sandbox.create(
+        variant="kaggle",
+        channels_url="wss://kkb-production.jupyter-proxy.kaggle.net/k/.../proxy/api/kernels/.../channels?session_id=...",
+) as sandbox:
+        print(sandbox.run_code("print(1 + 1)").text)
+
+# Transparent batch mode (no runtime URL required)
+with Sandbox.create(variant="kaggle") as sandbox:
+        result = sandbox.run_code("print('hello from kaggle batch')")
+        print(result.text or result.stdout)
+
+# Stream status updates and outputs while the Kaggle job runs.
+with Sandbox.create(variant="kaggle") as sandbox:
+    for event in sandbox.run_code_streaming("print('hello from kaggle stream')"):
+        if hasattr(event, "line"):
+            print(event.line)
+```
+
+## Authentication
 
 Kaggle notebooks expose a Jupyter-compatible kernel behind an authenticating
 proxy. `KaggleKernelClient` supports two auth modes:

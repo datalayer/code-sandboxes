@@ -28,7 +28,6 @@ KERNEL_ID = "11e073f0-e82d-4029-be8d-3918f7ed1a9e"
 PROXY_TOKEN = "proxy-abc"  # noqa: S105
 
 
-
 def test_colab_kernel_client_injects_headers_and_extra_params(monkeypatch):
     captured: dict = {}
 

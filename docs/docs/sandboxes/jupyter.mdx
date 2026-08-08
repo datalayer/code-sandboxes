@@ -1,0 +1,56 @@
+---
+sidebar_position: 2
+title: Jupyter
+---
+
+# Jupyter
+
+Runs code against a local or remote Jupyter Server and connects through its
+Jupyter kernel client. This variant provides process isolation via the Jupyter
+kernel and persistent state across requests.
+
+- **Requirements:** `jupyter_server` and `jupyter-kernel-client` (included by default).
+- **Parameters:** `server_url`, `token`, `host`/`port` (when the sandbox starts
+  its own server), `python_executable`.
+
+## How To Obtain The Token
+
+- If you start the server yourself, you choose the token:
+  ```bash
+  jupyter server --port 8888 --IdentityProvider.token MY_TOKEN
+  ```
+- For an already-running server, list servers and read the `token=...` value:
+  ```bash
+  jupyter server list
+  # http://localhost:8888/?token=abcd1234...  :: /home/you/notebooks
+  ```
+  You can also pass the full `http://host:port/?token=...` URL as `server_url`;
+  the token is parsed automatically.
+- If you omit `server_url`, `JupyterSandbox` **starts and manages its own local
+  Jupyter Server** and generates the token for you — no configuration needed.
+
+## Usage
+
+```python
+from code_sandboxes import Sandbox
+
+# Connect to an existing server:
+with Sandbox.create(
+    variant="jupyter",
+    server_url="http://localhost:8888",
+    token="MY_TOKEN",
+) as sandbox:
+    sandbox.run_code("x = 40")
+    result = sandbox.run_code("x + 2")
+    print(result.text)  # 42
+
+# Or let the sandbox manage a local server automatically:
+with Sandbox.create(variant="jupyter") as sandbox:
+    print(sandbox.run_code("1 + 1").text)  # 2
+```
+
+The concrete implementation is available from a top-level module:
+
+```python
+from code_sandboxes.jupyter_sandbox import JupyterSandbox
+```

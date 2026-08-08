@@ -391,6 +391,11 @@ class CodeSandboxClient:
         self.start()
         self._sandbox.set_variables(variables)
 
+    def register_tool_caller(self, caller: Callable[..., Any]) -> None:
+        """Register the callable used by generated tools inside the sandbox."""
+        self.start()
+        self._sandbox.register_tool_caller(caller)
+
     def interrupt(self) -> bool:
         """Interrupt the active execution when supported by the variant."""
         return self._sandbox.interrupt()

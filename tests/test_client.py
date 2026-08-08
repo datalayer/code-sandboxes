@@ -26,6 +26,7 @@ class _FakeSandbox:
     def __init__(self):
         self._started = False
         self._variables = {}
+        self._tool_caller = None
         self.config = SimpleNamespace(variant="kaggle")
         self.info = SimpleNamespace(metadata={"kernel_id": "execution-id"})
         self.sandbox_id = "sandbox-id"
@@ -63,6 +64,9 @@ class _FakeSandbox:
 
     def interrupt(self):
         return True
+
+    def register_tool_caller(self, caller):
+        self._tool_caller = caller
 
     @classmethod
     def list_environments(cls):
@@ -139,8 +143,14 @@ def test_variables_interrupt_and_restart_delegate_to_sandbox():
 
     client.set_variable("one", 1)
     client.set_variables({"two": 2})
+
+    def tool_caller():
+        return None
+
+    client.register_tool_caller(tool_caller)
     assert client.get_variable("one") == 1
     assert client.get_variable("two") == 2
+    assert sandbox._tool_caller is tool_caller
     assert client.interrupt() is True
 
     client.restart()

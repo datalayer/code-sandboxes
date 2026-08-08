@@ -210,7 +210,7 @@ def test_to_kernel_reply_uses_notebook_outputs_when_available():
                     {
                         "output_type": "stream",
                         "name": "stdout",
-                            "text": "hello from kaggle\n",
+                        "text": "hello from kaggle\n",
                     }
                 ],
             }
@@ -235,10 +235,10 @@ def test_to_kernel_reply_falls_back_to_log_streams():
         slug="me/demo",
         status="COMPLETE",
         log=(
-            '['
+            "["
             '{"stream_name":"stdout","data":"hello\\n"},'
             '{"stream_name":"stderr","data":"warn\\n"}'
-            ']'
+            "]"
         ),
     )
 
@@ -253,10 +253,10 @@ def test_stdout_stderr_and_repr_are_compact():
         slug="me/demo",
         status="COMPLETE",
         log=(
-            '['
+            "["
             '{"stream_name":"stdout","data":"hello\\n"},'
             '{"stream_name":"stderr","data":"warning\\n"}'
-            ']'
+            "]"
         ),
     )
 

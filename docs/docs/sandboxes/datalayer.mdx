@@ -1,0 +1,63 @@
+---
+sidebar_position: 9
+title: Datalayer
+---
+
+# Datalayer
+
+Cloud-based execution with full isolation, GPU support, snapshots, and persistence.
+
+- **Requirements:** `code-sandboxes[datalayer]` (installs `agent_runtimes`).
+- **Parameters:** `token` (defaults to `DATALAYER_API_KEY`), `run_url`,
+  `snapshot_name`, plus creation options like `environment`, `gpu`, `cpu`, `memory`.
+
+## How To Obtain Datalayer Credentials
+
+1. Create an account at [datalayer.ai](https://datalayer.ai).
+2. Generate an API token from your account settings (**IAM → Tokens / API Keys**).
+3. Export `DATALAYER_API_KEY` (or pass it as the `token` parameter). Set
+   `DATALAYER_RUN_URL` only for a self-hosted / custom deployment.
+
+## Usage
+
+```python
+import os
+from code_sandboxes import Sandbox
+
+os.environ["DATALAYER_API_KEY"] = "your-datalayer-token"
+
+with Sandbox.create(
+    variant="datalayer",
+    gpu="A100",
+    environment="python-gpu-env",
+) as sandbox:
+    sandbox.run_code("import torch; print(torch.cuda.is_available())")
+```
+
+The concrete implementation is available from a top-level module:
+
+```python
+from code_sandboxes.datalayer_sandbox import DatalayerSandbox
+```
+
+## Snapshots
+
+Save and restore sandbox state (datalayer only):
+
+```python
+with Sandbox.create(variant="datalayer") as sandbox:
+    # Set up environment
+    sandbox.run_code("import pandas as pd")
+    sandbox.run_code("df = pd.DataFrame({'a': [1,2,3]})")
+
+    # Create snapshot
+    snapshot = sandbox.create_snapshot("my-setup")
+    print(f"Snapshot: {snapshot.id}")
+
+# Later: restore from snapshot
+with Sandbox.create(
+    variant="datalayer",
+    snapshot_name="my-setup"
+) as sandbox:
+    result = sandbox.run_code("print(df)")  # State restored
+```
