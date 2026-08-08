@@ -274,8 +274,17 @@ class CodeSandboxClient:
 
     @property
     def variant(self) -> SandboxVariant | None:
-        """The variant of the wrapped sandbox, if known."""
-        return getattr(self._sandbox.config, "variant", None)
+        """The variant of the wrapped sandbox, if known.
+
+        ``SandboxConfig`` carries no ``variant`` field, so real sandboxes only
+        report their variant through ``info``, which is populated on start. The
+        config is still consulted first for duck-typed sandboxes that expose it.
+        """
+        variant = getattr(self._sandbox.config, "variant", None)
+        if variant is None:
+            info = getattr(self._sandbox, "info", None)
+            variant = getattr(info, "variant", None)
+        return variant
 
     @property
     def is_started(self) -> bool:
