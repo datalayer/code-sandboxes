@@ -379,16 +379,35 @@ class CodeSandboxClient:
         output_hook: Callable[[dict[str, Any]], None] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Execute code and optionally emit each normalized output to a callback."""
+        """Execute code and optionally emit each output to a callback.
+
+        Mirrors :meth:`jupyter_kernel_client.JupyterKernelClient.execute_interactive`
+        so kernel-client consumers work without an adapter:
+
+        * each output-hook message carries a Jupyter ``header`` with ``msg_type``
+          (read as ``message["header"]["msg_type"]``), and
+        * the reply nests ``status`` / ``execution_count`` under ``content``
+          (read as ``reply["content"]["status"]``).
+
+        The flat top-level ``status`` / ``execution_count`` / ``outputs`` keys are
+        preserved for callers that consume the backend-neutral reply shape, so the
+        emitted messages and reply are a superset satisfying both contracts.
+        """
         reply = self.execute(code, silent=silent, timeout=timeout, **kwargs)
         if output_hook is not None:
             for output in reply["outputs"]:
+                msg_type = output.get("output_type", "display_data")
                 output_hook(
                     {
-                        "msg_type": output.get("output_type", "display_data"),
+                        "header": {"msg_type": msg_type},
+                        "msg_type": msg_type,
                         "content": output,
                     }
                 )
+        reply["content"] = {
+            "status": reply.get("status", "ok"),
+            "execution_count": reply.get("execution_count"),
+        }
         return reply
 
     def get_variable(self, name: str) -> Any:
