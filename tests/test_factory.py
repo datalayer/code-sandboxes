@@ -7,10 +7,10 @@
 import pytest
 
 from code_sandboxes.base import Sandbox, SandboxVariant
-from code_sandboxes.google_colab_sandbox import GoogleColabSandbox
 from code_sandboxes.datalayer_sandbox import DatalayerSandbox
 from code_sandboxes.docker_sandbox import DockerSandbox
 from code_sandboxes.eval_sandbox import EvalSandbox
+from code_sandboxes.google_colab_sandbox import GoogleColabSandbox
 from code_sandboxes.jupyter_sandbox import JupyterSandbox
 from code_sandboxes.kaggle_sandbox import KaggleSandbox
 from code_sandboxes.modal_sandbox import ModalSandbox

@@ -7,10 +7,9 @@
 [![Datalayer](https://assets.datalayer.tech/datalayer-25.svg)](https://datalayer.io)
 
 [![Become a Sponsor](https://img.shields.io/static/v1?label=Become%20a%20Sponsor&message=%E2%9D%A4&logo=GitHub&style=flat&color=1ABC9C)](https://github.com/sponsors/datalayer)
+[![PyPI - Version](https://img.shields.io/pypi/v/code-sandboxes)](https://pypi.org/project/code-sandboxes)
 
 # { } 📦 Code Sandboxes
-
-[![PyPI - Version](https://img.shields.io/pypi/v/code-sandboxes)](https://pypi.org/project/code-sandboxes)
 
 Code Sandboxes (`code_sandboxes`) is a Python package for running code in isolated sandbox variants through a unified API.
 

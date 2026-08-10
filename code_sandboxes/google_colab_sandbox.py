@@ -20,8 +20,8 @@ import time
 import uuid
 
 from .base import Sandbox
-from .google_colab import GoogleColabKernelClient, parse_google_colab_channels_url
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
+from .google_colab import GoogleColabKernelClient, parse_google_colab_channels_url
 from .interfaces import ISandboxClient
 from .models import (
     CodeError,
@@ -96,9 +96,11 @@ class GoogleColabSandbox(Sandbox):
         if self._channels_url and (
             not self._server_url or not self._kernel_id or not self._proxy_token
         ):
-            parsed_server_url, parsed_kernel_id, parsed_proxy_token = parse_google_colab_channels_url(
-                self._channels_url
-            )
+            (
+                parsed_server_url,
+                parsed_kernel_id,
+                parsed_proxy_token,
+            ) = parse_google_colab_channels_url(self._channels_url)
             self._server_url = self._server_url or parsed_server_url
             self._kernel_id = self._kernel_id or parsed_kernel_id
             self._proxy_token = self._proxy_token or parsed_proxy_token

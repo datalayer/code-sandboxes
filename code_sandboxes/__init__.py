@@ -59,11 +59,6 @@ Style usage:
 
 from .base import Sandbox
 from .client import CodeExecutionOutcome, CodeSandboxClient, execution_result_to_reply
-from .google_colab import (
-    GoogleColabKernelClient,
-    parse_google_colab_channels_url,
-)
-from .google_colab_sandbox import GoogleColabSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .datalayer_sandbox import DatalayerSandbox
 from .docker_sandbox import DockerSandbox
@@ -90,6 +85,11 @@ from .filesystem import (
     SandboxFileHandle,
     SandboxFilesystem,
 )
+from .google_colab import (
+    GoogleColabKernelClient,
+    parse_google_colab_channels_url,
+)
+from .google_colab_sandbox import GoogleColabSandbox
 from .interfaces import ISandboxClient
 from .jupyter_sandbox import JupyterSandbox
 from .kaggle import KAGGLE_API_TOKEN_ENV, KaggleKernelClient, parse_kaggle_channels_url
@@ -135,9 +135,9 @@ __all__ = [
     "FileType",
     "FileWatchEvent",
     "FileWatchEventType",
+    "GPUType",
     "GoogleColabKernelClient",
     "GoogleColabSandbox",
-    "GPUType",
     "ISandboxClient",
     "JupyterSandbox",
     "KaggleExecutionResult",
