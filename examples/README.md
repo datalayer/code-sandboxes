@@ -21,7 +21,7 @@ Supported sandbox variants:
 - `docker`
 - `eval`
 - `monty`
-- `colab`
+- `google-colab`
 - `kaggle`
 - `modal`
 - `datalayer`
@@ -34,7 +34,7 @@ python eval_sandbox_example.py
 python jupyter_sandbox_example.py
 python docker_sandbox_example.py
 python monty_sandbox_example.py
-python colab_sandbox_example.py
+python google_colab_sandbox_example.py
 python kaggle_sandbox_example.py
 python modal_sandbox_example.py
 python datalayer_sandbox_example.py
@@ -48,7 +48,7 @@ make eval
 make jupyter
 make docker
 make monty
-make colab
+make google-colab
 make kaggle
 make modal
 make datalayer
@@ -62,7 +62,7 @@ make eval
 make jupyter
 make docker
 make monty
-make colab
+make google-colab
 make kaggle
 make modal
 make datalayer
@@ -72,7 +72,7 @@ Notes by variant:
 
 - `docker`: requires Docker support and a Docker image (for example `code-sandboxes-jupyter:latest`).
 - `monty`: requires `code-sandboxes[monty]` (`pydantic-monty`).
-- `colab`: requires `RUNTIME_URL`, `RUNTIME_ID`, and `RUNTIME_PROXY_TOKEN`.
+- `google-colab`: requires `RUNTIME_URL`, `RUNTIME_ID`, and `RUNTIME_PROXY_TOKEN`.
 - `kaggle`: requires `RUNTIME_CHANNELS_URL`, or `RUNTIME_URL` and `RUNTIME_ID`.
 - `modal`: requires `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or `~/.modal.toml`.
 - `datalayer`: requires Datalayer runtime credentials/config.

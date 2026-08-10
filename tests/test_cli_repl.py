@@ -63,10 +63,14 @@ def test_repl_colab_prompts_and_forwards_credentials(monkeypatch):
 
     # Prompts: server_url, kernel_id, proxy_token, then repl command.
     user_input = "https://colab-host.example\nkernel-abc\nproxy-xyz\n:exit\n"
-    result = runner.invoke(sandbox_cli.app, ["repl", "--variant", "colab"], input=user_input)
+    result = runner.invoke(
+        sandbox_cli.app,
+        ["repl", "--variant", "google-colab"],
+        input=user_input,
+    )
 
     assert result.exit_code == 0
-    assert captured["kwargs"]["variant"] == "colab"
+    assert captured["kwargs"]["variant"] == "google_colab"
     assert captured["kwargs"]["server_url"] == "https://colab-host.example"
     assert captured["kwargs"]["kernel_id"] == "kernel-abc"
     assert captured["kwargs"]["proxy_token"] == "proxy-xyz"  # noqa: S105

@@ -1,16 +1,11 @@
 # Copyright (c) 2025-2026 Datalayer, Inc.
 # BSD 3-Clause License
 
-"""Example: colab sandbox (Google Colab runtime).
-
-Run with:
-  RUNTIME_URL=... RUNTIME_ID=... RUNTIME_PROXY_TOKEN=... \\
-  python examples/colab_sandbox_example.py
-"""
+"""REPL example: colab sandbox (Google Colab runtime)."""
 
 import os
 
-from exec_common import show_and_run
+from repl_common import run_repl
 
 from code_sandboxes import Sandbox
 
@@ -29,20 +24,15 @@ def main() -> None:
         runtime_proxy_token = _require("RUNTIME_PROXY_TOKEN")
 
         with Sandbox.create(
-            variant="colab",
+            variant="google_colab",
             timeout=60,
             server_url=runtime_url,
             kernel_id=runtime_id,
             proxy_token=runtime_proxy_token,
         ) as sandbox:
-            show_and_run(sandbox, "x = 40")
-            result = show_and_run(sandbox, "x + 2")
-            print("result:", result.text)
-
-            result = show_and_run(sandbox, "print('hello from colab')")
-            print("stdout:", result.stdout)
+            run_repl(sandbox)
     except Exception as exc:
-        print("colab example failed:", exc)
+        print("colab REPL failed:", exc)
         print(
             "Hint: export RUNTIME_URL, RUNTIME_ID, and RUNTIME_PROXY_TOKEN "
             "from an active Colab runtime session."

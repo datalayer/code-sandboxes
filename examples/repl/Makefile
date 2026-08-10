@@ -2,9 +2,9 @@
 
 PYTHON ?= python
 
-.PHONY: all eval docker jupyter monty colab kaggle modal modal-gpu datalayer
+.PHONY: all eval docker jupyter monty google-colab kaggle modal modal-gpu datalayer
 
-all: eval docker jupyter monty colab modal datalayer
+all: eval docker jupyter monty google-colab modal datalayer
 
 eval:
 	$(PYTHON) eval_sandbox_example.py
@@ -18,8 +18,8 @@ jupyter:
 monty:
 	$(PYTHON) monty_sandbox_example.py
 
-colab:
-	$(PYTHON) colab_sandbox_example.py
+google-colab:
+	$(PYTHON) google_colab_sandbox_example.py
 
 kaggle:
 	$(PYTHON) kaggle_sandbox_example.py

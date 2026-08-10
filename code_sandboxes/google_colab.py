@@ -4,7 +4,7 @@
 
 """Google Colab kernel client.
 
-This module provides :class:`ColabKernelClient`, a thin specialization of
+This module provides :class:`GoogleColabKernelClient`, a thin specialization of
 :class:`~jupyter_kernel_client.client.JupyterKernelClient` that connects to an
 **already-running** Google Colab kernel.
 
@@ -28,13 +28,13 @@ runtime, for example::
 
     wss://<host>/api/kernels/<kernel_id>/channels?session_id=<...>&colab-runtime-proxy-token=<proxy_token>&colab-client-agent=web
 
-Use :func:`parse_colab_channels_url` (or
-:meth:`ColabKernelClient.from_channels_url`) to turn that URL into the
+Use :func:`parse_google_colab_channels_url` (or
+:meth:`GoogleColabKernelClient.from_channels_url`) to turn that URL into the
 ``server_url``, ``kernel_id`` and ``proxy_token`` expected by the client.
 
 Example:
-    >>> from code_sandboxes import ColabKernelClient
-    >>> kernel = ColabKernelClient(
+    >>> from code_sandboxes import GoogleColabKernelClient
+    >>> kernel = GoogleColabKernelClient(
     ...     server_url="https://<colab-host>",
     ...     kernel_id="<kernel_id>",
     ...     proxy_token="<proxy_token>",
@@ -68,7 +68,7 @@ DEFAULT_COLAB_CLIENT_AGENT = "code-sandboxes"
 _COLAB_KERNEL_RE = re.compile(r"/api/kernels/([^/]+)/channels", re.IGNORECASE)
 
 
-def parse_colab_channels_url(channels_url: str) -> tuple[str, str, str]:
+def parse_google_colab_channels_url(channels_url: str) -> tuple[str, str, str]:
     """Extract ``server_url``, ``kernel_id`` and ``proxy_token`` from a URL.
 
     Parses the websocket *channels* URL of a running Colab kernel session, as
@@ -128,7 +128,7 @@ def parse_colab_channels_url(channels_url: str) -> tuple[str, str, str]:
     return server_url, kernel_id, proxy_token
 
 
-class ColabKernelClient(JupyterKernelClient):
+class GoogleColabKernelClient(JupyterKernelClient):
     """Kernel client connected to an existing Google Colab runtime.
 
     This client connects to a kernel that is **already running** on a Colab
@@ -190,19 +190,19 @@ class ColabKernelClient(JupyterKernelClient):
         cls,
         channels_url: str,
         **kwargs: t.Any,
-    ) -> ColabKernelClient:
+    ) -> GoogleColabKernelClient:
         """Create a client from a Colab kernel session *channels* URL.
 
         Args:
             channels_url: The websocket *channels* URL of a running Colab kernel
-                session (see :func:`parse_colab_channels_url`).
-            **kwargs: Forwarded to :class:`ColabKernelClient`. Values provided
+                session (see :func:`parse_google_colab_channels_url`).
+            **kwargs: Forwarded to :class:`GoogleColabKernelClient`. Values provided
                 here override those parsed from the URL.
 
         Returns:
-            A configured :class:`ColabKernelClient` instance.
+            A configured :class:`GoogleColabKernelClient` instance.
         """
-        server_url, kernel_id, proxy_token = parse_colab_channels_url(channels_url)
+        server_url, kernel_id, proxy_token = parse_google_colab_channels_url(channels_url)
         kwargs.setdefault("kernel_id", kernel_id)
         kwargs.setdefault("proxy_token", proxy_token)
         return cls(server_url=server_url, **kwargs)

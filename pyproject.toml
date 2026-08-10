@@ -35,6 +35,7 @@ code-sandboxes = "code_sandboxes.cli:main"
 [project.optional-dependencies]
 datalayer = ["agent_runtimes>=1.0.16"]
 docker = ["docker>=6.0"]
+google-colab = []
 kaggle = ["kaggle>=1.6"]
 monty = ["pydantic-monty"]
 modal = ["modal>=0.64"]

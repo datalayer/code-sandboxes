@@ -6,7 +6,7 @@ title: Google Colab
 # Google Colab
 
 Runs code against a Google Colab runtime. Colab exposes a Jupyter-compatible
-kernel behind an authenticating proxy, using the `ColabKernelClient` implemented
+kernel behind an authenticating proxy, using the `GoogleColabKernelClient` implemented
 by Code Sandboxes.
 
 - **Requirements:** the base `code-sandboxes` installation.
@@ -25,7 +25,7 @@ after the runtime is reassigned or reconnected.
 from code_sandboxes import Sandbox
 
 with Sandbox.create(
-    variant="colab",
+    variant="google_colab",
     server_url="https://8080-m-s-kkb-...-d.us-east1-0.prod.colab.dev",
     kernel_id="c9bba548-3995-4f26-8e1a-7b8fbb10c578",
     proxy_token="eyJhbGci....",
@@ -39,7 +39,7 @@ Or pass a channels URL directly:
 
 ```python
 with Sandbox.create(
-    variant="colab",
+    variant="google_colab",
     channels_url=(
         "wss://<host>/api/kernels/<kernel_id>/channels"
         "?session_id=<...>&colab-runtime-proxy-token=<proxy_token>&colab-client-agent=web"
@@ -50,7 +50,7 @@ with Sandbox.create(
 
 ## Kernel Client
 
-Use `ColabKernelClient` to connect to a kernel that is already running in Colab.
+Use `GoogleColabKernelClient` to connect to a kernel that is already running in Colab.
 
 This client reuses an existing Colab runtime; it does not create a Colab runtime
 from scratch.
@@ -66,9 +66,9 @@ All three are available in Colab's channels WebSocket URL.
 ## Option A: Connect With Explicit Values
 
 ```python
-from code_sandboxes import ColabKernelClient
+from code_sandboxes import GoogleColabKernelClient
 
-kernel = ColabKernelClient(
+kernel = GoogleColabKernelClient(
     server_url="https://<colab-host>",
     kernel_id="<kernel_id>",
     proxy_token="<proxy_token>",
@@ -83,14 +83,14 @@ kernel.stop(shutdown_kernel=False)
 ## Option B: Connect From Channels URL
 
 ```python
-from code_sandboxes import ColabKernelClient
+from code_sandboxes import GoogleColabKernelClient
 
 channels_url = (
     "wss://<colab-host>/api/kernels/<kernel_id>/channels"
     "?session_id=<...>&colab-runtime-proxy-token=<proxy_token>&colab-client-agent=web"
 )
 
-with ColabKernelClient.from_channels_url(channels_url) as kernel:
+with GoogleColabKernelClient.from_channels_url(channels_url) as kernel:
     reply = kernel.execute("x = 1 + 1; print(x)")
     print(reply)
 ```
@@ -98,12 +98,12 @@ with ColabKernelClient.from_channels_url(channels_url) as kernel:
 You can also parse values directly:
 
 ```python
-from code_sandboxes import parse_colab_channels_url
+from code_sandboxes import parse_google_colab_channels_url
 
-server_url, kernel_id, proxy_token = parse_colab_channels_url(channels_url)
+server_url, kernel_id, proxy_token = parse_google_colab_channels_url(channels_url)
 ```
 
-`ColabKernelClient` forwards the proxy token as both the
+`GoogleColabKernelClient` forwards the proxy token as both the
 `X-Colab-Runtime-Proxy-Token` HTTP header and the
 `colab-runtime-proxy-token` WebSocket query parameter.
 

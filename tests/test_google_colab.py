@@ -8,12 +8,12 @@ import logging
 
 import pytest
 
-from code_sandboxes.colab import (
+from code_sandboxes.google_colab import (
     COLAB_CLIENT_AGENT_HEADER,
     COLAB_RUNTIME_PROXY_TOKEN_HEADER,
     COLAB_RUNTIME_PROXY_TOKEN_PARAM,
-    ColabKernelClient,
-    parse_colab_channels_url,
+    GoogleColabKernelClient,
+    parse_google_colab_channels_url,
 )
 
 CHANNELS_URL = (
@@ -35,10 +35,10 @@ def test_colab_kernel_client_injects_headers_and_extra_params(monkeypatch):
         captured.update(kwargs)
 
     monkeypatch.setattr(
-        "code_sandboxes.colab.JupyterKernelClient.__init__", fake_kernel_client_init
+        "code_sandboxes.google_colab.JupyterKernelClient.__init__", fake_kernel_client_init
     )
 
-    ColabKernelClient(
+    GoogleColabKernelClient(
         server_url="https://colab-host.example",
         kernel_id="kernel-123",
         proxy_token="proxy-abc",  # noqa: S106
@@ -68,10 +68,10 @@ def test_colab_kernel_client_drops_any_provided_jupyter_token(monkeypatch):
         captured.update(kwargs)
 
     monkeypatch.setattr(
-        "code_sandboxes.colab.JupyterKernelClient.__init__", fake_kernel_client_init
+        "code_sandboxes.google_colab.JupyterKernelClient.__init__", fake_kernel_client_init
     )
 
-    ColabKernelClient(
+    GoogleColabKernelClient(
         server_url="https://colab-host.example",
         kernel_id="kernel-123",
         proxy_token="proxy-abc",  # noqa: S106
@@ -83,26 +83,26 @@ def test_colab_kernel_client_drops_any_provided_jupyter_token(monkeypatch):
 
 
 def test_parse_colab_channels_url_extracts_parts():
-    server_url, kernel_id, proxy_token = parse_colab_channels_url(CHANNELS_URL)
+    server_url, kernel_id, proxy_token = parse_google_colab_channels_url(CHANNELS_URL)
     assert server_url == SERVER_URL
     assert kernel_id == KERNEL_ID
     assert proxy_token == PROXY_TOKEN
 
 
 def test_parse_colab_channels_url_maps_ws_to_http():
-    server_url, _, _ = parse_colab_channels_url(CHANNELS_URL.replace("wss://", "ws://"))
+    server_url, _, _ = parse_google_colab_channels_url(CHANNELS_URL.replace("wss://", "ws://"))
     assert server_url.startswith("http://")
 
 
 def test_parse_colab_channels_url_requires_proxy_token():
     without_token = CHANNELS_URL.replace("&colab-runtime-proxy-token=proxy-abc", "")
     with pytest.raises(ValueError):
-        parse_colab_channels_url(without_token)
+        parse_google_colab_channels_url(without_token)
 
 
 def test_parse_colab_channels_url_rejects_invalid_url():
     with pytest.raises(ValueError):
-        parse_colab_channels_url("https://colab.research.google.com/not-a-channels-url")
+        parse_google_colab_channels_url("https://colab.research.google.com/not-a-channels-url")
 
 
 def test_colab_kernel_client_from_channels_url(monkeypatch):
@@ -112,10 +112,10 @@ def test_colab_kernel_client_from_channels_url(monkeypatch):
         captured.update(kwargs)
 
     monkeypatch.setattr(
-        "code_sandboxes.colab.JupyterKernelClient.__init__", fake_kernel_client_init
+        "code_sandboxes.google_colab.JupyterKernelClient.__init__", fake_kernel_client_init
     )
 
-    ColabKernelClient.from_channels_url(CHANNELS_URL)
+    GoogleColabKernelClient.from_channels_url(CHANNELS_URL)
 
     assert captured["server_url"] == SERVER_URL
     assert captured["kernel_id"] == KERNEL_ID

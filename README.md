@@ -7,23 +7,22 @@
 [![Datalayer](https://assets.datalayer.tech/datalayer-25.svg)](https://datalayer.io)
 
 [![Become a Sponsor](https://img.shields.io/static/v1?label=Become%20a%20Sponsor&message=%E2%9D%A4&logo=GitHub&style=flat&color=1ABC9C)](https://github.com/sponsors/datalayer)
+[![PyPI - Version](https://img.shields.io/pypi/v/code-sandboxes)](https://pypi.org/project/code-sandboxes)
 
 # { } 📦 Code Sandboxes
-
-[![PyPI - Version](https://img.shields.io/pypi/v/code-sandboxes)](https://pypi.org/project/code-sandboxes)
 
 Code Sandboxes (`code_sandboxes`) is a Python package for running code in isolated sandbox variants through a unified API.
 
 Canonical variant names:
 
-- `jupyter`
+- `datalayer`
 - `docker`
 - `eval`
-- `monty`
+- `google_colab`
+- `jupyter`
 - `kaggle`
-- `colab`
 - `modal`
-- `datalayer`
+- `monty`
 
 ## Documentation
 
@@ -49,9 +48,7 @@ pip install code-sandboxes
 
 For backend-specific extras and credentials, see [https://code-sandboxes.datalayer.tech/installation](https://code-sandboxes.datalayer.tech/installation) and [https://code-sandboxes.datalayer.tech/sandboxes](https://code-sandboxes.datalayer.tech/sandboxes).
 
-## Quick Examples
-
-### Python: launch a `jupyter` sandbox
+### Jupyter Sandbox
 
 ```python
 from code_sandboxes import Sandbox
@@ -70,9 +67,14 @@ with Sandbox.create(
   print(sandbox.run_code("x + 2").text)  # 42
 ```
 
-### CLI REPL: `kaggle` variant
+## Kaggle Sandbox
 
-Kaggle REPL supports both interactive runtime mode and credential-based batch mode.
+Kaggle supports both batch execution and interactive connections through the
+`kaggle` sandbox. Install its optional dependency first:
+
+```bash
+pip install "code-sandboxes[kaggle]"
+```
 
 Required credentials for batch mode:
 
@@ -88,15 +90,6 @@ export KAGGLE_API_KEY="<your-kaggle-api-key>"
 
 # Launch the REPL
 sandbox repl --variant kaggle
-```
-
-### Kaggle
-
-Kaggle supports both batch execution and interactive connections through the
-`kaggle` sandbox. Install its optional dependency first:
-
-```bash
-pip install "code-sandboxes[kaggle]"
 ```
 
 For batch execution, configure Kaggle credentials and create the sandbox
@@ -136,10 +129,10 @@ with KaggleKernelClient.from_channels_url(channels_url, token=None) as kernel:
     print(kernel.execute("x = 1 + 1; print(x)"))
 ```
 
-See the [complete Kaggle guide](docs/docs/sandboxes/kaggle.mdx) for authentication,
+See the [complete Kaggle guide](https://code-sandboxes.datalayer.tech/sandboxes/kaggle) for authentication,
 accelerators, channels URL retrieval, and execution options.
 
-### Google Colab
+## Google Colab
 
 Google Colab exposes an already-running kernel through an authenticating proxy.
 Copy its WebSocket channels URL from the browser's Network tools, then pass it
@@ -148,28 +141,22 @@ directly to the sandbox:
 ```python
 from code_sandboxes import Sandbox
 
-with Sandbox.create(variant="colab", channels_url=channels_url) as sandbox:
+with Sandbox.create(variant="google_colab", channels_url=channels_url) as sandbox:
     print(sandbox.run_code("x = 1 + 1; print(x)").stdout)
 ```
 
 The lower-level client and parser are owned by Code Sandboxes as well:
 
 ```python
-from code_sandboxes import ColabKernelClient, parse_colab_channels_url
+from code_sandboxes import GoogleColabKernelClient, parse_google_colab_channels_url
 
-server_url, kernel_id, proxy_token = parse_colab_channels_url(channels_url)
-with ColabKernelClient.from_channels_url(channels_url) as kernel:
+server_url, kernel_id, proxy_token = parse_google_colab_channels_url(channels_url)
+with GoogleColabKernelClient.from_channels_url(channels_url) as kernel:
     print(kernel.execute("print('hello from colab')"))
 ```
 
-See the [complete Google Colab guide](docs/docs/sandboxes/google-colab.mdx) for
+See the [complete Google Colab guide](https://code-sandboxes.datalayer.tech/sandboxes/google-colab) for
 proxy authentication, explicit connection values, and channels URL retrieval.
-
-For full setup and parameters for all variants, see:
-
-- [https://code-sandboxes.datalayer.tech/sandboxes](https://code-sandboxes.datalayer.tech/sandboxes)
-- [https://code-sandboxes.datalayer.tech/cli](https://code-sandboxes.datalayer.tech/cli)
-- [https://code-sandboxes.datalayer.tech/installation](https://code-sandboxes.datalayer.tech/installation)
 
 ## License
 

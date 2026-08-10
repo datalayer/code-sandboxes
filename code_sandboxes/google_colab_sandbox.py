@@ -5,7 +5,7 @@
 """Google Colab sandbox implementation.
 
 This sandbox connects to an existing Google Colab runtime and executes code in
-its kernel using :class:`code_sandboxes.colab.ColabKernelClient`.
+its kernel using :class:`code_sandboxes.google_colab.GoogleColabKernelClient`.
 
 Unlike the Jupyter/Docker sandboxes, this sandbox does **not** provision a
 runtime: a Colab runtime must already be running in a browser session. Reuse it
@@ -20,8 +20,8 @@ import time
 import uuid
 
 from .base import Sandbox
-from .colab import ColabKernelClient, parse_colab_channels_url
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
+from .google_colab import GoogleColabKernelClient, parse_google_colab_channels_url
 from .interfaces import ISandboxClient
 from .models import (
     CodeError,
@@ -40,7 +40,7 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 
-class ColabSandbox(Sandbox):
+class GoogleColabSandbox(Sandbox):
     """Sandbox backed by a Google Colab runtime.
 
     Args:
@@ -79,13 +79,13 @@ class ColabSandbox(Sandbox):
     def list_environments(cls) -> list[SandboxEnvironment]:
         return [
             SandboxEnvironment(
-                name="colab",
+                name="google_colab",
                 title="Google Colab",
                 language="python",
                 owner="google",
                 visibility="cloud",
                 burning_rate=0.0,
-                metadata={"variant": "colab"},
+                metadata={"variant": "google_colab"},
             )
         ]
 
@@ -96,20 +96,22 @@ class ColabSandbox(Sandbox):
         if self._channels_url and (
             not self._server_url or not self._kernel_id or not self._proxy_token
         ):
-            parsed_server_url, parsed_kernel_id, parsed_proxy_token = parse_colab_channels_url(
-                self._channels_url
-            )
+            (
+                parsed_server_url,
+                parsed_kernel_id,
+                parsed_proxy_token,
+            ) = parse_google_colab_channels_url(self._channels_url)
             self._server_url = self._server_url or parsed_server_url
             self._kernel_id = self._kernel_id or parsed_kernel_id
             self._proxy_token = self._proxy_token or parsed_proxy_token
 
         if not self._server_url or not self._kernel_id or not self._proxy_token:
             raise SandboxConfigurationError(
-                "ColabSandbox requires 'server_url', 'kernel_id', and 'proxy_token'. "
+                "GoogleColabSandbox requires 'server_url', 'kernel_id', and 'proxy_token'. "
                 "Provide them directly, or pass 'channels_url' from an active Colab session."
             )
 
-        self._client = ColabKernelClient(
+        self._client = GoogleColabKernelClient(
             server_url=self._server_url,
             kernel_id=self._kernel_id,
             proxy_token=self._proxy_token,
@@ -120,7 +122,7 @@ class ColabSandbox(Sandbox):
         self._default_context = self.create_context("default")
         self._info = SandboxInfo(
             id=self._sandbox_id,
-            variant="colab",
+            variant="google_colab",
             status=SandboxStatus.RUNNING,
             created_at=time.time(),
             name=self.config.name,
@@ -168,7 +170,7 @@ class ColabSandbox(Sandbox):
             raise SandboxNotStartedError()
 
         if language != "python":
-            raise ValueError(f"ColabSandbox only supports Python, got: {language}")
+            raise ValueError(f"GoogleColabSandbox only supports Python, got: {language}")
 
         started_at = time.time()
         self._interrupt_requested.clear()

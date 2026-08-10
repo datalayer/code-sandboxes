@@ -36,7 +36,7 @@ def create(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter"`, `"monty"`, `"kaggle"`, `"colab"`, `"modal"`, or `"datalayer"`. Defaults to `"datalayer"`. |
+| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter"`, `"monty"`, `"kaggle"`, `"google_colab"`, `"modal"`, or `"datalayer"`. Defaults to `"datalayer"`. |
 | `timeout` | `float` | Execution timeout in seconds |
 | `environment` | `str` | Runtime environment name |
 | `gpu` | `str` | GPU type (e.g., `"T4"`, `"A100"`, `"H100"`) |
@@ -82,7 +82,7 @@ def list_environments(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter"`, `"monty"`, `"kaggle"`, `"colab"`, `"modal"`, or `"datalayer"` |
+| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter"`, `"monty"`, `"kaggle"`, `"google_colab"`, `"modal"`, or `"datalayer"` |
 | `**kwargs` | `dict` | Variant-specific arguments (e.g., credentials, run URL) |
 
 Legacy `local-eval`, `local-docker`, and `local-jupyter` variant names are not supported.
@@ -293,11 +293,11 @@ variants. They are exported from `code_sandboxes`:
 
 ```python
 from code_sandboxes import (
-    ColabKernelClient,
+    GoogleColabKernelClient,
     KaggleExecutionResult,
     KaggleKernelClient,
     KaggleKernelExecutor,
-    parse_colab_channels_url,
+    parse_google_colab_channels_url,
     parse_kaggle_channels_url,
 )
 ```
@@ -305,7 +305,7 @@ from code_sandboxes import (
 - `KaggleKernelClient` connects to an interactive Kaggle notebook kernel.
 - `KaggleKernelExecutor` submits and monitors Kaggle batch notebook jobs.
 - `KaggleExecutionResult` normalizes batch output into a Jupyter-like reply.
-- `ColabKernelClient` connects to an already-running Google Colab kernel.
+- `GoogleColabKernelClient` connects to an already-running Google Colab kernel.
 - The parser helpers extract connection details from browser channels URLs.
 
 See [Kaggle](/sandboxes/kaggle) and [Google Colab](/sandboxes/google-colab) for
