@@ -267,7 +267,3 @@ class GoogleColabSandbox(Sandbox):
         if not self._started or self._client is None:
             raise SandboxNotStartedError()
         self._client.set_variable(name, value)
-
-
-# Backward-compatible alias.
-GoogleColabSandbox = GoogleColabSandbox

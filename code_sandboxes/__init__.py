@@ -60,12 +60,10 @@ Style usage:
 from .base import Sandbox
 from .client import CodeExecutionOutcome, CodeSandboxClient, execution_result_to_reply
 from .google_colab import (
-    ColabKernelClient,
     GoogleColabKernelClient,
-    parse_colab_channels_url,
     parse_google_colab_channels_url,
 )
-from .google_colab_sandbox import ColabSandbox, GoogleColabSandbox
+from .google_colab_sandbox import GoogleColabSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .datalayer_sandbox import DatalayerSandbox
 from .docker_sandbox import DockerSandbox
@@ -125,8 +123,6 @@ __all__ = [
     "CodeError",
     "CodeExecutionOutcome",
     "CodeSandboxClient",
-    "ColabKernelClient",
-    "ColabSandbox",
     "CommandResult",
     "Context",
     "ContextNotFoundError",
@@ -184,7 +180,6 @@ __all__ = [
     "TunnelInfo",
     "VariableNotFoundError",
     "execution_result_to_reply",
-    "parse_colab_channels_url",
     "parse_google_colab_channels_url",
     "parse_kaggle_channels_url",
 ]

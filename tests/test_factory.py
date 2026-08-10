@@ -70,7 +70,7 @@ class TestSandboxFactory:
             ("jupyter", JupyterSandbox),
             ("docker", DockerSandbox),
             ("datalayer", DatalayerSandbox),
-            ("colab", GoogleColabSandbox),
+            ("google_colab", GoogleColabSandbox),
             ("kaggle", KaggleSandbox),
             ("monty", MontySandbox),
             ("modal", ModalSandbox),

@@ -25,8 +25,6 @@ Canonical variant names:
 - `modal`
 - `monty`
 
-CLI also accepts the alias `google-colab`.
-
 ## Documentation
 
 The full documentation is the single source of truth:
@@ -51,9 +49,7 @@ pip install code-sandboxes
 
 For backend-specific extras and credentials, see [https://code-sandboxes.datalayer.tech/installation](https://code-sandboxes.datalayer.tech/installation) and [https://code-sandboxes.datalayer.tech/sandboxes](https://code-sandboxes.datalayer.tech/sandboxes).
 
-## Quick Examples
-
-### Python: launch a `jupyter` sandbox
+### Jupyter Sandbox
 
 ```python
 from code_sandboxes import Sandbox
@@ -72,7 +68,7 @@ with Sandbox.create(
   print(sandbox.run_code("x + 2").text)  # 42
 ```
 
-### Kaggle
+## Kaggle Sandbox
 
 Kaggle supports both batch execution and interactive connections through the
 `kaggle` sandbox. Install its optional dependency first:
@@ -134,10 +130,10 @@ with KaggleKernelClient.from_channels_url(channels_url, token=None) as kernel:
     print(kernel.execute("x = 1 + 1; print(x)"))
 ```
 
-See the [complete Kaggle guide](docs/docs/sandboxes/kaggle.mdx) for authentication,
+See the [complete Kaggle guide](https://code-sandboxes.datalayer.tech/sandboxes/kaggle) for authentication,
 accelerators, channels URL retrieval, and execution options.
 
-### Google Colab
+## Google Colab
 
 Google Colab exposes an already-running kernel through an authenticating proxy.
 Copy its WebSocket channels URL from the browser's Network tools, then pass it
@@ -160,14 +156,8 @@ with GoogleColabKernelClient.from_channels_url(channels_url) as kernel:
     print(kernel.execute("print('hello from colab')"))
 ```
 
-See the [complete Google Colab guide](docs/docs/sandboxes/google-colab.mdx) for
+See the [complete Google Colab guide](https://code-sandboxes.datalayer.tech/sandboxes/google-colab) for
 proxy authentication, explicit connection values, and channels URL retrieval.
-
-For full setup and parameters for all variants, see:
-
-- [https://code-sandboxes.datalayer.tech/sandboxes](https://code-sandboxes.datalayer.tech/sandboxes)
-- [https://code-sandboxes.datalayer.tech/cli](https://code-sandboxes.datalayer.tech/cli)
-- [https://code-sandboxes.datalayer.tech/installation](https://code-sandboxes.datalayer.tech/installation)
 
 ## License
 

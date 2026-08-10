@@ -21,7 +21,6 @@ _SUPPORTED_REPL_VARIANTS = {
     "docker",
     "eval",
     "monty",
-    "colab",
     "google_colab",
     "google-colab",
     "kaggle",
@@ -82,7 +81,7 @@ def _resolve_variant(variant: str | None) -> str:
             f"Unsupported variant: {selected}. Supported values: "
             + ", ".join(sorted(_SUPPORTED_REPL_VARIANTS))
         )
-    if selected in {"colab", "google-colab"}:
+    if selected == "google-colab":
         return "google_colab"
     return selected
 

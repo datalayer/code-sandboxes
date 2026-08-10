@@ -206,8 +206,3 @@ class GoogleColabKernelClient(JupyterKernelClient):
         kwargs.setdefault("kernel_id", kernel_id)
         kwargs.setdefault("proxy_token", proxy_token)
         return cls(server_url=server_url, **kwargs)
-
-
-# Backward-compatible aliases.
-parse_colab_channels_url = parse_google_colab_channels_url
-ColabKernelClient = GoogleColabKernelClient
