@@ -7,7 +7,7 @@
 import pytest
 
 from code_sandboxes.base import Sandbox, SandboxVariant
-from code_sandboxes.colab_sandbox import ColabSandbox
+from code_sandboxes.google_colab_sandbox import GoogleColabSandbox
 from code_sandboxes.datalayer_sandbox import DatalayerSandbox
 from code_sandboxes.docker_sandbox import DockerSandbox
 from code_sandboxes.eval_sandbox import EvalSandbox
@@ -70,7 +70,7 @@ class TestSandboxFactory:
             ("jupyter", JupyterSandbox),
             ("docker", DockerSandbox),
             ("datalayer", DatalayerSandbox),
-            ("colab", ColabSandbox),
+            ("colab", GoogleColabSandbox),
             ("kaggle", KaggleSandbox),
             ("monty", MontySandbox),
             ("modal", ModalSandbox),
@@ -89,7 +89,7 @@ class TestSandboxFactory:
     def test_create_colab_forwards_connection_kwargs(self):
         """Test that Colab-specific connection kwargs are propagated."""
         sandbox = Sandbox.create(
-            variant="colab",
+            variant="google_colab",
             server_url="https://colab-host.example",
             kernel_id="kernel-id",
             proxy_token="proxy-token",  # noqa: S106
@@ -99,7 +99,7 @@ class TestSandboxFactory:
             ),
             client_agent="agent-name",
         )
-        assert isinstance(sandbox, ColabSandbox)
+        assert isinstance(sandbox, GoogleColabSandbox)
         assert sandbox._server_url == "https://colab-host.example"
         assert sandbox._kernel_id == "kernel-id"
         assert sandbox._proxy_token == "proxy-token"  # noqa: S105

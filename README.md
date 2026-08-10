@@ -16,14 +16,16 @@ Code Sandboxes (`code_sandboxes`) is a Python package for running code in isolat
 
 Canonical variant names:
 
-- `jupyter`
+- `datalayer`
 - `docker`
 - `eval`
-- `monty`
+- `google_colab`
+- `jupyter`
 - `kaggle`
-- `colab`
 - `modal`
-- `datalayer`
+- `monty`
+
+CLI also accepts the alias `google-colab`.
 
 ## Documentation
 
@@ -70,9 +72,14 @@ with Sandbox.create(
   print(sandbox.run_code("x + 2").text)  # 42
 ```
 
-### CLI REPL: `kaggle` variant
+### Kaggle
 
-Kaggle REPL supports both interactive runtime mode and credential-based batch mode.
+Kaggle supports both batch execution and interactive connections through the
+`kaggle` sandbox. Install its optional dependency first:
+
+```bash
+pip install "code-sandboxes[kaggle]"
+```
 
 Required credentials for batch mode:
 
@@ -88,15 +95,6 @@ export KAGGLE_API_KEY="<your-kaggle-api-key>"
 
 # Launch the REPL
 sandbox repl --variant kaggle
-```
-
-### Kaggle
-
-Kaggle supports both batch execution and interactive connections through the
-`kaggle` sandbox. Install its optional dependency first:
-
-```bash
-pip install "code-sandboxes[kaggle]"
 ```
 
 For batch execution, configure Kaggle credentials and create the sandbox
@@ -148,17 +146,17 @@ directly to the sandbox:
 ```python
 from code_sandboxes import Sandbox
 
-with Sandbox.create(variant="colab", channels_url=channels_url) as sandbox:
+with Sandbox.create(variant="google_colab", channels_url=channels_url) as sandbox:
     print(sandbox.run_code("x = 1 + 1; print(x)").stdout)
 ```
 
 The lower-level client and parser are owned by Code Sandboxes as well:
 
 ```python
-from code_sandboxes import ColabKernelClient, parse_colab_channels_url
+from code_sandboxes import GoogleColabKernelClient, parse_google_colab_channels_url
 
-server_url, kernel_id, proxy_token = parse_colab_channels_url(channels_url)
-with ColabKernelClient.from_channels_url(channels_url) as kernel:
+server_url, kernel_id, proxy_token = parse_google_colab_channels_url(channels_url)
+with GoogleColabKernelClient.from_channels_url(channels_url) as kernel:
     print(kernel.execute("print('hello from colab')"))
 ```
 

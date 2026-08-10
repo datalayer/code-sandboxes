@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from code_sandboxes.colab_sandbox import ColabSandbox
+from code_sandboxes.google_colab_sandbox import GoogleColabSandbox
 from code_sandboxes.kaggle_sandbox import KaggleSandbox
 from code_sandboxes.modal_sandbox import ModalSandbox
 from code_sandboxes.models import SandboxConfig
@@ -89,7 +89,7 @@ def test_modal_nonzero_return_without_stderr_sets_exit_code():
 
 def test_colab_execute_exception_sets_execution_ok_false():
     """Infrastructure execute errors must set execution_ok to False."""
-    sandbox = ColabSandbox(
+    sandbox = GoogleColabSandbox(
         config=SandboxConfig(timeout=10.0),
         server_url="https://colab-host.example",
         kernel_id="kernel-id",

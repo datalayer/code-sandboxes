@@ -253,6 +253,8 @@ class Sandbox(ABC):
         from .eval_sandbox import EvalSandbox
 
         variant_value = variant.value if isinstance(variant, SandboxVariant) else variant
+        if variant_value in ("colab", "google-colab"):
+            variant_value = "google_colab"
 
         if variant_value == "eval":
             sandbox = EvalSandbox(config=config, **kwargs)
@@ -269,10 +271,10 @@ class Sandbox(ABC):
             from .datalayer_sandbox import DatalayerSandbox
 
             sandbox = DatalayerSandbox(config=config, **kwargs)
-        elif variant_value == "colab":
-            from .colab_sandbox import ColabSandbox
+        elif variant_value == "google_colab":
+            from .google_colab_sandbox import GoogleColabSandbox
 
-            sandbox = ColabSandbox(config=config, **kwargs)
+            sandbox = GoogleColabSandbox(config=config, **kwargs)
         elif variant_value == "kaggle":
             from .kaggle_sandbox import KaggleSandbox
 
@@ -289,7 +291,7 @@ class Sandbox(ABC):
             raise ValueError(
                 f"Unknown sandbox variant: {variant}. "
                 "Supported variants: eval, docker, jupyter, "
-                "datalayer, colab, kaggle, monty, modal"
+                "datalayer, google_colab, google-colab, colab, kaggle, monty, modal"
             )
 
         # Set tags if provided

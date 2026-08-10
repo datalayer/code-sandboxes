@@ -22,6 +22,8 @@ _SUPPORTED_REPL_VARIANTS = {
     "eval",
     "monty",
     "colab",
+    "google_colab",
+    "google-colab",
     "kaggle",
     "modal",
     "datalayer",
@@ -80,6 +82,8 @@ def _resolve_variant(variant: str | None) -> str:
             f"Unsupported variant: {selected}. Supported values: "
             + ", ".join(sorted(_SUPPORTED_REPL_VARIANTS))
         )
+    if selected in {"colab", "google-colab"}:
+        return "google_colab"
     return selected
 
 
@@ -98,7 +102,7 @@ def _resolve_variant_kwargs(
         # Match `jupyter console` behavior by launching local Jupyter on random port.
         kwargs["port"] = 0
 
-    if variant == "colab":
+    if variant == "google_colab":
         kwargs["server_url"] = server_url or typer.prompt("Colab runtime URL (RUNTIME_URL)")
         kwargs["kernel_id"] = kernel_id or typer.prompt("Colab kernel id (RUNTIME_ID)")
         kwargs["proxy_token"] = proxy_token or typer.prompt(
@@ -208,7 +212,10 @@ def repl(
         None,
         "--variant",
         "-v",
-        help="Sandbox variant (jupyter, docker, eval, monty, colab, kaggle, modal, datalayer).",
+        help=(
+            "Sandbox variant (jupyter, docker, eval, monty, "
+            "google_colab/google-colab, kaggle, modal, datalayer)."
+        ),
     ),
     timeout: float = typer.Option(60.0, help="Default code execution timeout (seconds)."),
     environment: str | None = typer.Option(

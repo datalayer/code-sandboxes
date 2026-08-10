@@ -15,7 +15,7 @@ Remote sandboxes (out-of-process execution via Jupyter kernel protocol):
     - DockerSandbox: Docker container based, good isolation
     - JupyterSandbox: Jupyter Server with persistent kernel state
     - DatalayerSandbox: Cloud-based Datalayer runtime, full isolation
-    - ColabSandbox: Google Colab runtime, connects to an assigned kernel
+    - GoogleColabSandbox: Google Colab runtime, connects to an assigned kernel
     - KaggleSandbox: Kaggle runtime, connects to an interactive notebook kernel
 
 Cloud container sandboxes:
@@ -59,8 +59,13 @@ Style usage:
 
 from .base import Sandbox
 from .client import CodeExecutionOutcome, CodeSandboxClient, execution_result_to_reply
-from .colab import ColabKernelClient, parse_colab_channels_url
-from .colab_sandbox import ColabSandbox
+from .google_colab import (
+    ColabKernelClient,
+    GoogleColabKernelClient,
+    parse_colab_channels_url,
+    parse_google_colab_channels_url,
+)
+from .google_colab_sandbox import ColabSandbox, GoogleColabSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .datalayer_sandbox import DatalayerSandbox
 from .docker_sandbox import DockerSandbox
@@ -134,6 +139,8 @@ __all__ = [
     "FileType",
     "FileWatchEvent",
     "FileWatchEventType",
+    "GoogleColabKernelClient",
+    "GoogleColabSandbox",
     "GPUType",
     "ISandboxClient",
     "JupyterSandbox",
@@ -178,5 +185,6 @@ __all__ = [
     "VariableNotFoundError",
     "execution_result_to_reply",
     "parse_colab_channels_url",
+    "parse_google_colab_channels_url",
     "parse_kaggle_channels_url",
 ]
