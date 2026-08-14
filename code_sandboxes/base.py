@@ -30,6 +30,30 @@ from .models import (
 )
 
 
+def generate_sandbox_name() -> str:
+    """A readable name for a sandbox nobody named.
+
+    A colour and a word from `faker`, plus a short hex suffix — `moccasin-
+    summer-4f9c`. Readable matters: this is what a person sees in the runtimes
+    table, where a bare identifier tells them nothing and two identifiers tell
+    them less.
+
+    The suffix is not decoration. `faker` makes no uniqueness promise, and two
+    sandboxes launched in the same breath colliding would defeat the point.
+
+    Falls back to the suffix alone when `faker` is absent, so a trimmed install
+    still launches rather than failing at the moment someone needs a sandbox.
+    """
+    suffix = uuid.uuid4().hex[:4]
+    try:
+        from faker import Faker
+    except ImportError:  # pragma: no cover - depends on what is installed
+        return f"sandbox-{suffix}"
+    fake = Faker()
+    colour = fake.color_name().lower().replace(" ", "-")
+    return f"{colour}-{fake.word()}-{suffix}"
+
+
 #: The Datalayer environment used when a caller names none. Every cluster
 #: provides it; the previous default, `python-cpu-env`, does not exist on
 #: current deployments.
@@ -251,7 +275,11 @@ class Sandbox(ABC):
                 cpu_limit=cpu,
                 env_vars=env or {},
                 gpu=gpu,
-                name=name,
+                # Generated when the caller names none, so the platform
+                # always records something a person can read — a sandbox
+                # known by one name locally and another remotely cannot be
+                # reconciled after the fact.
+                name=name or generate_sandbox_name(),
                 network_policy=network_policy or "inherit",
                 allowed_hosts=allowed_hosts or [],
             )

@@ -21,6 +21,9 @@ classifiers = [
   "Programming Language :: Python :: 3",
 ]
 dependencies = [
+  # Readable names for sandboxes nobody named — what a person
+  # reads in the runtimes table instead of a bare identifier.
+  "faker",
   "jupyter-kernel-client",
   "jupyter-server",
   "jupyter-server-client",
