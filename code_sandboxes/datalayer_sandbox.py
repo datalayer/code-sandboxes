@@ -40,6 +40,21 @@ from .models import (
 )
 
 
+
+def _urls_for_run(run_url: str):
+    """Datalayer service URLs for a deployment served from one origin.
+
+    A run addresses every service under a single host, each on its own path
+    prefix, so one URL is enough to reach all of them. `DatalayerURLs` has no
+    constructor for that shape — it takes the services one by one — so they are
+    filled in here rather than in the SDK.
+    """
+    from datalayer_core.utils.urls import DatalayerURLs
+
+    base = (run_url or "").rstrip("/")
+    return DatalayerURLs.from_environment(**{name: base for name in ['iam_url', 'runtimes_url', 'spacer_url', 'library_url', 'manager_url', 'ai_agents_url', 'ai_inference_url', 'otel_url', 'growth_url', 'success_url', 'status_url', 'support_url', 'mcp_server_url', 'scheduler_url']})
+
+
 class DatalayerSandbox(Sandbox):
     """A sandbox using Datalayer Runtime for cloud-based code execution.
 
@@ -149,13 +164,13 @@ class DatalayerSandbox(Sandbox):
         """
         try:
             from agent_runtimes.client import AgentClient
-            from datalayer_core.utils.urls import DatalayerURLs
+            import datalayer_core.utils.urls  # noqa: F401 - availability check
         except ImportError:
             return
 
         try:
             if run_url:
-                urls = DatalayerURLs.from_run_url(run_url)
+                urls = _urls_for_run(run_url)
                 client = AgentClient(urls=urls, api_key=token)
             else:
                 client = AgentClient(api_key=token)
@@ -191,13 +206,13 @@ class DatalayerSandbox(Sandbox):
     ) -> list[SandboxEnvironment]:
         try:
             from agent_runtimes.client import AgentClient
-            from datalayer_core.utils.urls import DatalayerURLs
+            import datalayer_core.utils.urls  # noqa: F401 - availability check
         except ImportError:
             return []
 
         try:
             if run_url:
-                urls = DatalayerURLs.from_run_url(run_url)
+                urls = _urls_for_run(run_url)
                 client = AgentClient(urls=urls, api_key=token)
             else:
                 client = AgentClient(api_key=token)
@@ -232,7 +247,7 @@ class DatalayerSandbox(Sandbox):
             # Import here to avoid hard dependency
             from agent_runtimes.client import AgentClient
             from agent_runtimes.client.agent_client import DEFAULT_TIME_RESERVATION
-            from datalayer_core.utils.urls import DatalayerURLs
+            import datalayer_core.utils.urls  # noqa: F401 - availability check
         except ImportError as e:
             raise SandboxConfigurationError(
                 "agent-runtimes package is required for DatalayerSandbox. "
@@ -242,7 +257,7 @@ class DatalayerSandbox(Sandbox):
         try:
             # Create client with optional custom URL
             if self._run_url:
-                urls = DatalayerURLs.from_run_url(self._run_url)
+                urls = _urls_for_run(self._run_url)
                 self._client = AgentClient(urls=urls, api_key=self._token)
             else:
                 self._client = AgentClient(api_key=self._token)
