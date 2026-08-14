@@ -30,6 +30,12 @@ from .models import (
 )
 
 
+#: The Datalayer environment used when a caller names none. Every cluster
+#: provides it; the previous default, `python-cpu-env`, does not exist on
+#: current deployments.
+DEFAULT_ENVIRONMENT = "ai-agents-env"
+
+
 class Sandbox(ABC):
     """Abstract base class for code execution sandboxes.
 
@@ -207,7 +213,7 @@ class Sandbox(ABC):
             config: Optional full configuration object (overrides individual params).
             timeout: Default timeout for code execution in seconds.
             name: Optional name for the sandbox.
-            environment: Runtime environment (e.g., "python-cpu-env", "python-gpu-env").
+            environment: Runtime environment (e.g., "ai-agents-env").
             gpu: GPU type to use (e.g., "T4", "A100", "H100"). Only for datalayer.
             cpu: CPU cores to allocate.
             memory: Memory limit in MB.
@@ -240,7 +246,7 @@ class Sandbox(ABC):
         if config is None:
             config = SandboxConfig(
                 timeout=timeout or 30.0,
-                environment=environment or "python-cpu-env",
+                environment=environment or DEFAULT_ENVIRONMENT,
                 memory_limit=memory * 1024 * 1024 if memory else None,
                 cpu_limit=cpu,
                 env_vars=env or {},

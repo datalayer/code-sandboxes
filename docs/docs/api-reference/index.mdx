@@ -584,7 +584,7 @@ class SandboxConfig(BaseModel):
     timeout: float = 30.0
     memory_limit: int | None = None
     cpu_limit: float | None = None
-    environment: str = "python-cpu-env"
+    environment: str = "ai-agents-env"
     working_dir: str | None = None
     env_vars: dict[str, str]
     gpu: str | None = None

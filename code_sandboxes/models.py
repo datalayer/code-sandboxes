@@ -432,7 +432,11 @@ class SandboxConfig(BaseModel):
     timeout: float = 30.0
     memory_limit: Optional[int] = None
     cpu_limit: Optional[float] = None
-    environment: str = "python-cpu-env"
+    #: The Datalayer environment a sandbox runs in. `ai-agents-env` is the
+    #: one every cluster provides; `python-cpu-env` was the old default and
+    #: does not exist on current deployments, so asking for it failed at
+    #: the first cell with "Environment 'python-cpu-env' not found".
+    environment: str = "ai-agents-env"
     working_dir: Optional[str] = None
     env_vars: dict[str, str] = Field(default_factory=dict)
     gpu: Optional[str] = None
