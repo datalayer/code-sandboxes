@@ -106,6 +106,11 @@ class DatalayerSandbox(Sandbox):
         self._runtime = None
         self._sandbox_id = str(uuid.uuid4())
         self._extra_kwargs = kwargs
+        # Jupyter's In[n], kept here because the runtime does not report
+        # one: a sandbox serves a single client, so its own counter is the
+        # session's truth. Without it every cell shows 0, which the read
+        # tools render as N/A — an executed cell that looks never-run.
+        self._execution_count = 0
         self._end_at: Optional[float] = None
 
     @property
@@ -548,13 +553,17 @@ class DatalayerSandbox(Sandbox):
                 if on_error:
                     on_error(code_error)
 
+        # Count every execution that reached the runtime, error included —
+        # exactly as a Jupyter kernel numbers In[n].
+        self._execution_count += 1
         return ExecutionResult(
             results=results,
             logs=Logs(stdout=stdout_messages, stderr=stderr_messages),
             execution_ok=True,
             code_error=code_error,
             exit_code=exit_code,
-            execution_count=getattr(response, "execution_count", 0),
+            execution_count=getattr(response, "execution_count", None)
+            or self._execution_count,
             context_id=context.id if context else "default",
             started_at=started_at,
             completed_at=time.time(),
