@@ -30,11 +30,10 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-
     if not _has_modal_auth():
         print("Modal auth not found.")
         print("Set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET or run: modal token new")
-        return
+        raise SystemExit(1)
 
     if args.gpu:
         print(f"Launching modal sandbox REPL with GPU flavor: {args.gpu}")
@@ -50,6 +49,7 @@ def main() -> None:
             run_repl(sandbox)
     except Exception as exc:
         print("modal REPL failed:", exc)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

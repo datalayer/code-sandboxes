@@ -521,6 +521,10 @@ class KaggleKernelExecutor:
         }
         if accelerator:
             metadata["accelerator"] = accelerator
+            # The official client reads the accelerator from `machine_shape`
+            # (kernels_push falls back to it when its kwarg is not given), so
+            # the request carries it whichever client version pushes.
+            metadata["machine_shape"] = accelerator
         (folder / "kernel-metadata.json").write_text(
             json.dumps(metadata, indent=2), encoding="utf-8"
         )
@@ -528,11 +532,15 @@ class KaggleKernelExecutor:
     def _kernels_push(self, folder: str, accelerator: str | None):
         if accelerator is None:
             return self.api.kernels_push(folder)
-        try:
-            return self.api.kernels_push(folder, accelerator=accelerator)
-        except TypeError:
-            # Older kaggle clients may not expose the accelerator kwarg yet.
-            return self.api.kernels_push(folder)
+        # The kwarg is `acc` on the official client (2.x, mapped to the
+        # request's machine_shape) and `accelerator` on others; a client with
+        # neither still reads `machine_shape` from kernel-metadata.json.
+        for kwargs in ({"acc": accelerator}, {"accelerator": accelerator}, {}):
+            try:
+                return self.api.kernels_push(folder, **kwargs)
+            except TypeError:
+                continue
+        return self.api.kernels_push(folder)
 
     def _wait_for_completion(
         self,

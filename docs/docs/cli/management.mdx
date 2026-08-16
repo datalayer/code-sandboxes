@@ -1,0 +1,103 @@
+---
+title: Managing Sandboxes
+sidebar_position: 2
+---
+
+# Managing Sandboxes (CRUD)
+
+Beyond running code, sandboxes can be created, listed, inspected and deleted —
+from the CLI or from Python. Every variant answers the same four verbs:
+
+| Verb | CLI | Python |
+| --- | --- | --- |
+| Create | `code-sandboxes create -v <variant>` | `get_manager(variant).create(**kwargs)` |
+| Read (all) | `code-sandboxes list [-v <variant>]` | `get_manager(variant).list()` |
+| Read (one) | `code-sandboxes get <id> -v <variant>` | `get_manager(variant).get(id)` |
+| Update | `code-sandboxes update <id> -v <variant> [...]` | `get_manager(variant).update(id, **changes)` |
+| Delete | `code-sandboxes delete <id> -v <variant>` | `get_manager(variant).delete(id)` |
+
+## CLI
+
+```bash
+# Every variant that answers, in one table
+code-sandboxes list
+
+# One variant
+code-sandboxes list -v kaggle
+code-sandboxes list -v modal
+
+# One sandbox, with its live status
+code-sandboxes get sb-XXXX -v modal
+code-sandboxes get my-kernel-slug -v kaggle   # user/slug or bare slug
+
+# Update — what changes depends on the variant
+code-sandboxes update <container> -v docker --name proud-noether
+code-sandboxes update sb-XXXX -v modal --tag team=ai --tag env=dev
+code-sandboxes update <runtime-uid> -v datalayer --capability gpu
+code-sandboxes update my-kernel -v kaggle --code "print('v2')"
+
+# Delete (asks for confirmation without --yes)
+code-sandboxes delete sb-XXXX -v modal --yes
+
+# Create a sandbox and leave it running, detached from this process
+code-sandboxes create -v modal
+code-sandboxes create -v docker
+code-sandboxes create -v jupyter --server-url http://localhost:8888
+
+# The environments sandboxes can be created in
+code-sandboxes environments
+```
+
+Results are rendered as tables (via [rich](https://rich.readthedocs.io/)). When
+`list` is asked for every variant, a variant that cannot answer — no
+credentials, no daemon, no runtime URL — is skipped with the reason printed
+below the table instead of hiding the ones that answered.
+
+## Python
+
+```python
+from code_sandboxes import get_manager, manageable_variants
+
+print(manageable_variants())
+# ['datalayer', 'docker', 'eval', 'google_colab', 'jupyter', 'kaggle', 'modal', 'monty']
+
+manager = get_manager("modal")
+for info in manager.list():
+    print(info.id, info.status)
+
+info = manager.create()          # detached: keeps running after this process
+manager.delete(info.id)
+```
+
+Connection settings go to `get_manager` and stay out of the verbs:
+
+```python
+get_manager("jupyter", server_url="http://localhost:8888", token="...")
+get_manager("google_colab", server_url="https://...", proxy_token="...")
+get_manager("modal", app_name="code-sandboxes")
+get_manager("kaggle", username="...")
+get_manager("datalayer", token="...", run_url="https://...")
+```
+
+## What each variant maps to
+
+| Variant | A sandbox is | Update changes | Delete removes |
+| --- | --- | --- | --- |
+| `datalayer` | a runtime of the Datalayer platform | the capabilities | the runtime |
+| `modal` | a Modal sandbox of the `code-sandboxes` app | the tags | the Modal sandbox |
+| `docker` | a container labelled `code-sandboxes` | the name | the container (forced) |
+| `jupyter` | a kernel of the Jupyter Server | — nothing in place | the kernel |
+| `google_colab` | a kernel of the Colab runtime | — nothing in place | the kernel |
+| `kaggle` | a kernel on kaggle.com (batch mode creates one per run) | the code (a new version) | the kernel |
+| `eval`, `monty` | an object inside the creating process | — not supported | — not supported |
+
+Not every backend can honour every verb. A manager states what it supports
+through `manager.capabilities` and raises `SandboxManagementError` with the
+reason for the rest — an `eval` sandbox lives and dies inside the process that
+made it, so `list` truthfully answers `[]` and `delete` explains itself rather
+than silently doing nothing.
+
+Kaggle notes: `list` enumerates your kernels (`mine=True`), `get` adds the
+live run status, and `create` pushes a batch kernel with the given `--code` —
+creation on Kaggle *is* a code push. Both `user/slug` and a bare `slug` of
+the authenticated user are accepted as ids.

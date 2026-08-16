@@ -95,6 +95,12 @@ from .jupyter_sandbox import JupyterSandbox
 from .kaggle import KAGGLE_API_TOKEN_ENV, KaggleKernelClient, parse_kaggle_channels_url
 from .kaggle_execute import KaggleExecutionResult, KaggleKernelExecutor
 from .kaggle_sandbox import KaggleSandbox
+from .manage import (
+    SandboxManagementError,
+    SandboxManager,
+    get_manager,
+    manageable_variants,
+)
 from .modal_sandbox import ModalSandbox
 from .models import (
     CodeError,
@@ -169,6 +175,9 @@ __all__ = [
     # Filesystem
     "SandboxFilesystem",
     "SandboxInfo",
+    # Management (CRUD)
+    "SandboxManagementError",
+    "SandboxManager",
     "SandboxNotStartedError",
     "SandboxQuotaExceededError",
     "SandboxResourceError",
@@ -180,6 +189,8 @@ __all__ = [
     "TunnelInfo",
     "VariableNotFoundError",
     "execution_result_to_reply",
+    "get_manager",
+    "manageable_variants",
     "parse_google_colab_channels_url",
     "parse_kaggle_channels_url",
 ]

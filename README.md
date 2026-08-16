@@ -158,6 +158,36 @@ with GoogleColabKernelClient.from_channels_url(channels_url) as kernel:
 See the [complete Google Colab guide](https://code-sandboxes.datalayer.tech/sandboxes/google-colab) for
 proxy authentication, explicit connection values, and channels URL retrieval.
 
+## Manage Sandboxes (CRUD)
+
+Every variant answers the same verbs — create, list, get, update, delete —
+from Python or from the CLI, rendered as [rich](https://rich.readthedocs.io/)
+tables:
+
+```bash
+code-sandboxes list                 # every variant that answers, one table
+code-sandboxes list -v kaggle       # one variant
+code-sandboxes get <id> -v modal    # one sandbox, live status
+code-sandboxes create -v modal      # create detached, leave it running
+code-sandboxes update <id> -v modal --tag team=ai   # tags (modal), --name
+                                    # (docker), --capability (datalayer),
+                                    # --code (kaggle: a new version)
+code-sandboxes delete <id> -v modal --yes
+code-sandboxes environments         # what sandboxes can be created in
+```
+
+```python
+from code_sandboxes import get_manager
+
+manager = get_manager("modal")
+for info in manager.list():
+    print(info.id, info.status)
+manager.delete("sb-...")
+```
+
+See the [management guide](https://code-sandboxes.datalayer.tech/cli/management)
+for what each variant maps to and its connection settings.
+
 ## License
 
 BSD 3-Clause License

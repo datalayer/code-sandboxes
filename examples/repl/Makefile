@@ -21,21 +21,20 @@ monty:
 google-colab:
 	$(PYTHON) google_colab_sandbox_example.py
 
-kaggle:
+kaggle: ## Kaggle REPL — batch job per input by default, live session when RUNTIME_URL is set
+	@echo "==> Kaggle REPL"
+	@if [ -n "$$RUNTIME_URL" ]; then echo "    mode:    interactive (RUNTIME_URL is set)"; else echo "    mode:    batch (each input is a kaggle.com batch job, about a minute each)"; fi
+	@if [ -n "$$KAGGLE_API_TOKEN" ]; then echo "    token:   KAGGLE_API_TOKEN is set"; else echo "    token:   KAGGLE_API_TOKEN is NOT set"; fi
 	$(PYTHON) kaggle_sandbox_example.py
 
-modal:
-	@if [ -n "$$MODAL_GPU" ]; then \
-		echo "Running modal REPL with GPU flavor: $$MODAL_GPU"; \
-		$(PYTHON) modal_sandbox_example.py --gpu "$$MODAL_GPU"; \
-	else \
-		$(PYTHON) modal_sandbox_example.py; \
-	fi
+modal: ## Modal REPL (CPU)
+	@echo "==> Modal REPL (CPU)"
+	@echo "    auth: MODAL_TOKEN_ID/MODAL_TOKEN_SECRET or ~/.modal.toml"
+	$(PYTHON) modal_sandbox_example.py
 
-modal-gpu:
-	@echo "Preparing Modal GPU sandbox REPL..."
-	@echo "Run this snippet to confirm GPU availability inside your runtime:"
-	@printf '%s\n' 'python - <<'\''PY'\''' 'import shutil, subprocess' 'print("nvidia-smi available:", shutil.which("nvidia-smi") is not None)' 'if shutil.which("nvidia-smi"):' '    print(subprocess.run(["nvidia-smi", "-L"], check=False, capture_output=True, text=True).stdout or "(no output)")' 'try:' '    import torch  # type: ignore' '    print("torch:", torch.__version__)' '    print("cuda available:", torch.cuda.is_available())' '    print("cuda device count:", torch.cuda.device_count())' 'except Exception as exc:' '    print("torch check unavailable:", exc)' 'PY'
+modal-gpu: ## Modal REPL on a GPU (MODAL_GPU flavor, default T4)
+	@echo "==> Modal REPL (GPU: $${MODAL_GPU:-T4})"
+	@echo "    The run fails unless nvidia-smi lists a $${MODAL_GPU:-T4} in the sandbox."
 	MODAL_GPU=$${MODAL_GPU:-T4} $(PYTHON) modal_sandbox_example.py --gpu "$${MODAL_GPU:-T4}"
 
 datalayer:

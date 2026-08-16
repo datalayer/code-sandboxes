@@ -28,6 +28,7 @@ dependencies = [
   "jupyter-server",
   "jupyter-server-client",
   "pydantic>=2.0",
+  "rich",
   "typer>=0.12.0",
 ]
 

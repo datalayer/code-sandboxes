@@ -149,6 +149,8 @@ class DockerSandbox(Sandbox):
             environment=env,
             ports=ports,
             volumes={workdir: {"bind": "/workspace", "mode": "rw"}},
+            # The label DockerSandboxManager enumerates and deletes by.
+            labels={"code-sandboxes": self._sandbox_id},
             name=self._container_name,
             auto_remove=self._auto_remove,
             mem_limit=mem_limit,

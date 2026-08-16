@@ -368,11 +368,12 @@ class Sandbox(ABC):
         Returns:
             List of SandboxEnvironment entries.
         """
-        from .eval_sandbox import EvalSandbox
-
         variant_value = variant.value if isinstance(variant, SandboxVariant) else variant
+        variant_value = variant_value.replace("-", "_")
 
         if variant_value == "eval":
+            from .eval_sandbox import EvalSandbox
+
             return EvalSandbox.list_environments()
         if variant_value == "docker":
             from .docker_sandbox import DockerSandbox
@@ -382,14 +383,30 @@ class Sandbox(ABC):
             from .jupyter_sandbox import JupyterSandbox
 
             return JupyterSandbox.list_environments()
+        if variant_value == "monty":
+            from .monty_sandbox import MontySandbox
+
+            return MontySandbox.list_environments()
+        if variant_value == "modal":
+            from .modal_sandbox import ModalSandbox
+
+            return ModalSandbox.list_environments()
+        if variant_value == "kaggle":
+            from .kaggle_sandbox import KaggleSandbox
+
+            return KaggleSandbox.list_environments()
+        if variant_value == "google_colab":
+            from .google_colab_sandbox import GoogleColabSandbox
+
+            return GoogleColabSandbox.list_environments()
         if variant_value == "datalayer":
             from .datalayer_sandbox import DatalayerSandbox
 
             return DatalayerSandbox.list_environments(**kwargs)
         raise ValueError(
             f"Unknown sandbox variant: {variant}. "
-            "Supported variants: eval, docker, jupyter, "
-            "datalayer"
+            "Supported variants: eval, docker, jupyter, monty, modal, "
+            "kaggle, google_colab, datalayer"
         )
 
     @classmethod
