@@ -97,16 +97,32 @@ class KaggleSandbox(Sandbox):
 
     @classmethod
     def list_environments(cls) -> list[SandboxEnvironment]:
+        """The environments this provider ships.
+
+        A provider offers environments the way Datalayer offers its own — a
+        named machine to run in, not a free-form choice of hardware. Kaggle
+        gives a notebook session either on CPU alone or with an accelerator
+        attached, so it ships one of each and nothing in between.
+        """
         return [
             SandboxEnvironment(
-                name="kaggle",
-                title="Kaggle",
+                name="kaggle-cpu",
+                title="Kaggle CPU",
                 language="python",
                 owner="kaggle",
                 visibility="cloud",
                 burning_rate=0.0,
-                metadata={"variant": "kaggle"},
-            )
+                metadata={"variant": "kaggle", "accelerator": None},
+            ),
+            SandboxEnvironment(
+                name="kaggle-gpu",
+                title="Kaggle GPU",
+                language="python",
+                owner="kaggle",
+                visibility="cloud",
+                burning_rate=0.0,
+                metadata={"variant": "kaggle", "accelerator": "T4"},
+            ),
         ]
 
     def start(self) -> None:

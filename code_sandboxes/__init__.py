@@ -121,10 +121,23 @@ from .models import (
     SnapshotInfo,
     TunnelInfo,
 )
+from .providers import (
+    PROVIDERS,
+    ProviderRequirement,
+    SandboxProvider,
+    available_providers,
+    get_provider,
+)
 from .monty_sandbox import MontySandbox
 
 __all__ = [
     "KAGGLE_API_TOKEN_ENV",
+    # Providers
+    "PROVIDERS",
+    "ProviderRequirement",
+    "SandboxProvider",
+    "available_providers",
+    "get_provider",
     # Models
     "CodeError",
     "CodeExecutionOutcome",

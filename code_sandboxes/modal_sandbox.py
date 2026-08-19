@@ -122,16 +122,32 @@ class ModalSandbox(Sandbox):
 
     @classmethod
     def list_environments(cls) -> list[SandboxEnvironment]:
+        """The environments this provider ships.
+
+        Modal takes a machine specification per sandbox; what is offered here
+        are the two shapes worth naming — a plain container, and one with a
+        GPU attached — so that choosing an environment is choosing between
+        two named things, as it is with every other provider.
+        """
         return [
             SandboxEnvironment(
-                name="modal",
-                title="Modal",
+                name="modal-cpu",
+                title="Modal CPU",
                 language="python",
                 owner="modal",
                 visibility="cloud",
                 burning_rate=0.0,
-                metadata={"variant": "modal"},
-            )
+                metadata={"variant": "modal", "gpu": None},
+            ),
+            SandboxEnvironment(
+                name="modal-gpu",
+                title="Modal GPU",
+                language="python",
+                owner="modal",
+                visibility="cloud",
+                burning_rate=0.0,
+                metadata={"variant": "modal", "gpu": "T4"},
+            ),
         ]
 
     def start(self) -> None:
