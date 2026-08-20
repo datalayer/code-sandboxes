@@ -232,7 +232,7 @@ class Sandbox(ABC):
             variant: The type of sandbox to create.
                 - "eval": Simple Python exec() based, minimal isolation
                 - "docker": Docker container based (requires Docker)
-                - "jupyter": Jupyter Server with persistent kernel state
+                - "jupyter-server": Jupyter Server with persistent kernel state
                 - "datalayer": Cloud-based Datalayer runtime (default)
             config: Optional full configuration object (overrides individual params).
             timeout: Default timeout for code execution in seconds.
@@ -286,7 +286,12 @@ class Sandbox(ABC):
 
         from .eval_sandbox import EvalSandbox
 
-        variant_value = variant.value if isinstance(variant, SandboxVariant) else variant
+        # In one normal form, as every dispatcher here reads it: the value of
+        # a variant may carry a dash — `jupyter-server` — and callers type
+        # either spelling.
+        variant_value = (
+            variant.value if isinstance(variant, SandboxVariant) else variant
+        ).replace("-", "_")
 
         if variant_value == "eval":
             sandbox = EvalSandbox(config=config, **kwargs)
@@ -295,10 +300,10 @@ class Sandbox(ABC):
             from .docker_sandbox import DockerSandbox
 
             sandbox = DockerSandbox(config=config, **kwargs)
-        elif variant_value == "jupyter":
-            from .jupyter_sandbox import JupyterSandbox
+        elif variant_value == "jupyter_server":
+            from .jupyter_server_sandbox import JupyterServerSandbox
 
-            sandbox = JupyterSandbox(config=config, **kwargs)
+            sandbox = JupyterServerSandbox(config=config, **kwargs)
         elif variant_value == "datalayer":
             from .datalayer_sandbox import DatalayerSandbox
 
@@ -322,8 +327,8 @@ class Sandbox(ABC):
         else:
             raise ValueError(
                 f"Unknown sandbox variant: {variant}. "
-                "Supported variants: eval, docker, jupyter, "
-                "datalayer, google_colab, kaggle, monty, modal"
+                "Supported variants: "
+                + ", ".join(sorted(v.value for v in SandboxVariant))
             )
 
         # Set tags if provided
@@ -379,10 +384,10 @@ class Sandbox(ABC):
             from .docker_sandbox import DockerSandbox
 
             return DockerSandbox.list_environments()
-        if variant_value == "jupyter":
-            from .jupyter_sandbox import JupyterSandbox
+        if variant_value == "jupyter_server":
+            from .jupyter_server_sandbox import JupyterServerSandbox
 
-            return JupyterSandbox.list_environments()
+            return JupyterServerSandbox.list_environments()
         if variant_value == "monty":
             from .monty_sandbox import MontySandbox
 
@@ -405,7 +410,7 @@ class Sandbox(ABC):
             return DatalayerSandbox.list_environments(**kwargs)
         raise ValueError(
             f"Unknown sandbox variant: {variant}. "
-            "Supported variants: eval, docker, jupyter, monty, modal, "
+            "Supported variants: eval, docker, jupyter-server, monty, modal, "
             "kaggle, google_colab, datalayer"
         )
 

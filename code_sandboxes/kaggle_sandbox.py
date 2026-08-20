@@ -94,23 +94,78 @@ class KaggleSandbox(Sandbox):
         self._batch_mode = False
         self._sandbox_id = str(uuid.uuid4())
         self._extra_kwargs = kwargs
+        # The snippets this sandbox has run, replayed before each batch job so
+        # state appears to survive between them — see `_session_prelude`.
+        self._session_history: list[str] = []
 
     @classmethod
     def list_environments(cls) -> list[SandboxEnvironment]:
+        """The environments this provider ships.
+
+        A provider offers environments the way Datalayer offers its own — a
+        named machine to run in, not a free-form choice of hardware. Kaggle
+        gives a notebook session either on CPU alone or with an accelerator
+        attached, so it ships one of each and nothing in between.
+        """
         return [
             SandboxEnvironment(
-                name="kaggle",
-                title="Kaggle",
+                name="kaggle-cpu",
+                title="Kaggle CPU",
                 language="python",
                 owner="kaggle",
                 visibility="cloud",
                 burning_rate=0.0,
-                metadata={"variant": "kaggle"},
-            )
+                metadata={"variant": "kaggle", "accelerator": None},
+            ),
+            SandboxEnvironment(
+                name="kaggle-gpu",
+                title="Kaggle GPU",
+                language="python",
+                owner="kaggle",
+                visibility="cloud",
+                burning_rate=0.0,
+                metadata={"variant": "kaggle", "accelerator": "T4"},
+            ),
         ]
 
     def start(self) -> None:
         if self._started:
+            return
+
+        # Live mode: a batch job runs an agent holding a real ipykernel, and
+        # the code travels over the account's own datasets — one persistent
+        # kernel, no replay, no external service. See `kaggle_live`.
+        if (
+            self._extra_kwargs.get("live")
+            and not self._server_url
+            and not self._channels_url
+        ):
+            from .kaggle_live import KaggleLiveSession
+
+            executor = KaggleKernelExecutor(
+                username=self._extra_kwargs.get("username"),
+                quiet=True,
+            )
+            session = KaggleLiveSession(executor)
+            session.start(
+                accelerator=self._extra_kwargs.get("accelerator")
+                or self._extra_kwargs.get("gpu")
+                or self.config.gpu
+            )
+            # The session ducks as the kernel client, so the interactive
+            # `run_code` path works on it untouched.
+            self._client = session
+            self._info = SandboxInfo(
+                id=self._sandbox_id,
+                variant="kaggle",
+                status=SandboxStatus.RUNNING,
+                created_at=time.time(),
+                name=self.config.name,
+                metadata={"mode": "live", "kernel_id": session.id},
+                config=self.config,
+            )
+            self._default_context = self.create_context("default")
+            self._started = True
             return
 
         # Transparent batch mode: when no interactive runtime connection details
@@ -388,9 +443,11 @@ class KaggleSandbox(Sandbox):
         poll_interval = float(self._extra_kwargs.get("poll_interval", 2.0))
         timeout_seconds = float(timeout or self.config.timeout)
 
+        submitted_code, session_marker = self._session_prelude(code)
+
         try:
             submitted = self._executor.execute(
-                code,
+                submitted_code,
                 wait=False,
                 timeout=timeout_seconds,
                 download_output=False,
@@ -463,6 +520,11 @@ class KaggleSandbox(Sandbox):
             reply = submitted.to_kernel_reply()
             submitted.kernel_reply = reply
 
+        if isinstance(reply, dict) and session_marker:
+            # The outputs of the replay were shown on the turns that ran them.
+            reply = self._cut_replayed_outputs(reply, session_marker)
+            submitted.kernel_reply = reply
+
         if isinstance(reply, dict):
             for output in reply.get("outputs", []):
                 output_type = output.get("output_type")
@@ -494,6 +556,10 @@ class KaggleSandbox(Sandbox):
                 value=failure_message or f"Kaggle execution failed with status: {status}",
                 traceback=getattr(submitted, "log", "") or "",
             )
+        else:
+            # Only a snippet that completed joins the session — see the batch
+            # path, which records under the same condition.
+            self._record_session(code)
 
         self._executing_event.clear()
         self._interrupt_requested.clear()
@@ -515,6 +581,61 @@ class KaggleSandbox(Sandbox):
             timeout=timeout,
         ):
             yield item
+
+    def _session_prelude(self, code: str) -> tuple[str, str | None]:
+        """The code to submit for a batch, replaying the session so far.
+
+        A batch job is a fresh machine: nothing survives from one to the next,
+        so `x = 1` in one job and `print(x)` in the following one is a
+        NameError. What CAN be carried is the code itself — every snippet that
+        succeeded before is replayed ahead of the new one, and a sentinel
+        printed between them marks where the replay ends, so only the new
+        snippet's output is surfaced.
+
+        The price is honest: each turn re-executes the whole session (on a
+        machine where a job already takes a minute), and code with side
+        effects — downloads, writes, randomness — runs again each time. Turn
+        it off with ``session=False`` when creating the sandbox.
+        """
+        if not self._extra_kwargs.get("session", True) or not self._session_history:
+            return code, None
+        marker = f"<<code-sandbox-session-{uuid.uuid4().hex[:12]}>>"
+        replay = "\n".join(self._session_history)
+        full = f"{replay}\nprint({marker!r}, flush=True)\n{code}"
+        return full, marker
+
+    def _record_session(self, code: str) -> None:
+        """Keep a snippet that ran, for the replays of the turns after it."""
+        if self._extra_kwargs.get("session", True):
+            self._session_history.append(code)
+
+    @staticmethod
+    def _cut_replayed_outputs(reply: dict, marker: str) -> dict:
+        """Drop the outputs of the replay, keeping what follows the sentinel.
+
+        The outputs of a run are ordered, so everything before the stream line
+        carrying the sentinel belongs to snippets already shown on the turns
+        that ran them.
+        """
+        outputs = reply.get("outputs", [])
+        for index, output in enumerate(outputs):
+            if output.get("output_type") != "stream":
+                continue
+            text = str(output.get("text", ""))
+            if marker not in text:
+                continue
+            kept = outputs[index + 1 :]
+            after = text.split(marker, 1)[1].lstrip("\n")
+            if after:
+                head = dict(output)
+                head["text"] = after
+                kept = [head, *kept]
+            trimmed = dict(reply)
+            trimmed["outputs"] = kept
+            return trimmed
+        # No sentinel reached: the replay itself failed, and its outputs are
+        # the explanation — better shown than swallowed.
+        return reply
 
     def _run_code_batch(  # noqa: C901
         self,
@@ -548,9 +669,11 @@ class KaggleSandbox(Sandbox):
             or self.config.gpu
         )
 
+        submitted_code, session_marker = self._session_prelude(code)
+
         try:
             result = self._executor.execute(
-                code,
+                submitted_code,
                 wait=True,
                 timeout=float(timeout or self.config.timeout),
                 download_output=True,
@@ -582,6 +705,9 @@ class KaggleSandbox(Sandbox):
         reply = getattr(result, "kernel_reply", None)
         if reply is None and hasattr(result, "to_kernel_reply"):
             reply = result.to_kernel_reply()
+
+        if isinstance(reply, dict) and session_marker:
+            reply = self._cut_replayed_outputs(reply, session_marker)
 
         if isinstance(reply, dict):
             for output in reply.get("outputs", []):
@@ -656,6 +782,11 @@ class KaggleSandbox(Sandbox):
         self._executing_event.clear()
         was_interrupted = self._interrupt_requested.is_set()
         self._interrupt_requested.clear()
+
+        # Only a snippet that ran without error joins the session: replaying a
+        # failing one would fail every turn after it.
+        if result.succeeded and code_error is None and not was_interrupted:
+            self._record_session(code)
 
         return ExecutionResult(
             results=results,

@@ -72,7 +72,7 @@ manager.delete(info.id)
 Connection settings go to `get_manager` and stay out of the verbs:
 
 ```python
-get_manager("jupyter", server_url="http://localhost:8888", token="...")
+get_manager("jupyter-server", server_url="http://localhost:8888", token="...")
 get_manager("google_colab", server_url="https://...", proxy_token="...")
 get_manager("modal", app_name="code-sandboxes")
 get_manager("kaggle", username="...")
@@ -86,7 +86,7 @@ get_manager("datalayer", token="...", run_url="https://...")
 | `datalayer` | a runtime of the Datalayer platform | the capabilities | the runtime |
 | `modal` | a Modal sandbox of the `code-sandboxes` app | the tags | the Modal sandbox |
 | `docker` | a container labelled `code-sandboxes` | the name | the container (forced) |
-| `jupyter` | a kernel of the Jupyter Server | — nothing in place | the kernel |
+| `jupyter-server` | a kernel of the Jupyter Server | — nothing in place | the kernel |
 | `google_colab` | a kernel of the Colab runtime | — nothing in place | the kernel |
 | `kaggle` | a kernel on kaggle.com (batch mode creates one per run) | the code (a new version) | the kernel |
 | `eval`, `monty` | an object inside the creating process | — not supported | — not supported |

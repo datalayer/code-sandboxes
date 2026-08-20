@@ -16,7 +16,6 @@ def main() -> None:
     with Sandbox.create(variant="eval", timeout=30) as sandbox:
         # Basic execution
         result = show_and_run(sandbox, "x = 21 * 2\nprint(x)")
-        print("stdout:", result.stdout)
         print("success:", result.success)
 
         # Show execution timing

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from code_sandboxes.jupyter_sandbox import JupyterSandbox
+from code_sandboxes.jupyter_server_sandbox import JupyterServerSandbox
 from code_sandboxes.models import SandboxConfig
 
 
@@ -41,7 +41,7 @@ def test_explicit_kernel_id_wins_over_reuse(monkeypatch):
         types.SimpleNamespace(JupyterKernelClient=_KernelClientStub),
     )
 
-    sandbox = JupyterSandbox(
+    sandbox = JupyterServerSandbox(
         server_url="http://localhost:8888",
         kernel_id="explicit-kernel",
         reuse_kernel=True,
@@ -83,7 +83,7 @@ def test_reuse_kernel_false_forces_new_kernel(monkeypatch):
         types.SimpleNamespace(JupyterKernelClient=_KernelClientStub),
     )
 
-    sandbox = JupyterSandbox(
+    sandbox = JupyterServerSandbox(
         server_url="http://localhost:8888",
         kernel_id=None,
         reuse_kernel=False,
@@ -104,7 +104,7 @@ def test_reuse_kernel_false_forces_new_kernel(monkeypatch):
 
 
 def test_kernel_client_forwards_client_kwargs(monkeypatch, tmp_path: Path):
-    """JupyterSandbox forwards client_kwargs to JupyterKernelClient."""
+    """JupyterServerSandbox forwards client_kwargs to JupyterKernelClient."""
 
     captured: dict[str, object] = {}
 
@@ -130,7 +130,7 @@ def test_kernel_client_forwards_client_kwargs(monkeypatch, tmp_path: Path):
 
     notebook_path = str(tmp_path / "notebook.ipynb")
 
-    sandbox = JupyterSandbox(
+    sandbox = JupyterServerSandbox(
         server_url="http://localhost:8888",
         kernel_id="kernel-1",
         kernel_path=notebook_path,
@@ -149,8 +149,8 @@ def test_kernel_client_forwards_client_kwargs(monkeypatch, tmp_path: Path):
         sandbox.stop()
 
 
-class TestJupyterSandbox:
-    """Tests for JupyterSandbox."""
+class TestJupyterServerSandbox:
+    """Tests for JupyterServerSandbox."""
 
     def test_local_jupyter_persistence(self, tmp_path: Path):
         """Test persistence across requests in jupyter sandbox."""
@@ -161,7 +161,7 @@ class TestJupyterSandbox:
         except Exception:
             pytest.skip("jupyter_server is not available")
 
-        sandbox = JupyterSandbox(config=SandboxConfig(working_dir=str(tmp_path)))
+        sandbox = JupyterServerSandbox(config=SandboxConfig(working_dir=str(tmp_path)))
         try:
             sandbox.start()
         except Exception as exc:
@@ -207,7 +207,7 @@ def test_headers_are_forwarded_to_the_kernel_client(monkeypatch):
     )
 
     auth_headers = {"Cookie": "username-localhost=abc; _xsrf=tok", "X-XSRFToken": "tok"}
-    sandbox = JupyterSandbox(
+    sandbox = JupyterServerSandbox(
         server_url="http://localhost:8888",
         token=None,
         kernel_id="kernel-1",
@@ -235,7 +235,7 @@ def test_no_headers_kwarg_when_none_supplied(monkeypatch):
     )
 
     credential = uuid.uuid4().hex
-    sandbox = JupyterSandbox(
+    sandbox = JupyterServerSandbox(
         server_url="http://localhost:8888",
         token=credential,
         kernel_id="kernel-1",
@@ -259,7 +259,7 @@ def test_external_server_keeps_token_none():
     would put a credential the server never issued on every request.
     """
 
-    sandbox = JupyterSandbox(server_url="http://localhost:8888", token=None)
+    sandbox = JupyterServerSandbox(server_url="http://localhost:8888", token=None)
 
     assert sandbox._token is None
 
@@ -267,6 +267,6 @@ def test_external_server_keeps_token_none():
 def test_owned_server_still_generates_a_token():
     """A sandbox that starts its own server still needs a token to secure it."""
 
-    sandbox = JupyterSandbox()
+    sandbox = JupyterServerSandbox()
 
     assert sandbox._token

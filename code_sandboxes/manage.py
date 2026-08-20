@@ -240,7 +240,7 @@ class DockerSandboxManager(SandboxManager):
         return info
 
 
-class JupyterSandboxManager(SandboxManager):
+class JupyterServerSandboxManager(SandboxManager):
     """Kernels of a Jupyter Server, spoken to over its REST API.
 
     A ``jupyter`` sandbox started with ``server_url`` lives on that server as
@@ -249,7 +249,7 @@ class JupyterSandboxManager(SandboxManager):
     environment, then to ``http://localhost:8888``.
     """
 
-    variant = "jupyter"
+    variant = "jupyter-server"
     capabilities = frozenset({"create", "list", "get", "delete"})
 
     def __init__(
@@ -294,7 +294,7 @@ class JupyterSandboxManager(SandboxManager):
     def _info(kernel: dict) -> SandboxInfo:
         return SandboxInfo(
             id=kernel.get("id", ""),
-            variant="jupyter",
+            variant="jupyter-server",
             status=(
                 SandboxStatus.RUNNING
                 if kernel.get("execution_state") != "dead"
@@ -334,7 +334,7 @@ class JupyterSandboxManager(SandboxManager):
         return self._info(response.json())
 
 
-class GoogleColabSandboxManager(JupyterSandboxManager):
+class GoogleColabSandboxManager(JupyterServerSandboxManager):
     """Kernels of a Colab runtime, over the same Jupyter REST API.
 
     The Colab proxy authenticates with its own headers instead of a Jupyter
@@ -734,7 +734,7 @@ _MANAGERS: dict[str, type[SandboxManager]] = {
     "eval": EvalSandboxManager,
     "monty": MontySandboxManager,
     "docker": DockerSandboxManager,
-    "jupyter": JupyterSandboxManager,
+    "jupyter-server": JupyterServerSandboxManager,
     "google_colab": GoogleColabSandboxManager,
     "kaggle": KaggleSandboxManager,
     "modal": ModalSandboxManager,
@@ -765,7 +765,16 @@ def get_manager(variant: str, **kwargs: Any) -> SandboxManager:
         ValueError: For an unknown variant.
     """
     normalized = variant.strip().lower().replace("-", "_")
-    manager_class = _MANAGERS.get(normalized)
+    # Keys carry the variant's own spelling — `jupyter-server` with its dash —
+    # and lookups arrive in either form: compare in one normal form.
+    manager_class = next(
+        (
+            cls
+            for key, cls in _MANAGERS.items()
+            if key.replace("-", "_") == normalized
+        ),
+        None,
+    )
     if manager_class is None:
         raise ValueError(
             f"Unknown sandbox variant: {variant}. "

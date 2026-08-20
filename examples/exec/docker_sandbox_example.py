@@ -23,7 +23,6 @@ def main() -> None:
             image="code-sandboxes-jupyter:latest",
         ) as sandbox:
             result = show_and_run(sandbox, "print('hello from docker')")
-            print("stdout:", result.stdout)
             error_result = show_and_run(sandbox, "raise RuntimeError('boom')")
             if error_result.code_error:
                 print(

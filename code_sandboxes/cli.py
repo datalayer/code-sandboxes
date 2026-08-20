@@ -22,7 +22,7 @@ app = typer.Typer(help="Code sandboxes: run a REPL, list, create and delete sand
 console = Console()
 
 _SUPPORTED_REPL_VARIANTS = {
-    "jupyter",
+    "jupyter-server",
     "docker",
     "eval",
     "monty",
@@ -40,7 +40,7 @@ _EXIT_COMMANDS = {":exit", ":quit", "exit", "quit"}
 def _root(ctx: typer.Context) -> None:
     """Code sandboxes CLI."""
     if ctx.invoked_subcommand is None:
-        _run_repl(variant="jupyter")
+        _run_repl(variant="jupyter-server")
 
 
 def _print_result(result: Any) -> None:
@@ -76,7 +76,7 @@ def _resolve_variant(variant: str | None) -> str:
     else:
         selected = typer.prompt(
             "Sandbox variant",
-            default="jupyter",
+            default="jupyter-server",
             show_default=True,
         )
         selected = selected.strip().lower()
@@ -102,7 +102,7 @@ def _resolve_variant_kwargs(
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
 
-    if variant == "jupyter":
+    if variant.strip().lower().replace("-", "_") == "jupyter_server":
         # Match `jupyter console` behavior by launching local Jupyter on random port.
         kwargs["port"] = 0
 
@@ -485,7 +485,7 @@ def create(
     create_kwargs: dict[str, Any] = {}
     if gpu:
         create_kwargs["gpu"] = gpu
-    if variant.strip().lower().replace("-", "_") == "jupyter":
+    if variant.strip().lower().replace("-", "_") == "jupyter_server":
         if environment:
             create_kwargs["kernel_name"] = environment
     elif environment:

@@ -31,7 +31,6 @@ def main() -> None:
             environment=first_env.name,
         ) as sandbox:
             result = show_and_run(sandbox, "print('hello from datalayer runtime')")
-            print("stdout:", result.stdout)
     except Exception as exc:
         print("datalayer example failed:", exc)
         print("Exception type:", type(exc))
