@@ -327,8 +327,8 @@ class Sandbox(ABC):
         else:
             raise ValueError(
                 f"Unknown sandbox variant: {variant}. "
-                "Supported variants: eval, docker, jupyter, "
-                "datalayer, google_colab, kaggle, monty, modal"
+                "Supported variants: "
+                + ", ".join(sorted(v.value for v in SandboxVariant))
             )
 
         # Set tags if provided
