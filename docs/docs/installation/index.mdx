@@ -21,20 +21,20 @@ Code Sandboxes supports different execution backends via extras:
 # With Datalayer variant support
 pip install code-sandboxes[datalayer]
 
+# With Daytona variant support
+pip install code-sandboxes[daytona]
+
 # With Docker variant support
 pip install code-sandboxes[docker]
 
 # With Kaggle support
 pip install code-sandboxes[kaggle]
 
-# With Monty (secure in-process interpreter) support
-pip install code-sandboxes[monty]
-
 # With Modal variant support
 pip install code-sandboxes[modal]
 
-# With Daytona variant support
-pip install code-sandboxes[daytona]
+# With Monty (secure in-process interpreter) support
+pip install code-sandboxes[monty]
 
 # All features
 pip install code-sandboxes[all]
@@ -43,16 +43,16 @@ pip install code-sandboxes[all]
 ## Requirements
 
 - Python 3.10 or higher
-- For Docker variant: Docker installed and running
 - For Datalayer variant: valid `DATALAYER_API_KEY`
-- For Kaggle variant: `code-sandboxes[kaggle]` and Kaggle credentials (for batch mode) or runtime connection values (for interactive mode)
-- For Google Colab variant: a Colab runtime assignment
-  (server URL, kernel id, proxy token)
-- For Monty variant: `code-sandboxes[monty]` (no credentials required)
-- For Modal variant: `code-sandboxes[modal]` and Modal credentials
-  (`modal token new` or `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`)
 - For Daytona variant: `code-sandboxes[daytona]` and a Daytona API key
   (`DAYTONA_API_KEY`, from app.daytona.io)
+- For Docker variant: Docker installed and running
+- For Google Colab variant: a Colab runtime assignment
+  (server URL, kernel id, proxy token)
+- For Kaggle variant: `code-sandboxes[kaggle]` and Kaggle credentials (for batch mode) or runtime connection values (for interactive mode)
+- For Modal variant: `code-sandboxes[modal]` and Modal credentials
+  (`modal token new` or `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`)
+- For Monty variant: `code-sandboxes[monty]` (no credentials required)
 
 ## Configuration
 

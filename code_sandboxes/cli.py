@@ -314,9 +314,7 @@ _RUN_URL_OPTION = typer.Option(None, help="Datalayer run URL override.")
 _APP_NAME_OPTION = typer.Option(None, help="Modal app name (default code-sandboxes).")
 _USERNAME_OPTION = typer.Option(None, help="Kaggle username override.")
 _TAG_OPTION = typer.Option(None, "--tag", help="Tag as key=value, repeatable (modal).")
-_CAPABILITY_OPTION = typer.Option(
-    None, "--capability", help="Capability, repeatable (datalayer)."
-)
+_CAPABILITY_OPTION = typer.Option(None, "--capability", help="Capability, repeatable (datalayer).")
 
 
 @app.command("list")
@@ -330,9 +328,7 @@ def list_sandboxes(
     username: str | None = _USERNAME_OPTION,
 ) -> None:
     """List sandboxes — of one variant, or of every variant that answers."""
-    kwargs = _manager_kwargs(
-        server_url, token, proxy_token, run_url, app_name, username
-    )
+    kwargs = _manager_kwargs(server_url, token, proxy_token, run_url, app_name, username)
     variants = [variant] if variant else manageable_variants()
     table = _sandbox_table("Code Sandboxes")
     skipped: list[tuple[str, str]] = []
@@ -369,9 +365,7 @@ def get(
     username: str | None = _USERNAME_OPTION,
 ) -> None:
     """Show one sandbox."""
-    kwargs = _manager_kwargs(
-        server_url, token, proxy_token, run_url, app_name, username
-    )
+    kwargs = _manager_kwargs(server_url, token, proxy_token, run_url, app_name, username)
     try:
         info = get_manager(variant, **kwargs).get(sandbox_id)
     except Exception as exc:
@@ -398,9 +392,7 @@ def delete(
     username: str | None = _USERNAME_OPTION,
 ) -> None:
     """Delete a sandbox."""
-    kwargs = _manager_kwargs(
-        server_url, token, proxy_token, run_url, app_name, username
-    )
+    kwargs = _manager_kwargs(server_url, token, proxy_token, run_url, app_name, username)
     if not yes and not typer.confirm(f"Delete {variant} sandbox {sandbox_id}?"):
         raise typer.Exit(code=0)
     try:
@@ -422,9 +414,7 @@ def update(
     name: str | None = typer.Option(None, help="New name (docker)."),
     tag: list[str] | None = _TAG_OPTION,
     capability: list[str] | None = _CAPABILITY_OPTION,
-    code: str | None = typer.Option(
-        None, help="New code, pushed as a new version (kaggle)."
-    ),
+    code: str | None = typer.Option(None, help="New code, pushed as a new version (kaggle)."),
     server_url: str | None = _SERVER_URL_OPTION,
     token: str | None = _TOKEN_OPTION,
     proxy_token: str | None = _PROXY_TOKEN_OPTION,
@@ -433,9 +423,7 @@ def update(
     username: str | None = _USERNAME_OPTION,
 ) -> None:
     """Update a sandbox: what changes depends on the variant."""
-    manager_kwargs = _manager_kwargs(
-        server_url, token, proxy_token, run_url, app_name, username
-    )
+    manager_kwargs = _manager_kwargs(server_url, token, proxy_token, run_url, app_name, username)
     changes: dict[str, Any] = {}
     if name:
         changes["name"] = name
@@ -470,9 +458,7 @@ def create(
         None, help="Environment (datalayer) or kernel name (jupyter)."
     ),
     gpu: str | None = typer.Option(None, help="GPU flavor for supported variants."),
-    code: str | None = typer.Option(
-        None, help="Code for the batch kernel (kaggle only)."
-    ),
+    code: str | None = typer.Option(None, help="Code for the batch kernel (kaggle only)."),
     server_url: str | None = _SERVER_URL_OPTION,
     token: str | None = _TOKEN_OPTION,
     proxy_token: str | None = _PROXY_TOKEN_OPTION,
@@ -481,9 +467,7 @@ def create(
     username: str | None = _USERNAME_OPTION,
 ) -> None:
     """Create a sandbox and leave it running, detached from this process."""
-    manager_kwargs = _manager_kwargs(
-        server_url, token, proxy_token, run_url, app_name, username
-    )
+    manager_kwargs = _manager_kwargs(server_url, token, proxy_token, run_url, app_name, username)
     create_kwargs: dict[str, Any] = {}
     if gpu:
         create_kwargs["gpu"] = gpu

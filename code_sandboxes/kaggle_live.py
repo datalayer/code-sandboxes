@@ -34,7 +34,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import Callable, Any, Optional
+from typing import Any, Callable
 
 __all__ = ["KaggleLiveSession", "build_agent_code", "resolve_kaggle_credentials"]
 
@@ -150,7 +150,7 @@ def build_agent_code(
             "idle": idle_timeout,
         }
     )
-    template = '''
+    template = """
 import json, os, shutil, tempfile, time
 from pathlib import Path
 
@@ -194,12 +194,31 @@ def run(code):
         kind = msg["msg_type"]
         content = msg["content"]
         if kind == "stream":
-            outputs.append({"output_type": "stream", "name": content["name"], "text": content["text"]})
+            outputs.append(
+                {
+                    "output_type": "stream",
+                    "name": content["name"],
+                    "text": content["text"],
+                }
+            )
         elif kind in ("execute_result", "display_data"):
-            outputs.append({"output_type": kind, "data": content.get("data", {}), "metadata": content.get("metadata", {})})
+            outputs.append(
+                {
+                    "output_type": kind,
+                    "data": content.get("data", {}),
+                    "metadata": content.get("metadata", {}),
+                }
+            )
         elif kind == "error":
             state["status"] = "error"
-            outputs.append({"output_type": "error", "ename": content["ename"], "evalue": content["evalue"], "traceback": content.get("traceback", [])})
+            outputs.append(
+                {
+                    "output_type": "error",
+                    "ename": content["ename"],
+                    "evalue": content["evalue"],
+                    "traceback": content.get("traceback", []),
+                }
+            )
     reply = client.execute_interactive(code, output_hook=sink, timeout=None)
     if reply["content"]["status"] == "error":
         state["status"] = "error"
@@ -226,7 +245,7 @@ while time.time() - alive_since < SETTINGS["idle"]:
 client.stop_channels()
 manager.shutdown_kernel(now=True)
 print("agent: session closed")
-'''
+"""
     return template.replace("%SETTINGS%", repr(settings))
 
 
@@ -243,7 +262,7 @@ class KaggleLiveSession:
         executor: Any,
         *,
         api: Any = None,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
         poll_seconds: float = POLL_SECONDS,
     ) -> None:
         self._executor = executor
@@ -254,11 +273,11 @@ class KaggleLiveSession:
         self._api = api
         self._poll = poll_seconds
         self._session_id = session_id or uuid.uuid4().hex[:8]
-        self._username: Optional[str] = None
-        self._c2k: Optional[str] = None
-        self._k2c: Optional[str] = None
+        self._username: str | None = None
+        self._c2k: str | None = None
+        self._k2c: str | None = None
         self._seq = 0
-        self._slug: Optional[str] = None
+        self._slug: str | None = None
         self.id = f"kaggle-live-{self._session_id}"
 
     # -- the bus ---------------------------------------------------------
@@ -292,13 +311,11 @@ class KaggleLiveSession:
 
             shutil.rmtree(folder, ignore_errors=True)
 
-    def _read_bus(self, ref: str) -> Optional[dict]:
+    def _read_bus(self, ref: str) -> dict | None:
         folder = Path(tempfile.mkdtemp(prefix="bus-"))
         try:
             with contextlib.redirect_stdout(io.StringIO()):
-                self._api.dataset_download_files(
-                    ref, path=str(folder), force=True, unzip=True
-                )
+                self._api.dataset_download_files(ref, path=str(folder), force=True, unzip=True)
             return json.loads((folder / "message.json").read_text(encoding="utf-8"))
         except Exception:
             # Not there yet, or a version still processing: the caller polls.
@@ -316,15 +333,16 @@ class KaggleLiveSession:
             return ""
         folder = Path(tempfile.mkdtemp(prefix="bus-log-"))
         try:
-            with contextlib.redirect_stdout(io.StringIO()):
-                files = self._executor.output(self._slug, str(folder))
-            for name in files:
-                path = Path(name)
-                if path.suffix == ".log" or path.name == "output.log":
-                    text = path.read_text(encoding="utf-8", errors="replace")
-                    return "\n".join(text.splitlines()[-lines:])
-        except Exception:  # noqa: BLE001 — the log is a courtesy, not a right
-            pass
+            # A post-mortem is a nicety: a job with no log yet, or one whose
+            # artifacts cannot be fetched, leaves the caller its own error.
+            with contextlib.suppress(Exception):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    files = self._executor.output(self._slug, str(folder))
+                for name in files:
+                    path = Path(name)
+                    if path.suffix == ".log" or path.name == "output.log":
+                        text = path.read_text(encoding="utf-8", errors="replace")
+                        return "\n".join(text.splitlines()[-lines:])
         finally:
             import shutil
 
@@ -334,9 +352,9 @@ class KaggleLiveSession:
     def start(
         self,
         *,
-        accelerator: Optional[str] = None,
+        accelerator: str | None = None,
         ready_timeout: float = READY_TIMEOUT_SECONDS,
-        on_progress: Optional[Callable[[str], None]] = print,
+        on_progress: Callable[[str], None] | None = print,
     ) -> None:
         """Create the bus, submit the agent, wait until the kernel answers.
 
@@ -378,7 +396,7 @@ class KaggleLiveSession:
 
         started = time.monotonic()
         deadline = started + ready_timeout
-        last_status: Optional[str] = None
+        last_status: str | None = None
         last_note = started
         while time.monotonic() < deadline:
             message = self._read_bus(self._k2c)
@@ -387,11 +405,10 @@ class KaggleLiveSession:
                 return
             # The job's own status: a dead agent must fail NOW, with its log,
             # not at the end of a fifteen-minute timeout.
-            status: Optional[str] = None
-            try:
+            status: str | None = None
+            # Unreachable status is not a dead job: the wait goes on.
+            with contextlib.suppress(Exception):
                 status = self._executor.status(self._slug) if self._slug else None
-            except Exception:  # noqa: BLE001 — status is telemetry, not truth
-                pass
             if status in ("ERROR", "CANCEL_ACKNOWLEDGED", "COMPLETE"):
                 tail = self._agent_log_tail()
                 hint = ""
@@ -424,7 +441,7 @@ class KaggleLiveSession:
             "longest — or the account may not allow internet-enabled kernels."
         )
 
-    def execute(self, code: str, timeout: Optional[float] = None) -> dict:
+    def execute(self, code: str, timeout: float | None = None) -> dict:
         """Run one snippet on the live kernel and return its reply."""
         if self._c2k is None or self._k2c is None:
             raise RuntimeError("The live session is not started.")
@@ -447,11 +464,9 @@ class KaggleLiveSession:
         """Tell the agent to go; the datasets remain, small and private."""
         if shutdown_kernel and self._c2k:
             self._seq += 1
-            try:
+            # The agent's idle timeout is the backstop.
+            with contextlib.suppress(Exception):
                 self._write_bus(self._c2k, {"seq": self._seq, "op": "shutdown"}, create=False)
-            except Exception:
-                # The agent's idle timeout is the backstop.
-                pass
 
     def get_variable(self, name: str) -> Any:
         raise NotImplementedError(

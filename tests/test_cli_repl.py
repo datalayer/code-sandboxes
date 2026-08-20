@@ -43,7 +43,9 @@ def test_repl_jupyter_variant_uses_random_port(monkeypatch):
 
     monkeypatch.setattr(sandbox_cli.Sandbox, "create", staticmethod(_fake_create))
 
-    result = runner.invoke(sandbox_cli.app, ["repl", "--variant", "jupyter-server"], input=":exit\n")
+    result = runner.invoke(
+        sandbox_cli.app, ["repl", "--variant", "jupyter-server"], input=":exit\n"
+    )
 
     assert result.exit_code == 0
     assert captured["kwargs"]["variant"] == "jupyter-server"

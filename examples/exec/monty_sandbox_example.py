@@ -18,9 +18,9 @@ def main() -> None:
     try:
         with Sandbox.create(variant="monty", timeout=30) as sandbox:
             show_and_run(sandbox, "x = 21")
-            result = show_and_run(sandbox, "x * 2")
+            show_and_run(sandbox, "x * 2")
 
-            result = show_and_run(sandbox, "print('hello from monty')")
+            show_and_run(sandbox, "print('hello from monty')")
 
             error_result = show_and_run(sandbox, "raise ValueError('monty failure example')")
             if error_result.code_error:

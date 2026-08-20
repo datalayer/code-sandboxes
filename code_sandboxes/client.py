@@ -15,7 +15,7 @@ Example:
     from code_sandboxes import CodeSandboxClient
 
     # Create + own the sandbox lifecycle.
-    with CodeSandboxClient.create(variant="jupyter", jupyter_url=url) as client:
+    with CodeSandboxClient.create(variant="jupyter-server", jupyter_url=url) as client:
         outcome = client.execute_code("x = 1")
         outcome = client.execute_code("print(x)")
         print(outcome.stdout)  # "1"

@@ -53,12 +53,18 @@ import subprocess
 smi = shutil.which("nvidia-smi")
 print("GPU-PROBE: nvidia-smi", "present" if smi else "MISSING")
 if smi:
-    listing = subprocess.run(["nvidia-smi", "-L"], check=False, capture_output=True, text=True).stdout.strip()
+    listing = subprocess.run(
+        ["nvidia-smi", "-L"], check=False, capture_output=True, text=True
+    ).stdout.strip()
     print("GPU-PROBE: devices", listing or "NONE")
 
 try:
     import torch  # type: ignore
-    print("GPU-PROBE: torch", torch.__version__, "cuda", torch.cuda.is_available(), "count", torch.cuda.device_count())
+    print(
+        "GPU-PROBE: torch", torch.__version__,
+        "cuda", torch.cuda.is_available(),
+        "count", torch.cuda.device_count(),
+    )
 except Exception as exc:
     print("GPU-PROBE: torch unavailable:", exc)
 """
@@ -108,13 +114,11 @@ def main() -> None:
             print("-- error handling: the next snippet raises deliberately --")
             error_result = show_and_run(sandbox, "raise RuntimeError('modal failure example')")
             if error_result.code_error is None:
-                raise RuntimeError(
-                    "The deliberate failure did not surface as a code_error."
-                )
+                raise RuntimeError("The deliberate failure did not surface as a code_error.")
             print("error captured as expected — modal example completed.")
     except Exception as exc:
         print("modal example failed:", exc)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

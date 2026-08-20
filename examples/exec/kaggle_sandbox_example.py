@@ -32,7 +32,6 @@ from exec_common import show_and_run, show_code
 
 from code_sandboxes import CodeError, Sandbox
 
-
 GPU_PROBE = """
 import shutil
 import subprocess
@@ -40,7 +39,9 @@ import subprocess
 smi = shutil.which("nvidia-smi")
 print("GPU-PROBE: nvidia-smi", "present" if smi else "MISSING")
 if smi:
-    listing = subprocess.run(["nvidia-smi", "-L"], check=False, capture_output=True, text=True).stdout.strip()
+    listing = subprocess.run(
+        ["nvidia-smi", "-L"], check=False, capture_output=True, text=True
+    ).stdout.strip()
     print("GPU-PROBE: devices", listing or "NONE")
 """
 
@@ -77,14 +78,11 @@ def _check_gpu_probe(probe: str, flavor: str) -> None:
     print("gpu_probe:\n", probe)
     if "nvidia-smi present" not in probe or "devices NONE" in probe:
         raise RuntimeError(
-            f"GPU verification failed: no GPU in the Kaggle runtime "
-            f"(requested {flavor})."
+            f"GPU verification failed: no GPU in the Kaggle runtime (requested {flavor})."
         )
     # 'T4 x2' must match a 'Tesla T4' listing: the family name is the check.
     family = flavor.split()[0].lower()
-    devices = next(
-        (line for line in probe.splitlines() if "devices" in line), ""
-    ).lower()
+    devices = next((line for line in probe.splitlines() if "devices" in line), "").lower()
     if family not in devices:
         raise RuntimeError(
             f"GPU verification failed: requested {flavor} but nvidia-smi "
@@ -152,9 +150,9 @@ def _run_interactive(gpu: str | None) -> None:
     print("mode: interactive (live kaggle.com session)")
     with Sandbox.create(variant="kaggle", timeout=60, **kwargs) as sandbox:
         show_and_run(sandbox, "x = 40")
-        result = show_and_run(sandbox, "x + 2")
+        show_and_run(sandbox, "x + 2")
 
-        result = show_and_run(sandbox, "print('hello from kaggle')")
+        show_and_run(sandbox, "print('hello from kaggle')")
 
         if gpu:
             probe = show_and_run(sandbox, GPU_PROBE).stdout.strip()
@@ -163,9 +161,7 @@ def _run_interactive(gpu: str | None) -> None:
 
 def main() -> None:
     args = _parse_args()
-    interactive = bool(
-        os.environ.get("RUNTIME_CHANNELS_URL") or os.environ.get("RUNTIME_URL")
-    )
+    interactive = bool(os.environ.get("RUNTIME_CHANNELS_URL") or os.environ.get("RUNTIME_URL"))
     try:
         if interactive:
             _run_interactive(args.gpu)
@@ -188,7 +184,7 @@ def main() -> None:
                 "kernel creation on it. Unset RUNTIME_URL to use batch mode, "
                 "which needs no session."
             )
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

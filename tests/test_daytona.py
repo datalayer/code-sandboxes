@@ -64,9 +64,7 @@ class _FakeInterpreter:
         envs=None,
         timeout=None,
     ):
-        self.calls.append(
-            SimpleNamespace(code=code, context=context, envs=envs, timeout=timeout)
-        )
+        self.calls.append(SimpleNamespace(code=code, context=context, envs=envs, timeout=timeout))
         namespace = self.namespaces[context.id if context else None]
         out, err, error = io.StringIO(), io.StringIO(), None
         try:
@@ -408,9 +406,7 @@ def test_the_network_policy_becomes_daytonas_own_settings():
             allowed_hosts=["pypi.org", "files.pythonhosted.org"],
         )
     )
-    assert allowed._network_params() == {
-        "domain_allow_list": "pypi.org,files.pythonhosted.org"
-    }
+    assert allowed._network_params() == {"domain_allow_list": "pypi.org,files.pythonhosted.org"}
 
     assert _started(SandboxConfig(network_policy="inherit"))._network_params() == {}
 
@@ -497,6 +493,4 @@ def test_the_provider_says_what_it_needs():
     assert provider.extra == "daytona"
     assert not provider.is_available({})
     assert provider.is_available({"DAYTONA_API_KEY": "dtn_key"})
-    assert provider.is_available(
-        {"DAYTONA_JWT_TOKEN": "jwt", "DAYTONA_ORGANIZATION_ID": "org"}
-    )
+    assert provider.is_available({"DAYTONA_JWT_TOKEN": "jwt", "DAYTONA_ORGANIZATION_ID": "org"})

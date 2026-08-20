@@ -25,25 +25,25 @@ You can either pass `--variant` directly or omit it and choose interactively.
 
 Supported variants:
 
-- `jupyter-server`
+- `datalayer`
+- `daytona`
 - `docker`
 - `eval`
-- `monty`
-- `kaggle`
 - `google-colab`
+- `jupyter-server`
+- `kaggle`
 - `modal`
-- `daytona`
-- `datalayer`
+- `monty`
 
 ## Variant-specific Behavior
 
-- `jupyter-server`: starts a managed local Jupyter server on a random port.
-- `kaggle`: supports either interactive runtime settings or credential-based batch execution.
-- `monty`: starts a Monty REPL-backed sandbox.
-- `modal`: starts a Modal sandbox container.
 - `daytona`: starts a Daytona sandbox; `--gpu` takes Daytona's own flavors
   (`H100`, `H200`, `RTX-4090`, ...).
 - `google-colab`: prompts for runtime URL, kernel ID, and proxy token.
+- `jupyter-server`: starts a managed local Jupyter server on a random port.
+- `kaggle`: supports either interactive runtime settings or credential-based batch execution.
+- `modal`: starts a Modal sandbox container.
+- `monty`: starts a Monty REPL-backed sandbox.
 
 ## Usage
 

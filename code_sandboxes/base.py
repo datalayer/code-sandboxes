@@ -54,6 +54,20 @@ def generate_sandbox_name() -> str:
     return f"{colour}-{fake.word()}-{suffix}"
 
 
+def normalize_variant(variant: SandboxVariant | str) -> str:
+    """One spelling of a variant, as every dispatcher of this package reads it.
+
+    The value of a variant may carry a dash — `jupyter-server` — and a caller
+    types it with a dash, with an underscore, in capitals, or with the
+    whitespace a configuration file left around it. `get_manager` and
+    `get_provider` have always answered to all of those; the factory here
+    accepted one spelling alone, which made the front door of the package the
+    strictest thing in it.
+    """
+    value = variant.value if isinstance(variant, SandboxVariant) else str(variant)
+    return value.strip().lower().replace("-", "_")
+
+
 #: The Datalayer environment used when a caller names none. Every cluster
 #: provides it; the previous default, `python-cpu-env`, does not exist on
 #: current deployments.
@@ -286,12 +300,7 @@ class Sandbox(ABC):
 
         from .eval_sandbox import EvalSandbox
 
-        # In one normal form, as every dispatcher here reads it: the value of
-        # a variant may carry a dash — `jupyter-server` — and callers type
-        # either spelling.
-        variant_value = (
-            variant.value if isinstance(variant, SandboxVariant) else variant
-        ).replace("-", "_")
+        variant_value = normalize_variant(variant)
 
         if variant_value == "eval":
             sandbox = EvalSandbox(config=config, **kwargs)
@@ -331,8 +340,7 @@ class Sandbox(ABC):
         else:
             raise ValueError(
                 f"Unknown sandbox variant: {variant}. "
-                "Supported variants: "
-                + ", ".join(sorted(v.value for v in SandboxVariant))
+                "Supported variants: " + ", ".join(sorted(v.value for v in SandboxVariant))
             )
 
         # Set tags if provided
@@ -377,8 +385,7 @@ class Sandbox(ABC):
         Returns:
             List of SandboxEnvironment entries.
         """
-        variant_value = variant.value if isinstance(variant, SandboxVariant) else variant
-        variant_value = variant_value.replace("-", "_")
+        variant_value = normalize_variant(variant)
 
         if variant_value == "eval":
             from .eval_sandbox import EvalSandbox
@@ -418,8 +425,7 @@ class Sandbox(ABC):
             return DatalayerSandbox.list_environments(**kwargs)
         raise ValueError(
             f"Unknown sandbox variant: {variant}. "
-            "Supported variants: "
-            + ", ".join(sorted(v.value for v in SandboxVariant))
+            "Supported variants: " + ", ".join(sorted(v.value for v in SandboxVariant))
         )
 
     @classmethod

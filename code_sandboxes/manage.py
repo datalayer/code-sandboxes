@@ -88,9 +88,7 @@ class SandboxManager(ABC):
 
     def update(self, sandbox_id: str, **changes: Any) -> SandboxInfo:
         """Change what the backend can change; the sandbox as it now is."""
-        raise self._unsupported(
-            "update", "this backend has nothing that can be changed in place"
-        )
+        raise self._unsupported("update", "this backend has nothing that can be changed in place")
 
     def _unsupported(self, verb: str, reason: str) -> SandboxManagementError:
         return SandboxManagementError(
@@ -116,9 +114,7 @@ class _EphemeralManager(SandboxManager):
         raise self._unsupported("delete", self._reason)
 
     def create(self, **kwargs: Any) -> SandboxInfo:
-        raise self._unsupported(
-            "detached create", self._reason + "; use Sandbox.create() instead"
-        )
+        raise self._unsupported("detached create", self._reason + "; use Sandbox.create() instead")
 
     def update(self, sandbox_id: str, **changes: Any) -> SandboxInfo:
         raise self._unsupported("update", self._reason)
@@ -162,9 +158,7 @@ class DockerSandboxManager(SandboxManager):
 
     def _containers(self) -> list[Any]:
         client = self._client()
-        labelled = client.containers.list(
-            all=True, filters={"label": self.LABEL}
-        )
+        labelled = client.containers.list(all=True, filters={"label": self.LABEL})
         seen = {c.id for c in labelled}
         # Containers from before the label existed: found by their image.
         for container in client.containers.list(all=True):
@@ -243,7 +237,7 @@ class DockerSandboxManager(SandboxManager):
 class JupyterServerSandboxManager(SandboxManager):
     """Kernels of a Jupyter Server, spoken to over its REST API.
 
-    A ``jupyter`` sandbox started with ``server_url`` lives on that server as
+    A ``jupyter-server`` sandbox started with ``server_url`` lives on that server as
     a kernel; this manager enumerates and deletes those kernels. The server
     defaults to ``JUPYTER_SERVER_URL``/``JUPYTER_TOKEN`` from the
     environment, then to ``http://localhost:8888``.
@@ -259,9 +253,7 @@ class JupyterServerSandboxManager(SandboxManager):
         **_: Any,
     ) -> None:
         self._server_url = (
-            server_url
-            or os.environ.get("JUPYTER_SERVER_URL")
-            or "http://localhost:8888"
+            server_url or os.environ.get("JUPYTER_SERVER_URL") or "http://localhost:8888"
         ).rstrip("/")
         self._token = token if token is not None else os.environ.get("JUPYTER_TOKEN")
 
@@ -359,8 +351,7 @@ class GoogleColabSandboxManager(JupyterServerSandboxManager):
         # to answer what it cannot do.
         if not self._colab_url:
             raise SandboxManagementError(
-                "A Colab runtime URL is required: pass server_url=... or set "
-                "RUNTIME_URL."
+                "A Colab runtime URL is required: pass server_url=... or set RUNTIME_URL."
             )
         from .google_colab import (
             COLAB_CLIENT_AGENT_HEADER,
@@ -483,9 +474,7 @@ class KaggleSandboxManager(SandboxManager):
         try:
             executor.api.kernels_pull(ref, str(folder), metadata=True)
         except Exception as exc:
-            raise SandboxManagementError(
-                f"No kaggle sandbox found: {sandbox_id} ({exc})"
-            ) from exc
+            raise SandboxManagementError(f"No kaggle sandbox found: {sandbox_id} ({exc})") from exc
         metadata = json.loads((folder / "kernel-metadata.json").read_text())
         code_file = folder / (metadata.get("code_file") or "kernel.py")
         if code_file.suffix == ".ipynb":
@@ -515,9 +504,7 @@ class KaggleSandboxManager(SandboxManager):
             raise SandboxManagementError(f"Kaggle refused the update: {error}")
         info = self.get(ref)
         if info is None:
-            raise SandboxManagementError(
-                f"The kernel disappeared while updating: {ref}"
-            )
+            raise SandboxManagementError(f"The kernel disappeared while updating: {ref}")
         info.metadata["version"] = getattr(response, "version_number", "")
         return info
 
@@ -592,9 +579,7 @@ class ModalSandboxManager(SandboxManager):
         sandbox.terminate()
         return True
 
-    def update(
-        self, sandbox_id: str, tags: dict[str, str] | None = None, **_: Any
-    ) -> SandboxInfo:
+    def update(self, sandbox_id: str, tags: dict[str, str] | None = None, **_: Any) -> SandboxInfo:
         """Set tags on the sandbox — what Modal changes on a running one."""
         if not tags:
             raise self._unsupported("update without tags=...", "only tags change")
@@ -602,9 +587,7 @@ class ModalSandboxManager(SandboxManager):
         try:
             sandbox = modal.Sandbox.from_id(sandbox_id)
         except Exception as exc:
-            raise SandboxManagementError(
-                f"No modal sandbox found: {sandbox_id}"
-            ) from exc
+            raise SandboxManagementError(f"No modal sandbox found: {sandbox_id}") from exc
         sandbox.set_tags(tags)
         info = self.get(sandbox_id)
         if info is None:
@@ -717,18 +700,14 @@ class DaytonaSandboxManager(SandboxManager):
         client.delete(sandbox)
         return True
 
-    def update(
-        self, sandbox_id: str, tags: dict[str, str] | None = None, **_: Any
-    ) -> SandboxInfo:
+    def update(self, sandbox_id: str, tags: dict[str, str] | None = None, **_: Any) -> SandboxInfo:
         """Set labels on the sandbox — what Daytona changes on a running one."""
         if not tags:
             raise self._unsupported("update without tags=...", "only labels change")
         try:
             sandbox = self._client().get(sandbox_id)
         except Exception as exc:
-            raise SandboxManagementError(
-                f"No daytona sandbox found: {sandbox_id}"
-            ) from exc
+            raise SandboxManagementError(f"No daytona sandbox found: {sandbox_id}") from exc
         # Daytona REPLACES the label set, so what is there is kept and the
         # tags given are written over it — an update of one tag is not a
         # deletion of the others.
@@ -775,15 +754,12 @@ class DatalayerSandboxManager(SandboxManager):
                 from agent_runtimes.client import AgentClient
             except ImportError as exc:
                 raise SandboxManagementError(
-                    "agent_runtimes package is required: "
-                    "pip install code-sandboxes[datalayer]"
+                    "agent_runtimes package is required: pip install code-sandboxes[datalayer]"
                 ) from exc
             if self._run_url:
                 from .datalayer_sandbox import _urls_for_run
 
-                self._client = AgentClient(
-                    urls=_urls_for_run(self._run_url), api_key=self._token
-                )
+                self._client = AgentClient(urls=_urls_for_run(self._run_url), api_key=self._token)
             else:
                 self._client = AgentClient(api_key=self._token)
         return self._client
@@ -891,11 +867,7 @@ def get_manager(variant: str, **kwargs: Any) -> SandboxManager:
     # Keys carry the variant's own spelling — `jupyter-server` with its dash —
     # and lookups arrive in either form: compare in one normal form.
     manager_class = next(
-        (
-            cls
-            for key, cls in _MANAGERS.items()
-            if key.replace("-", "_") == normalized
-        ),
+        (cls for key, cls in _MANAGERS.items() if key.replace("-", "_") == normalized),
         None,
     )
     if manager_class is None:

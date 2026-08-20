@@ -16,6 +16,7 @@ captured; only stdout/stderr text and the process exit code are returned.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 import time
@@ -127,7 +128,7 @@ for line in sys.stdin:
 def _modal_exec_timeout_seconds(timeout: float | None, default: float) -> int:
     """Return a Modal-compatible timeout in integer seconds."""
     value = timeout if timeout is not None else default
-    return max(1, int(math.ceil(value)))
+    return max(1, math.ceil(value))
 
 
 class ModalSandbox(Sandbox):
@@ -259,19 +260,18 @@ class ModalSandbox(Sandbox):
             driver = self._sandbox.exec(self._python_executable, "-u", "-c", _DRIVER_SOURCE)
         except Exception:
             logger.warning(
-                "The Modal session driver could not be started; snippets will "
-                "not share state.",
+                "The Modal session driver could not be started; snippets will not share state.",
                 exc_info=True,
             )
             return
         replies: queue.Queue = queue.Queue()
 
         def pump() -> None:
-            try:
+            # The reader dies with the driver, and says so with the sentinel
+            # below rather than with an exception nobody is there to catch.
+            with contextlib.suppress(Exception):
                 for line in driver.stdout:
                     replies.put(line)
-            except Exception:  # noqa: BLE001 — the reader dies with the driver
-                pass
             replies.put(None)
 
         # A thread reads the replies: the stream blocks, and a request that

@@ -10,6 +10,7 @@ one) and uses ``jupyter-kernel-client`` to execute code in a persistent kernel.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import signal
@@ -240,7 +241,7 @@ class JupyterServerSandbox(Sandbox):
             workdir,
         )
 
-        self._server_process = subprocess.Popen(
+        self._server_process = subprocess.Popen(  # noqa: S603 — argv built above, no shell
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -431,15 +432,13 @@ class JupyterServerSandbox(Sandbox):
         """Keep tool calling on the client side for Jupyter sandboxes."""
         return
 
-    def stop(self) -> None:
+    def stop(self) -> None:  # noqa: C901
         if not self._started:
             return
 
         if self._client is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._client.stop()
-            except Exception:
-                pass
             self._client = None
 
         # Terminate subprocess-based server
@@ -452,37 +451,30 @@ class JupyterServerSandbox(Sandbox):
                     self._server_process.terminate()
                 self._server_process.wait(timeout=5)
             except Exception:
-                try:
+                # It would not go quietly; there is nothing after `kill`.
+                with contextlib.suppress(Exception):
                     self._server_process.kill()
-                except Exception:
-                    pass
             self._server_process = None
 
         # Terminate in-process server (legacy mode)
         if self._server_app is not None and self._owns_server:
-            try:
+            with contextlib.suppress(Exception):
                 if getattr(self._server_app, "io_loop", None):
                     self._server_app.io_loop.add_callback(self._server_app.stop)
                 else:
                     self._server_app.stop()
-            except Exception:
-                pass
             self._server_app = None
 
         if self._server_thread is not None and self._owns_server:
-            try:
+            with contextlib.suppress(Exception):
                 self._server_thread.join(timeout=5)
-            except Exception:
-                pass
             self._server_thread = None
 
         if self._workdir_tmp and os.path.isdir(self._workdir_tmp):
-            try:
-                import shutil
+            import shutil
 
-                shutil.rmtree(self._workdir_tmp, ignore_errors=True)
-            except Exception:
-                pass
+            # `ignore_errors` already swallows what the tree throws.
+            shutil.rmtree(self._workdir_tmp, ignore_errors=True)
             self._workdir_tmp = None
 
         self._started = False
@@ -509,7 +501,7 @@ class JupyterServerSandbox(Sandbox):
             logger.warning(f"Failed to interrupt Jupyter kernel: {e}")
             return False
 
-    def run_code(
+    def run_code(  # noqa: C901
         self,
         code: str,
         language: str = "python",

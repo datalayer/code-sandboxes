@@ -30,9 +30,7 @@ from code_sandboxes import Sandbox
 def _has_daytona_auth() -> bool:
     if os.environ.get("DAYTONA_API_KEY"):
         return True
-    return bool(
-        os.environ.get("DAYTONA_JWT_TOKEN") and os.environ.get("DAYTONA_ORGANIZATION_ID")
-    )
+    return bool(os.environ.get("DAYTONA_JWT_TOKEN") and os.environ.get("DAYTONA_ORGANIZATION_ID"))
 
 
 def _parse_args() -> argparse.Namespace:

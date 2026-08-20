@@ -19,10 +19,10 @@ def main() -> None:
         with Sandbox.create(variant="jupyter-server", timeout=30) as sandbox:
             # Test persistent state across executions
             show_and_run(sandbox, "x = 40")
-            result = show_and_run(sandbox, "x + 2")
+            show_and_run(sandbox, "x + 2")
 
             # Test stdout
-            result = show_and_run(sandbox, "print('hello from jupyter')")
+            show_and_run(sandbox, "print('hello from jupyter')")
 
             # Test file operations
             sandbox.files.write("/tmp/jupyter_test.txt", "Hello from jupyter")

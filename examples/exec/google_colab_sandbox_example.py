@@ -36,9 +36,9 @@ def main() -> None:
             proxy_token=runtime_proxy_token,
         ) as sandbox:
             show_and_run(sandbox, "x = 40")
-            result = show_and_run(sandbox, "x + 2")
+            show_and_run(sandbox, "x + 2")
 
-            result = show_and_run(sandbox, "print('hello from colab')")
+            show_and_run(sandbox, "print('hello from colab')")
     except Exception as exc:
         print("colab example failed:", exc)
         print(

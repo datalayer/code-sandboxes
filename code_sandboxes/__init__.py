@@ -123,6 +123,7 @@ from .models import (
     SnapshotInfo,
     TunnelInfo,
 )
+from .monty_sandbox import MontySandbox
 from .providers import (
     PROVIDERS,
     ProviderRequirement,
@@ -130,17 +131,12 @@ from .providers import (
     available_providers,
     get_provider,
 )
-from .monty_sandbox import MontySandbox
 
+#: Everything this package exports, in one sorted list — the groups it
+#: used to be split into stopped matching what they sat above.
 __all__ = [
     "KAGGLE_API_TOKEN_ENV",
-    # Providers
     "PROVIDERS",
-    "ProviderRequirement",
-    "SandboxProvider",
-    "available_providers",
-    "get_provider",
-    # Models
     "CodeError",
     "CodeExecutionOutcome",
     "CodeSandboxClient",
@@ -150,7 +146,6 @@ __all__ = [
     "DatalayerSandbox",
     "DaytonaSandbox",
     "DockerSandbox",
-    # Sandbox implementations
     "EvalSandbox",
     "ExecutionResult",
     "FileInfo",
@@ -173,28 +168,25 @@ __all__ = [
     "OutputHandler",
     "OutputMessage",
     "ProcessHandle",
+    "ProviderRequirement",
     "ResourceConfig",
     "Result",
-    # Main sandbox class
     "Sandbox",
     "SandboxAuthenticationError",
-    # Commands
     "SandboxCommands",
     "SandboxConfig",
     "SandboxConfigurationError",
     "SandboxConnectionError",
     "SandboxEnvironment",
-    # Exceptions
     "SandboxError",
     "SandboxExecutionError",
     "SandboxFileHandle",
-    # Filesystem
     "SandboxFilesystem",
     "SandboxInfo",
-    # Management (CRUD)
     "SandboxManagementError",
     "SandboxManager",
     "SandboxNotStartedError",
+    "SandboxProvider",
     "SandboxQuotaExceededError",
     "SandboxResourceError",
     "SandboxSnapshotError",
@@ -204,8 +196,10 @@ __all__ = [
     "SnapshotInfo",
     "TunnelInfo",
     "VariableNotFoundError",
+    "available_providers",
     "execution_result_to_reply",
     "get_manager",
+    "get_provider",
     "manageable_variants",
     "parse_google_colab_channels_url",
     "parse_kaggle_channels_url",

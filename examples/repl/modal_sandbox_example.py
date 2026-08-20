@@ -49,7 +49,7 @@ def main() -> None:
             run_repl(sandbox)
     except Exception as exc:
         print("modal REPL failed:", exc)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

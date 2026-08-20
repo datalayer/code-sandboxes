@@ -22,19 +22,20 @@ Datalayer ships ``ai-agents-env``, and only the variant knows its own.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Mapping, Optional
+from typing import Callable
 
 from .models import SandboxEnvironment, SandboxVariant
 
 __all__ = [
+    "PROVIDERS",
     "ProviderRequirement",
     "SandboxProvider",
-    "PROVIDERS",
     "available_providers",
-    "provider_catalog",
     "get_provider",
+    "provider_catalog",
 ]
 
 
@@ -50,11 +51,11 @@ class ProviderRequirement:
     #: Environment variables that must all be set for this way to be satisfied.
     env_vars: tuple[str, ...] = ()
     #: A file that satisfies it instead, e.g. what a provider's CLI writes.
-    file: Optional[str] = None
+    file: str | None = None
     #: What to tell someone who has none of it.
     hint: str = ""
 
-    def is_met(self, secrets: Optional[Mapping[str, str]] = None) -> bool:
+    def is_met(self, secrets: Mapping[str, str] | None = None) -> bool:
         """Whether this way of providing the credentials is satisfied.
 
         Args:
@@ -83,11 +84,19 @@ class SandboxProvider:
     #: Any one of these satisfies the provider; empty means nothing is needed.
     requirements: tuple[ProviderRequirement, ...] = ()
     #: Extra packages needed, as the extra of this distribution.
-    extra: Optional[str] = None
+    extra: str | None = None
     #: Whether the provider can be used with no credentials at all.
     needs_credentials: bool = True
+    #: Credentials the environment listing takes as ARGUMENTS, as pairs of
+    #: (keyword, the variable holding its value).
+    #:
+    #: Most providers ship a fixed list and need none. Datalayer asks its
+    #: platform, so it needs the account to ask on behalf of — and reading it
+    #: from the process environment is exactly wrong for a service, which
+    #: holds the credentials of whoever is asking and not of itself.
+    environment_secrets: tuple[tuple[str, str], ...] = ()
     #: Read the environments this provider ships, when it can be asked.
-    list_environments: Optional[Callable[[], list[SandboxEnvironment]]] = field(
+    list_environments: Callable[..., list[SandboxEnvironment]] | None = field(
         default=None, repr=False
     )
 
@@ -96,7 +105,7 @@ class SandboxProvider:
         """The identifier of the provider, which is that of its variant."""
         return self.variant.value
 
-    def is_available(self, secrets: Optional[Mapping[str, str]] = None) -> bool:
+    def is_available(self, secrets: Mapping[str, str] | None = None) -> bool:
         """Whether the provider's requirements are met, here or in `secrets`."""
         if not self.needs_credentials or not self.requirements:
             return True
@@ -106,29 +115,43 @@ class SandboxProvider:
         """The ways of satisfying it, when none of them is satisfied."""
         return () if self.is_available() else self.requirements
 
-    def environments(self) -> list[SandboxEnvironment]:
-        """The environments the provider ships, or none when it cannot say."""
+    def environments(self, secrets: Mapping[str, str] | None = None) -> list[SandboxEnvironment]:
+        """The environments the provider ships, or none when it cannot say.
+
+        Args:
+            secrets: Where to read the credentials the listing takes as
+                arguments. The process environment by default; a service
+                passes the secrets of an ACCOUNT, and then asking the platform
+                what THAT account may launch is the whole point — asked
+                without them, the provider reads as enabled and ships nothing.
+        """
         if self.list_environments is None:
             return []
+        store: Mapping[str, str] = os.environ if secrets is None else secrets
+        arguments = {
+            keyword: store[variable]
+            for keyword, variable in self.environment_secrets
+            if store.get(variable)
+        }
         try:
-            return self.list_environments()
-        except Exception:  # noqa: BLE001
+            return self.list_environments(**arguments)
+        except Exception:
             # A provider that cannot be reached ships nothing rather than
             # taking down whoever asked what is available.
             return []
 
 
-def _environments_of(variant: SandboxVariant) -> Callable[[], list[SandboxEnvironment]]:
+def _environments_of(variant: SandboxVariant) -> Callable[..., list[SandboxEnvironment]]:
     """Read a variant's own environments, lazily.
 
     Imported on the call rather than here: a provider whose package is not
     installed must cost nothing until someone asks about it.
     """
 
-    def read() -> list[SandboxEnvironment]:
+    def read(**kwargs) -> list[SandboxEnvironment]:
         from .base import Sandbox
 
-        return Sandbox.list_environments(variant=variant)
+        return Sandbox.list_environments(variant=variant, **kwargs)
 
     return read
 
@@ -147,6 +170,10 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
                 env_vars=("DATALAYER_TOKEN",),
                 hint="Sign in with `datalayer login`, or set DATALAYER_TOKEN.",
             ),
+        ),
+        environment_secrets=(
+            ("token", "DATALAYER_TOKEN"),
+            ("run_url", "DATALAYER_RUN_URL"),
         ),
         list_environments=_environments_of(SandboxVariant.DATALAYER),
     ),
@@ -169,8 +196,7 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
         variant=SandboxVariant.KAGGLE,
         title="Kaggle",
         description=(
-            "Kaggle notebook sessions, interactively against a running kernel "
-            "or as a batch job."
+            "Kaggle notebook sessions, interactively against a running kernel or as a batch job."
         ),
         extra="kaggle",
         requirements=(
@@ -214,24 +240,17 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
         variant=SandboxVariant.DAYTONA,
         title="Daytona",
         description=(
-            "Sandboxes on Daytona, with a stateful Python interpreter and an "
-            "optional GPU."
+            "Sandboxes on Daytona, with a stateful Python interpreter and an optional GPU."
         ),
         extra="daytona",
         requirements=(
             ProviderRequirement(
                 env_vars=("DAYTONA_API_KEY",),
-                hint=(
-                    "Create an API key at app.daytona.io and set "
-                    "DAYTONA_API_KEY."
-                ),
+                hint=("Create an API key at app.daytona.io and set DAYTONA_API_KEY."),
             ),
             ProviderRequirement(
                 env_vars=("DAYTONA_JWT_TOKEN", "DAYTONA_ORGANIZATION_ID"),
-                hint=(
-                    "Set DAYTONA_JWT_TOKEN with the DAYTONA_ORGANIZATION_ID it "
-                    "belongs to."
-                ),
+                hint=("Set DAYTONA_JWT_TOKEN with the DAYTONA_ORGANIZATION_ID it belongs to."),
             ),
         ),
         list_environments=_environments_of(SandboxVariant.DAYTONA),
@@ -247,8 +266,7 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
         variant=SandboxVariant.EVAL,
         title="Eval",
         description=(
-            "Code evaluated in this very process. For tests and examples; it "
-            "isolates nothing."
+            "Code evaluated in this very process. For tests and examples; it isolates nothing."
         ),
         needs_credentials=False,
         list_environments=_environments_of(SandboxVariant.EVAL),
@@ -256,7 +274,7 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
 )
 
 
-def get_provider(name: str) -> Optional[SandboxProvider]:
+def get_provider(name: str) -> SandboxProvider | None:
     """The provider of that name, if there is one.
 
     Args:
@@ -272,14 +290,14 @@ def get_provider(name: str) -> Optional[SandboxProvider]:
 
 
 def available_providers(
-    secrets: Optional[Mapping[str, str]] = None,
+    secrets: Mapping[str, str] | None = None,
 ) -> tuple[SandboxProvider, ...]:
     """The providers whose credentials are on hand, here or in `secrets`."""
     return tuple(p for p in PROVIDERS if p.is_available(secrets))
 
 
 def provider_catalog(
-    secrets: Optional[Mapping[str, str]] = None,
+    secrets: Mapping[str, str] | None = None,
 ) -> list[dict]:
     """Every provider as plain data, for a service to serve.
 
@@ -313,7 +331,7 @@ def provider_catalog(
                         "title": environment.title,
                         "language": environment.language,
                     }
-                    for environment in (provider.environments() if enabled else [])
+                    for environment in (provider.environments(secrets) if enabled else [])
                 ],
             }
         )

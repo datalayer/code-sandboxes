@@ -233,9 +233,7 @@ def test_cli_update_parses_tags_and_renders_the_result(monkeypatch):
     assert received["sb-1"] == {"tags": {"team": "ai", "env": "dev"}}
     assert "sb-1" in result.output
 
-    result = runner.invoke(
-        sandbox_cli.app, ["update", "sb-1", "-v", "modal", "--tag", "notavalue"]
-    )
+    result = runner.invoke(sandbox_cli.app, ["update", "sb-1", "-v", "modal", "--tag", "notavalue"])
     assert result.exit_code == 1
     assert "Not a key=value tag" in result.output
 

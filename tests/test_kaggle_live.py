@@ -95,9 +95,10 @@ def test_execute_round_trips_over_the_bus():
         if inbox.get("seq") == session._seq:
             api.store[session._k2c] = {
                 "seq": session._seq,
-                "reply": {"status": "ok", "outputs": [
-                    {"output_type": "stream", "name": "stdout", "text": "42\n"}
-                ]},
+                "reply": {
+                    "status": "ok",
+                    "outputs": [{"output_type": "stream", "name": "stdout", "text": "42\n"}],
+                },
             }
         return real_read(ref)
 

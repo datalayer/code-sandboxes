@@ -81,6 +81,32 @@ class TestSandboxFactory:
         sandbox = Sandbox.create(variant=variant)
         assert isinstance(sandbox, expected_type)
 
+    @pytest.mark.parametrize(
+        "variant",
+        ["jupyter-server", "jupyter_server", "JUPYTER-SERVER", " Jupyter-Server "],
+    )
+    def test_a_variant_is_read_in_any_spelling(self, variant):
+        """The factory was the strictest door into the package, and alone.
+
+        `get_manager` and `get_provider` have always taken the case and the
+        whitespace a configuration file leaves around a name; `create` took
+        one spelling and raised on the rest.
+        """
+        assert isinstance(Sandbox.create(variant=variant), JupyterServerSandbox)
+        assert Sandbox.list_environments(variant=variant)
+
+    def test_a_name_that_is_not_a_variant_still_raises(self):
+        """Reading loosely is not guessing: `jupyter` names nothing."""
+        with pytest.raises(ValueError, match="Unknown sandbox variant"):
+            Sandbox.create(variant="jupyter")
+
+    def test_the_refusal_names_what_there_is(self):
+        with pytest.raises(ValueError) as raised:
+            Sandbox.list_environments(variant="nonesuch")
+        message = str(raised.value)
+        assert "jupyter-server" in message
+        assert "daytona" in message
+
     def test_create_default_variant_is_datalayer(self):
         """Test that omitting variant uses the datalayer sandbox by default."""
         sandbox = Sandbox.create()

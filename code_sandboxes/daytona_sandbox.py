@@ -367,9 +367,7 @@ class DaytonaSandbox(Sandbox):
                     if self._python_version
                     else daytona.Image.debian_slim()
                 )
-            return daytona.CreateSandboxFromImageParams(
-                image=image, resources=resources, **common
-            )
+            return daytona.CreateSandboxFromImageParams(image=image, resources=resources, **common)
         return daytona.CreateSandboxFromSnapshotParams(snapshot=self._snapshot, **common)
 
     def _labels(self) -> dict[str, str]:
@@ -430,9 +428,7 @@ class DaytonaSandbox(Sandbox):
                 else:
                     self._sandbox.stop()
             except Exception:
-                logger.debug(
-                    "Ignoring error while stopping the Daytona sandbox", exc_info=True
-                )
+                logger.debug("Ignoring error while stopping the Daytona sandbox", exc_info=True)
             self._sandbox = None
         self._daytona = None
         self._contexts.clear()
@@ -579,16 +575,12 @@ class DaytonaSandbox(Sandbox):
             _emit_text(f"{_JSON_MOD}.dumps({name}, default=repr)"), context=context
         )
         if not execution.execution_ok:
-            raise SandboxExecutionError(
-                execution.execution_error or "Sandbox execution failed"
-            )
+            raise SandboxExecutionError(execution.execution_error or "Sandbox execution failed")
         if execution.code_error is not None or execution.text is None:
             raise VariableNotFoundError(name)
         return json.loads(execution.text)
 
-    def _set_internal_variable(
-        self, name: str, value: Any, context: Context | None = None
-    ) -> None:
+    def _set_internal_variable(self, name: str, value: Any, context: Context | None = None) -> None:
         if not self._started or self._sandbox is None:
             raise SandboxNotStartedError()
         try:
@@ -606,9 +598,7 @@ class DaytonaSandbox(Sandbox):
             context=context,
         )
         if not execution.execution_ok:
-            raise SandboxExecutionError(
-                execution.execution_error or "Sandbox execution failed"
-            )
+            raise SandboxExecutionError(execution.execution_error or "Sandbox execution failed")
         if execution.code_error is not None:
             raise SandboxExecutionError(str(execution.code_error))
 

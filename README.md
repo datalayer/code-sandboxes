@@ -16,12 +16,12 @@ Code Sandboxes (`code_sandboxes`) is a Python package for running code in isolat
 Canonical variant names:
 
 - `datalayer`
+- `daytona`
 - `docker`
 - `eval`
 - `google_colab`
-- `jupyter`
+- `jupyter-server`
 - `kaggle`
-- `daytona`
 - `modal`
 - `monty`
 
@@ -49,18 +49,18 @@ pip install code-sandboxes
 
 For backend-specific extras and credentials, see [https://code-sandboxes.datalayer.tech/installation](https://code-sandboxes.datalayer.tech/installation) and [https://code-sandboxes.datalayer.tech/sandboxes](https://code-sandboxes.datalayer.tech/sandboxes).
 
-### Jupyter Sandbox
+### Jupyter Server Sandbox
 
 ```python
 from code_sandboxes import Sandbox
 
 # Option 1: manage a local Jupyter server automatically
-with Sandbox.create(variant="jupyter") as sandbox:
+with Sandbox.create(variant="jupyter-server") as sandbox:
   print(sandbox.run_code("1 + 1").text)  # 2
 
 # Option 2: connect to an existing Jupyter server
 with Sandbox.create(
-  variant="jupyter",
+  variant="jupyter-server",
   server_url="http://localhost:8888",
   token="MY_TOKEN",
 ) as sandbox:

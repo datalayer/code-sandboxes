@@ -18,7 +18,7 @@ def _driver_source() -> str:
 
 def _speak(requests):
     stdin = "".join(json.dumps(r) + "\n" for r in requests)
-    completed = subprocess.run(
+    completed = subprocess.run(  # noqa: S603 — this interpreter, and the driver of this repo
         [sys.executable, "-u", "-c", _driver_source()],
         input=stdin,
         capture_output=True,
@@ -29,21 +29,25 @@ def _speak(requests):
 
 
 def test_state_survives_between_requests():
-    replies = _speak([
-        {"seq": 1, "code": "x = 1"},
-        {"seq": 2, "code": "x"},
-    ])
+    replies = _speak(
+        [
+            {"seq": 1, "code": "x = 1"},
+            {"seq": 2, "code": "x"},
+        ]
+    )
     assert replies[0]["status"] == "ok"
     assert replies[1]["status"] == "ok"
     assert replies[1]["result"] == "1"
 
 
 def test_stdout_and_errors_come_back_per_request():
-    replies = _speak([
-        {"seq": 1, "code": "print('hello')"},
-        {"seq": 2, "code": "1 / 0"},
-        {"seq": 3, "code": "print('still alive')"},
-    ])
+    replies = _speak(
+        [
+            {"seq": 1, "code": "print('hello')"},
+            {"seq": 2, "code": "1 / 0"},
+            {"seq": 3, "code": "print('still alive')"},
+        ]
+    )
     assert replies[0]["stdout"] == "hello\n"
     assert replies[1]["status"] == "error"
     assert replies[1]["error"]["name"] == "ZeroDivisionError"
