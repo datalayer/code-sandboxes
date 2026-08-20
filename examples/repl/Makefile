@@ -2,9 +2,9 @@
 
 PYTHON ?= python
 
-.PHONY: all eval docker jupyter-server monty google-colab kaggle kaggle-gpu kaggle-live kaggle-gpu-live modal modal-gpu datalayer
+.PHONY: all eval docker jupyter-server monty google-colab kaggle kaggle-gpu kaggle-live kaggle-gpu-live modal modal-gpu daytona daytona-gpu datalayer
 
-all: eval docker jupyter-server monty google-colab modal datalayer
+all: eval docker jupyter-server monty google-colab modal daytona datalayer
 
 eval:
 	$(PYTHON) eval_sandbox_example.py
@@ -48,6 +48,16 @@ modal-gpu: ## Modal REPL on a GPU (MODAL_GPU flavor, default T4)
 	@echo "==> Modal REPL (GPU: $${MODAL_GPU:-T4})"
 	@echo "    The run fails unless nvidia-smi lists a $${MODAL_GPU:-T4} in the sandbox."
 	MODAL_GPU=$${MODAL_GPU:-T4} $(PYTHON) modal_sandbox_example.py --gpu "$${MODAL_GPU:-T4}"
+
+daytona: ## Daytona REPL (CPU)
+	@echo "==> Daytona REPL (CPU)"
+	@echo "    auth: DAYTONA_API_KEY, or DAYTONA_JWT_TOKEN with DAYTONA_ORGANIZATION_ID"
+	@echo "    Definitions persist between lines: the interpreter holds one namespace."
+	$(PYTHON) daytona_sandbox_example.py
+
+daytona-gpu: ## Daytona REPL on a GPU (DAYTONA_GPU flavor, default H100)
+	@echo "==> Daytona REPL (GPU: $${DAYTONA_GPU:-H100}; built from an image, so slower to start)"
+	DAYTONA_GPU=$${DAYTONA_GPU:-H100} $(PYTHON) daytona_sandbox_example.py --gpu "$${DAYTONA_GPU:-H100}"
 
 datalayer:
 	$(PYTHON) datalayer_sandbox_example.py

@@ -20,6 +20,7 @@ Remote sandboxes (out-of-process execution via Jupyter kernel protocol):
 
 Cloud container sandboxes:
     - ModalSandbox: Modal cloud containers, per-snippet process execution
+    - DaytonaSandbox: Daytona cloud sandboxes, stateful Python interpreter
 
 Features:
 - Code execution with streaming support
@@ -61,6 +62,7 @@ from .base import Sandbox
 from .client import CodeExecutionOutcome, CodeSandboxClient, execution_result_to_reply
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .datalayer_sandbox import DatalayerSandbox
+from .daytona_sandbox import DaytonaSandbox
 from .docker_sandbox import DockerSandbox
 from .eval_sandbox import EvalSandbox
 from .exceptions import (
@@ -146,6 +148,7 @@ __all__ = [
     "Context",
     "ContextNotFoundError",
     "DatalayerSandbox",
+    "DaytonaSandbox",
     "DockerSandbox",
     # Sandbox implementations
     "EvalSandbox",

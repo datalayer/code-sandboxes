@@ -632,6 +632,127 @@ class ModalSandboxManager(SandboxManager):
         return info
 
 
+#: What Daytona calls the life of a sandbox, in the words used here. A state
+#: this does not name is one added after this was written: reported as
+#: pending rather than guessed at.
+_DAYTONA_STATES = {
+    "started": SandboxStatus.RUNNING,
+    "creating": SandboxStatus.STARTING,
+    "starting": SandboxStatus.STARTING,
+    "restoring": SandboxStatus.STARTING,
+    "pulling_snapshot": SandboxStatus.STARTING,
+    "building_snapshot": SandboxStatus.STARTING,
+    "pending_build": SandboxStatus.STARTING,
+    "stopping": SandboxStatus.STOPPING,
+    "pausing": SandboxStatus.STOPPING,
+    "archiving": SandboxStatus.STOPPING,
+    "destroying": SandboxStatus.STOPPING,
+    "stopped": SandboxStatus.STOPPED,
+    "archived": SandboxStatus.STOPPED,
+    "destroyed": SandboxStatus.TERMINATED,
+    "error": SandboxStatus.ERROR,
+    "build_failed": SandboxStatus.ERROR,
+}
+
+
+class DaytonaSandboxManager(SandboxManager):
+    """Sandboxes of a Daytona organization."""
+
+    variant = "daytona"
+    capabilities = frozenset({"create", "list", "get", "update", "delete"})
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_url: str | None = None,
+        target: str | None = None,
+        **_: Any,
+    ) -> None:
+        self._settings = {"api_key": api_key, "api_url": api_url, "target": target}
+
+    def _client(self) -> Any:
+        try:
+            import daytona
+        except ImportError as exc:
+            raise SandboxManagementError(
+                "daytona package is required: pip install code-sandboxes[daytona]"
+            ) from exc
+        given = {key: value for key, value in self._settings.items() if value}
+        return daytona.Daytona(daytona.DaytonaConfig(**given) if given else None)
+
+    def _info(self, sandbox: Any) -> SandboxInfo:
+        labels = dict(getattr(sandbox, "labels", None) or {})
+        state = getattr(sandbox, "state", None)
+        state_value = getattr(state, "value", state)
+        return SandboxInfo(
+            id=sandbox.id,
+            variant=self.variant,
+            status=_DAYTONA_STATES.get(str(state_value), SandboxStatus.PENDING),
+            # The name a person gave it, which Daytona carries as a label:
+            # its own `name` is an address and has to stay unique.
+            name=labels.get("name") or getattr(sandbox, "name", None),
+            metadata={
+                "state": state_value,
+                "labels": labels,
+                "snapshot": getattr(sandbox, "snapshot", None),
+                "target": getattr(sandbox, "target", None),
+            },
+        )
+
+    def list(self) -> list[SandboxInfo]:
+        return [self._info(sandbox) for sandbox in self._client().list()]
+
+    def get(self, sandbox_id: str) -> SandboxInfo | None:
+        try:
+            return self._info(self._client().get(sandbox_id))
+        except Exception:
+            return None
+
+    def delete(self, sandbox_id: str) -> bool:
+        client = self._client()
+        try:
+            sandbox = client.get(sandbox_id)
+        except Exception:
+            return False
+        client.delete(sandbox)
+        return True
+
+    def update(
+        self, sandbox_id: str, tags: dict[str, str] | None = None, **_: Any
+    ) -> SandboxInfo:
+        """Set labels on the sandbox — what Daytona changes on a running one."""
+        if not tags:
+            raise self._unsupported("update without tags=...", "only labels change")
+        try:
+            sandbox = self._client().get(sandbox_id)
+        except Exception as exc:
+            raise SandboxManagementError(
+                f"No daytona sandbox found: {sandbox_id}"
+            ) from exc
+        # Daytona REPLACES the label set, so what is there is kept and the
+        # tags given are written over it — an update of one tag is not a
+        # deletion of the others.
+        sandbox.set_labels({**(dict(sandbox.labels or {})), **tags})
+        info = self.get(sandbox_id)
+        if info is None:
+            raise SandboxManagementError(f"No daytona sandbox found: {sandbox_id}")
+        return info
+
+    def create(self, **kwargs: Any) -> SandboxInfo:
+        from .daytona_sandbox import DaytonaSandbox
+
+        given = {key: value for key, value in self._settings.items() if value}
+        # Detached, so it outlives this call: stopping it is `delete`.
+        sandbox = DaytonaSandbox(delete_on_stop=False, **given, **kwargs)
+        sandbox.start()
+        info = sandbox.info
+        if info is None:
+            raise SandboxManagementError("The sandbox started without an identity.")
+        sandbox._sandbox = None
+        sandbox._started = False
+        return info
+
+
 class DatalayerSandboxManager(SandboxManager):
     """Runtimes of the Datalayer platform, through ``agent_runtimes``."""
 
@@ -738,6 +859,7 @@ _MANAGERS: dict[str, type[SandboxManager]] = {
     "google_colab": GoogleColabSandboxManager,
     "kaggle": KaggleSandboxManager,
     "modal": ModalSandboxManager,
+    "daytona": DaytonaSandboxManager,
     "datalayer": DatalayerSandboxManager,
 }
 
@@ -755,8 +877,9 @@ def get_manager(variant: str, **kwargs: Any) -> SandboxManager:
             accepted for ``google_colab``).
         **kwargs: Variant-specific connection settings — ``server_url`` /
             ``token`` (jupyter), ``proxy_token`` (google_colab), ``app_name``
-            (modal), ``username`` (kaggle), ``token`` / ``run_url``
-            (datalayer), ``docker_client`` (docker).
+            (modal), ``api_key`` / ``api_url`` / ``target`` (daytona),
+            ``username`` (kaggle), ``token`` / ``run_url`` (datalayer),
+            ``docker_client`` (docker).
 
     Returns:
         A :class:`SandboxManager` for the variant.

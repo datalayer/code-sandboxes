@@ -69,6 +69,7 @@ class SandboxVariant(str, Enum):
     DOCKER = "docker"
     JUPYTER = "jupyter-server"
     DATALAYER = "datalayer"
+    DAYTONA = "daytona"
     GOOGLE_COLAB = "google_colab"
     KAGGLE = "kaggle"
     MONTY = "monty"

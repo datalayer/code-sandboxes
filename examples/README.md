@@ -24,6 +24,7 @@ Supported sandbox variants:
 - `google-colab`
 - `kaggle`
 - `modal`
+- `daytona`
 - `datalayer`
 
 Run one-shot examples from `examples/exec/`:
@@ -37,6 +38,7 @@ python monty_sandbox_example.py
 python google_colab_sandbox_example.py
 python kaggle_sandbox_example.py
 python modal_sandbox_example.py
+python daytona_sandbox_example.py
 python datalayer_sandbox_example.py
 ```
 
@@ -51,6 +53,7 @@ make monty
 make google-colab
 make kaggle
 make modal
+make daytona
 make datalayer
 ```
 
@@ -65,6 +68,7 @@ make monty
 make google-colab
 make kaggle
 make modal
+make daytona
 make datalayer
 ```
 
@@ -75,4 +79,6 @@ Notes by variant:
 - `google-colab`: requires `RUNTIME_URL`, `RUNTIME_ID`, and `RUNTIME_PROXY_TOKEN`.
 - `kaggle`: requires `RUNTIME_CHANNELS_URL`, or `RUNTIME_URL` and `RUNTIME_ID`.
 - `modal`: requires `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or `~/.modal.toml`.
+- `daytona`: requires `code-sandboxes[daytona]` and `DAYTONA_API_KEY` (or
+  `DAYTONA_JWT_TOKEN` with `DAYTONA_ORGANIZATION_ID`).
 - `datalayer`: requires Datalayer runtime credentials/config.

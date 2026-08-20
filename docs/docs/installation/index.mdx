@@ -33,6 +33,9 @@ pip install code-sandboxes[monty]
 # With Modal variant support
 pip install code-sandboxes[modal]
 
+# With Daytona variant support
+pip install code-sandboxes[daytona]
+
 # All features
 pip install code-sandboxes[all]
 ```
@@ -48,6 +51,8 @@ pip install code-sandboxes[all]
 - For Monty variant: `code-sandboxes[monty]` (no credentials required)
 - For Modal variant: `code-sandboxes[modal]` and Modal credentials
   (`modal token new` or `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`)
+- For Daytona variant: `code-sandboxes[daytona]` and a Daytona API key
+  (`DAYTONA_API_KEY`, from app.daytona.io)
 
 ## Configuration
 
@@ -59,6 +64,9 @@ pip install code-sandboxes[all]
 | `DATALAYER_RUN_URL` | Custom Datalayer service URL (optional) |
 | `MODAL_TOKEN_ID` | Modal token id (Modal variant) |
 | `MODAL_TOKEN_SECRET` | Modal token secret (Modal variant) |
+| `DAYTONA_API_KEY` | Daytona API key (Daytona variant) |
+| `DAYTONA_API_URL` | Daytona API URL (optional, defaults to app.daytona.io) |
+| `DAYTONA_TARGET` | Daytona region (optional) |
 
 ### Programmatic Configuration
 

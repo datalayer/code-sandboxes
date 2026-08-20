@@ -23,6 +23,7 @@ from code_sandboxes.models import SandboxInfo, SandboxStatus
 def test_every_variant_has_a_manager():
     assert manageable_variants() == [
         "datalayer",
+        "daytona",
         "docker",
         "eval",
         "google_colab",

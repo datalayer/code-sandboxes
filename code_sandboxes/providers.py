@@ -211,6 +211,32 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
         list_environments=_environments_of(SandboxVariant.MODAL),
     ),
     SandboxProvider(
+        variant=SandboxVariant.DAYTONA,
+        title="Daytona",
+        description=(
+            "Sandboxes on Daytona, with a stateful Python interpreter and an "
+            "optional GPU."
+        ),
+        extra="daytona",
+        requirements=(
+            ProviderRequirement(
+                env_vars=("DAYTONA_API_KEY",),
+                hint=(
+                    "Create an API key at app.daytona.io and set "
+                    "DAYTONA_API_KEY."
+                ),
+            ),
+            ProviderRequirement(
+                env_vars=("DAYTONA_JWT_TOKEN", "DAYTONA_ORGANIZATION_ID"),
+                hint=(
+                    "Set DAYTONA_JWT_TOKEN with the DAYTONA_ORGANIZATION_ID it "
+                    "belongs to."
+                ),
+            ),
+        ),
+        list_environments=_environments_of(SandboxVariant.DAYTONA),
+    ),
+    SandboxProvider(
         variant=SandboxVariant.DOCKER,
         title="Docker",
         description="Containers on the Docker daemon of this machine.",

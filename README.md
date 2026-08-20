@@ -21,6 +21,7 @@ Canonical variant names:
 - `google_colab`
 - `jupyter`
 - `kaggle`
+- `daytona`
 - `modal`
 - `monty`
 

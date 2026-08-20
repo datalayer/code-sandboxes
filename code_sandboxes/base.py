@@ -324,6 +324,10 @@ class Sandbox(ABC):
             from .modal_sandbox import ModalSandbox
 
             sandbox = ModalSandbox(config=config, **kwargs)
+        elif variant_value == "daytona":
+            from .daytona_sandbox import DaytonaSandbox
+
+            sandbox = DaytonaSandbox(config=config, **kwargs)
         else:
             raise ValueError(
                 f"Unknown sandbox variant: {variant}. "
@@ -396,6 +400,10 @@ class Sandbox(ABC):
             from .modal_sandbox import ModalSandbox
 
             return ModalSandbox.list_environments()
+        if variant_value == "daytona":
+            from .daytona_sandbox import DaytonaSandbox
+
+            return DaytonaSandbox.list_environments()
         if variant_value == "kaggle":
             from .kaggle_sandbox import KaggleSandbox
 
@@ -410,8 +418,8 @@ class Sandbox(ABC):
             return DatalayerSandbox.list_environments(**kwargs)
         raise ValueError(
             f"Unknown sandbox variant: {variant}. "
-            "Supported variants: eval, docker, jupyter-server, monty, modal, "
-            "kaggle, google_colab, datalayer"
+            "Supported variants: "
+            + ", ".join(sorted(v.value for v in SandboxVariant))
         )
 
     @classmethod

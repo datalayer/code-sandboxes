@@ -1,0 +1,156 @@
+---
+sidebar_position: 9
+title: Daytona
+---
+
+# Daytona
+
+Runs code in a [Daytona](https://www.daytona.io/docs/) sandbox — an isolated
+cloud sandbox that starts in well under a second.
+
+State **persists** between calls. The variant drives the sandbox's code
+interpreter (`sandbox.code_interpreter`), which holds one Python namespace per
+context, rather than `process.code_run`, which is a fresh process per snippet:
+
+```python
+sandbox.run_code("x = 40")
+sandbox.run_code("x + 2").text  # "42"
+```
+
+- **Requirements:** `code-sandboxes[daytona]` (installs `daytona`).
+- **Parameters:** `api_key`, `api_url`, `target`, `jwt_token`,
+  `organization_id`, `snapshot`, `image`, `python_version`, `delete_on_stop`.
+
+## How To Obtain Daytona Credentials
+
+1. Sign in at [app.daytona.io](https://app.daytona.io).
+2. Create an API key and export it:
+   ```bash
+   export DAYTONA_API_KEY="dtn_..."
+   ```
+3. Optionally point at another deployment or region:
+   ```bash
+   export DAYTONA_API_URL="https://app.daytona.io/api"   # the default
+   export DAYTONA_TARGET="eu"                            # your default region otherwise
+   ```
+
+JWT authentication works too, and then the organization has to be named
+alongside it: `DAYTONA_JWT_TOKEN` with `DAYTONA_ORGANIZATION_ID`.
+
+Every one of these can be passed to the sandbox instead of exported. What is
+left out is read from the environment by the Daytona SDK, so passing nothing is
+not the same as passing `None`:
+
+```python
+Sandbox.create(variant="daytona", api_key="dtn_...", target="eu")
+```
+
+## Usage
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="daytona") as sandbox:
+    result = sandbox.run_code("import numpy as np; np.arange(5).sum()")
+    print(result.text)  # "10"
+```
+
+### Contexts
+
+The default namespace is shared by every call. `create_context()` asks Daytona
+for one it keeps apart, so two pieces of work can run in the same sandbox
+without seeing each other's variables:
+
+```python
+with Sandbox.create(variant="daytona") as sandbox:
+    other = sandbox.create_context()
+
+    sandbox.run_code("secret = 1")
+    sandbox.run_code("secret", context=other).code_error.name  # "NameError"
+```
+
+### GPUs
+
+Daytona's own flavours — `H100`, `H200`, `RTX-PRO-6000`, `RTX-4090`,
+`RTX-5090`. A name Daytona does not have is refused before any sandbox is
+created, naming the ones it does:
+
+```python
+Sandbox.create(variant="daytona", gpu="H100")
+```
+
+A GPU — like any request for `cpu` or `memory` — is a machine specification,
+and Daytona accepts one only when the sandbox is built from an **image**. So
+asking for resources builds from `Image.debian_slim()` instead of starting from
+the default snapshot, and takes longer to come up. Pass `image=` to choose that
+image yourself, or `snapshot=` to start from a snapshot of your organization
+when you need no specification.
+
+### Network policy
+
+The policy of the configuration becomes Daytona's own network settings:
+
+```python
+# No outbound network at all.
+Sandbox.create(variant="daytona", network_policy="none")
+
+# Only these domains.
+Sandbox.create(
+    variant="daytona",
+    network_policy="allowlist",
+    allowed_hosts=["pypi.org", "files.pythonhosted.org"],
+)
+```
+
+### Lifecycle
+
+Leaving the `with` block **deletes** the sandbox. Daytona sandboxes otherwise
+outlive the program that made them, and one nobody deletes goes on costing
+storage. Pass `delete_on_stop=False` to stop it instead, leaving it in the
+organization to be started again:
+
+```python
+with Sandbox.create(variant="daytona", delete_on_stop=False) as sandbox:
+    sandbox.run_code("open('/tmp/work', 'w').write('kept')")
+```
+
+`code-sandboxes list -v daytona` shows what is there; see the
+[management guide](/cli/management).
+
+### Names and tags
+
+A Daytona name is an address — `daytona.get(name)` — and has to be unique
+within an organization, while the names this package generates are meant to be
+readable and may repeat. So the name and any tags travel as **labels**, next to
+`created-by=code-sandboxes`, which is what tells the sandboxes this package
+made from the rest of the organization's:
+
+```python
+Sandbox.create(variant="daytona", name="nightly-report", tags={"team": "ai"})
+```
+
+## What Is Not Reported
+
+The interpreter answers with stdout, stderr, and the error when the code
+raised. There is no execute_result on the wire, so:
+
+- The value of a trailing expression is captured for you — it is evaluated,
+  bound, and its `repr` carried back on a marked line of stdout that never
+  reaches your logs. That is what makes `result.text` work above.
+- Rich display data — a figure, an HTML repr, a PNG — has no channel at all and
+  is **not** returned. `result.results` only ever holds the text value.
+- There is no interrupt: `sandbox.interrupt()` answers `False`, and a runaway
+  execution is stopped by its timeout.
+
+Variables cross as JSON (`get_variable`, `set_variable`, and everything built
+on them such as `sandbox.commands.run`), so a value that cannot be encoded
+comes back as its `repr` rather than as the object itself, and one that cannot
+be *sent* is refused with a reason.
+
+Binary files go straight to Daytona's filesystem API rather than through a
+program that decodes them:
+
+```python
+sandbox.files.write_bytes("/tmp/data.parquet", payload)
+sandbox.files.read_bytes("/tmp/data.parquet")
+```

@@ -30,6 +30,7 @@ _SUPPORTED_REPL_VARIANTS = {
     "google-colab",
     "kaggle",
     "modal",
+    "daytona",
     "datalayer",
 }
 
@@ -134,7 +135,7 @@ def _resolve_variant_kwargs(
         if run_url:
             kwargs["run_url"] = run_url
 
-    if variant in {"modal", "datalayer", "kaggle"} and gpu:
+    if variant in {"modal", "daytona", "datalayer", "kaggle"} and gpu:
         kwargs["gpu"] = gpu
 
     return kwargs
@@ -218,7 +219,7 @@ def repl(
         "-v",
         help=(
             "Sandbox variant (jupyter, docker, eval, monty, "
-            "google_colab/google-colab, kaggle, modal, datalayer)."
+            "google_colab/google-colab, kaggle, modal, daytona, datalayer)."
         ),
     ),
     timeout: float = typer.Option(60.0, help="Default code execution timeout (seconds)."),
@@ -237,6 +238,7 @@ def repl(
         help=(
             "GPU flavor / accelerator for supported variants "
             "(modal/datalayer examples: T4, A10G, A100, H100; "
+            "daytona examples: H100, H200, RTX-4090; "
             "kaggle examples: NvidiaTeslaT4, NvidiaTeslaP100, or aliases T4/P100)."
         ),
     ),

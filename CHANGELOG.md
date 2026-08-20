@@ -8,6 +8,17 @@
 
 ## Unreleased
 
+- Added the `daytona` sandbox variant (`DaytonaSandbox`), running code in a
+  [Daytona](https://www.daytona.io/docs/) cloud sandbox. It drives the
+  sandbox's code interpreter rather than `process.code_run`, so state persists
+  between calls and `create_context()` gives a namespace Daytona keeps apart.
+  The value of a trailing expression is captured and returned as
+  `ExecutionResult.text`, which the interpreter itself does not report. GPUs,
+  cpu/memory and the network policy map onto Daytona's own settings; binary
+  files go through its filesystem API. Authenticate with `DAYTONA_API_KEY` (or
+  `DAYTONA_JWT_TOKEN` with `DAYTONA_ORGANIZATION_ID`) and install with
+  `pip install code-sandboxes[daytona]`. `get_manager("daytona")` answers the
+  CRUD verbs over an organization's sandboxes.
 - Added the `kaggle` sandbox variant (`KaggleSandbox`) to connect to a Kaggle
   interactive notebook runtime via `jupyter-kernel-client`'s
   `KaggleKernelClient`. Authenticate with a Kaggle API token (`token` argument or
