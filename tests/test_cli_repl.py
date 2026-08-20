@@ -9,13 +9,16 @@ from __future__ import annotations
 from typer.testing import CliRunner
 
 from code_sandboxes import cli as sandbox_cli
-from code_sandboxes.models import ExecutionResult, Logs, Result
+from code_sandboxes.models import ExecutionResult, Logs, Result, SandboxInfo
 
 
 class _FakeSandbox:
     def __init__(self):
         self.sandbox_id = "sandbox-123"
         self.exited = False
+        # The prompt names the sandbox it is about to run a line in, so a
+        # stand-in for one has to answer the same question a real one does.
+        self.info = SandboxInfo(id=self.sandbox_id, variant="fake", name="fake-sandbox")
 
     def __enter__(self):
         return self

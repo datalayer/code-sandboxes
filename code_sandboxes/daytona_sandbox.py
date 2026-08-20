@@ -402,12 +402,13 @@ class DaytonaSandbox(Sandbox):
 
     def _resources(self, daytona: Any) -> Any | None:
         """The machine asked for, or nothing when the defaults will do."""
-        cpu = int(self.config.cpu_limit) if self.config.cpu_limit else None
+        # Whole units here, and never zero: a fraction of a core or of a
+        # GiB is still a request, and rounding it away asks for a machine
+        # with none of that resource rather than for one with the default.
+        cpu = max(1, math.ceil(self.config.cpu_limit)) if self.config.cpu_limit else None
         memory = None
         if self.config.memory_limit:
-            # Bytes here, whole GiB there — and never zero, which would be a
-            # sandbox with no memory rather than one with the default.
-            memory = max(1, round(self.config.memory_limit / 1024**3))
+            memory = max(1, math.ceil(self.config.memory_limit / 1024**3))
         gpu_type = _gpu_type(self.config.gpu, daytona) if self.config.gpu else None
         if cpu is None and memory is None and gpu_type is None:
             return None
@@ -617,4 +618,11 @@ class DaytonaSandbox(Sandbox):
     def _read_file(self, path: str) -> bytes:
         if not self._started or self._sandbox is None:
             raise SandboxNotStartedError()
-        return self._sandbox.fs.download_file(path) or b""
+        content = self._sandbox.fs.download_file(path)
+        if content is None:
+            # A file that is not there raises out of the SDK, so this is the
+            # other case: an answer carrying neither content nor error.
+            # Reading it as an empty file would make a failed read look like
+            # a successful one.
+            raise FileNotFoundError(f"Could not read file: {path}")
+        return content

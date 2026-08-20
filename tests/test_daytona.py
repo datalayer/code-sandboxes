@@ -90,7 +90,11 @@ class _FakeFilesystem:
         self.files: dict[str, bytes] = {}
 
     def upload_file(self, src, dst, timeout=1800):
-        self.files[dst] = src if isinstance(src, bytes) else open(src, "rb").read()
+        if isinstance(src, bytes):
+            self.files[dst] = src
+            return
+        with open(src, "rb") as handle:
+            self.files[dst] = handle.read()
 
     def download_file(self, *args):
         return self.files.get(args[0])

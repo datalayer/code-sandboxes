@@ -2,11 +2,15 @@
 #
 # BSD 3-Clause License
 
-"""Typer CLI for code sandboxes: REPL sessions and CRUD management."""
+"""Typer CLI for code sandboxes: running code, and CRUD management."""
 
 from __future__ import annotations
 
+import contextlib
 import os
+import sys
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -14,8 +18,8 @@ from rich.console import Console
 from rich.table import Table
 
 from . import Sandbox
+from .console import run_repl, show_and_run, show_result
 from .manage import SandboxManagementError, get_manager, manageable_variants
-from .models import Result
 
 app = typer.Typer(help="Code sandboxes: run a REPL, list, create and delete sandboxes.")
 
@@ -34,41 +38,12 @@ _SUPPORTED_REPL_VARIANTS = {
     "datalayer",
 }
 
-_EXIT_COMMANDS = {":exit", ":quit", "exit", "quit"}
-
 
 @app.callback(invoke_without_command=True)
 def _root(ctx: typer.Context) -> None:
     """Code sandboxes CLI."""
     if ctx.invoked_subcommand is None:
         _run_repl(variant="jupyter-server")
-
-
-def _print_result(result: Any) -> None:
-    if not getattr(result, "execution_ok", True):
-        msg = getattr(result, "execution_error", None) or "Execution failed"
-        typer.secho(msg, fg=typer.colors.RED)
-        return
-
-    for line in getattr(result, "stdout", "").splitlines():
-        typer.echo(line)
-
-    for line in getattr(result, "stderr", "").splitlines():
-        typer.secho(line, fg=typer.colors.YELLOW)
-
-    code_error = getattr(result, "code_error", None)
-    if code_error is not None:
-        typer.secho(f"{code_error.name}: {code_error.value}", fg=typer.colors.RED)
-
-    # Prefer the main result and avoid duplicating stdout.
-    text = None
-    results = getattr(result, "results", [])
-    for item in results:
-        if isinstance(item, Result) and item.is_main_result:
-            text = item.text
-            break
-    if text:
-        typer.echo(text)
 
 
 def _resolve_variant(variant: str | None) -> str:
@@ -141,20 +116,77 @@ def _resolve_variant_kwargs(
     return kwargs
 
 
-def _run_repl(
-    variant: str | None = None,
-    timeout: float = 60.0,
-    environment: str | None = None,
+#: The options both ways of running code take. Declared once: `exec` and
+#: `repl` open the same sandbox and differ only in what they then do with it,
+#: and two copies of nine options drift.
+_RUN_VARIANT_OPTION = typer.Option(
+    None,
+    "--variant",
+    "-v",
+    help=(
+        "Sandbox variant (datalayer, daytona, docker, eval, "
+        "google_colab/google-colab, jupyter-server, kaggle, modal, monty)."
+    ),
+)
+_RUN_TIMEOUT_OPTION = typer.Option(60.0, help="Code execution timeout (seconds).")
+_RUN_ENVIRONMENT_OPTION = typer.Option(
+    None, help="Sandbox environment (used by variants such as datalayer)."
+)
+_RUN_SERVER_URL_OPTION = typer.Option(None, help="Colab/Kaggle runtime URL.")
+_RUN_KERNEL_ID_OPTION = typer.Option(None, help="Colab/Kaggle kernel ID.")
+_RUN_PROXY_TOKEN_OPTION = typer.Option(None, help="Colab runtime proxy token.")
+_RUN_TOKEN_OPTION = typer.Option(None, help="Datalayer/Kaggle API token override.")
+_RUN_RUN_URL_OPTION = typer.Option(None, help="Datalayer run URL override.")
+_EXEC_CODE_ARGUMENT = typer.Argument(
+    None,
+    help="The code to run. Read from stdin when neither this nor --file is given.",
+)
+_EXEC_FILE_OPTION = typer.Option(None, "--file", "-f", help="Read the code from a file instead.")
+_EXEC_QUIET_OPTION = typer.Option(
+    False,
+    "--quiet",
+    "-q",
+    help="Print only what the code produced — no banner, no echo of the code.",
+)
+_RUN_GPU_OPTION = typer.Option(
+    None,
+    "--gpu",
+    help=(
+        "GPU flavor / accelerator for supported variants "
+        "(modal/datalayer examples: T4, A10G, A100, H100; "
+        "daytona examples: H100, H200, RTX-4090; "
+        "kaggle examples: NvidiaTeslaT4, NvidiaTeslaP100, or aliases T4/P100)."
+    ),
+)
+
+
+@contextlib.contextmanager
+def _started_sandbox(
+    variant: str | None,
+    timeout: float,
+    environment: str | None,
+    *,
+    announce: bool = True,
     server_url: str | None = None,
     kernel_id: str | None = None,
     proxy_token: str | None = None,
     token: str | None = None,
     run_url: str | None = None,
     gpu: str | None = None,
-) -> None:
-    selected_variant = _resolve_variant(variant)
+) -> Iterator[Sandbox]:
+    """A started sandbox of the variant asked for, gone again on the way out.
+
+    Both ways of running code want the same thing — resolve the variant,
+    gather what that variant needs to connect, start it, and be certain it is
+    terminated afterwards. They differ only in what happens in between.
+
+    A failure to START is reported here, because there is nothing to report
+    it to yet. A failure inside the block is the caller's: it travels, so
+    `exec` can end with the status its code earned.
+    """
+    selected = _resolve_variant(variant)
     sandbox_kwargs = _resolve_variant_kwargs(
-        selected_variant,
+        selected,
         server_url=server_url,
         kernel_id=kernel_id,
         proxy_token=proxy_token,
@@ -162,90 +194,48 @@ def _run_repl(
         run_url=run_url,
         gpu=gpu,
     )
-
-    typer.secho(f"Starting sandbox variant: {selected_variant}", fg=typer.colors.CYAN)
-
+    if announce:
+        console.print(f"Starting sandbox variant: {selected}", style="cyan")
+    started = False
     try:
         with Sandbox.create(
-            variant=selected_variant,
+            variant=selected,
             timeout=timeout,
             environment=environment,
             **sandbox_kwargs,
         ) as sandbox:
-            sandbox_id = sandbox.sandbox_id or "<unknown>"
-            typer.secho(
-                f"Sandbox started (id={sandbox_id}). Type code and press Enter.",
-                fg=typer.colors.GREEN,
-            )
-            typer.echo("Use :exit or Ctrl+D to terminate.")
-
-            while True:
-                try:
-                    code = input(">>> ")
-                except EOFError:
-                    typer.echo("")
-                    break
-                except KeyboardInterrupt:
-                    typer.echo("\n(Interrupted. Type :exit to quit.)")
-                    continue
-
-                if not code.strip():
-                    continue
-                if code.strip() in _EXIT_COMMANDS:
-                    break
-
-                try:
-                    result = sandbox.run_code(code)
-                except KeyboardInterrupt:
-                    typer.echo("\n(Execution interrupted.)")
-                    continue
-                except Exception as exc:
-                    typer.secho(f"Execution failed: {exc}", fg=typer.colors.RED)
-                    continue
-
-                _print_result(result)
+            started = True
+            if announce:
+                identifier = sandbox.sandbox_id or "<unknown>"
+                console.print(f"Sandbox started (id={identifier}).", style="green")
+            yield sandbox
     except Exception as exc:
-        typer.secho(f"Failed to start REPL: {exc}", fg=typer.colors.RED)
+        if started:
+            # Not ours to report: whatever the block raised travels, so that
+            # `exec` can end with the status its own code earned.
+            raise
+        console.print(f"Failed to start the {selected} sandbox: {exc}", style="red")
         raise typer.Exit(code=1) from None
-
-    typer.secho("Sandbox terminated.", fg=typer.colors.GREEN)
+    if announce:
+        console.print("Sandbox terminated.", style="green")
 
 
 @app.command()
 def repl(
-    variant: str | None = typer.Option(
-        None,
-        "--variant",
-        "-v",
-        help=(
-            "Sandbox variant (jupyter, docker, eval, monty, "
-            "google_colab/google-colab, kaggle, modal, daytona, datalayer)."
-        ),
-    ),
-    timeout: float = typer.Option(60.0, help="Default code execution timeout (seconds)."),
-    environment: str | None = typer.Option(
-        None,
-        help="Sandbox environment (used by variants such as datalayer).",
-    ),
-    server_url: str | None = typer.Option(None, help="Colab runtime URL."),
-    kernel_id: str | None = typer.Option(None, help="Colab kernel ID."),
-    proxy_token: str | None = typer.Option(None, help="Colab runtime proxy token."),
-    token: str | None = typer.Option(None, help="Datalayer API token override."),
-    run_url: str | None = typer.Option(None, help="Datalayer run URL override."),
-    gpu: str | None = typer.Option(
-        None,
-        "--gpu",
-        help=(
-            "GPU flavor / accelerator for supported variants "
-            "(modal/datalayer examples: T4, A10G, A100, H100; "
-            "daytona examples: H100, H200, RTX-4090; "
-            "kaggle examples: NvidiaTeslaT4, NvidiaTeslaP100, or aliases T4/P100)."
-        ),
-    ),
+    variant: str | None = _RUN_VARIANT_OPTION,
+    timeout: float = _RUN_TIMEOUT_OPTION,
+    environment: str | None = _RUN_ENVIRONMENT_OPTION,
+    server_url: str | None = _RUN_SERVER_URL_OPTION,
+    kernel_id: str | None = _RUN_KERNEL_ID_OPTION,
+    proxy_token: str | None = _RUN_PROXY_TOKEN_OPTION,
+    token: str | None = _RUN_TOKEN_OPTION,
+    run_url: str | None = _RUN_RUN_URL_OPTION,
+    gpu: str | None = _RUN_GPU_OPTION,
 ) -> None:
-    """Launch an interactive REPL against the selected sandbox variant.
+    """Open an interactive prompt on a sandbox of the selected variant.
 
-    The sandbox is always terminated when this command exits.
+    State is kept between lines. The sandbox is always terminated when this
+    command exits.
     """
     _run_repl(
         variant=variant,
@@ -258,6 +248,91 @@ def repl(
         run_url=run_url,
         gpu=gpu,
     )
+
+
+def _run_repl(
+    variant: str | None = None,
+    timeout: float = 60.0,
+    environment: str | None = None,
+    server_url: str | None = None,
+    kernel_id: str | None = None,
+    proxy_token: str | None = None,
+    token: str | None = None,
+    run_url: str | None = None,
+    gpu: str | None = None,
+) -> None:
+    with _started_sandbox(
+        variant,
+        timeout,
+        environment,
+        server_url=server_url,
+        kernel_id=kernel_id,
+        proxy_token=proxy_token,
+        token=token,
+        run_url=run_url,
+        gpu=gpu,
+    ) as sandbox:
+        run_repl(sandbox, console=console)
+
+
+def _code_to_run(code: str | None, file: Path | None) -> str:
+    """The snippet to run, from the argument, a file, or what was piped in."""
+    if file is not None:
+        if code is not None:
+            raise typer.BadParameter("Give the code or --file, not both.")
+        return file.read_text(encoding="utf-8")
+    if code is not None:
+        return code
+    if sys.stdin.isatty():
+        raise typer.BadParameter(
+            "No code to run: pass it as an argument, with --file, or on stdin."
+        )
+    return sys.stdin.read()
+
+
+@app.command("exec")
+def exec_code(
+    code: str | None = _EXEC_CODE_ARGUMENT,
+    file: Path | None = _EXEC_FILE_OPTION,
+    quiet: bool = _EXEC_QUIET_OPTION,
+    variant: str | None = _RUN_VARIANT_OPTION,
+    timeout: float = _RUN_TIMEOUT_OPTION,
+    environment: str | None = _RUN_ENVIRONMENT_OPTION,
+    server_url: str | None = _RUN_SERVER_URL_OPTION,
+    kernel_id: str | None = _RUN_KERNEL_ID_OPTION,
+    proxy_token: str | None = _RUN_PROXY_TOKEN_OPTION,
+    token: str | None = _RUN_TOKEN_OPTION,
+    run_url: str | None = _RUN_RUN_URL_OPTION,
+    gpu: str | None = _RUN_GPU_OPTION,
+) -> None:
+    """Run one snippet in a fresh sandbox and print what it produced.
+
+    The sandbox is created, the code is run, and the sandbox is terminated.
+    The exit status is the code's own — 0 when it ran cleanly, 1 when it
+    raised or the sandbox could not run it — so this composes in a shell:
+
+        code-sandboxes exec -v eval -q 'print(40 + 2)' | wc -l
+    """
+    snippet = _code_to_run(code, file)
+    with _started_sandbox(
+        variant,
+        timeout,
+        environment,
+        announce=not quiet,
+        server_url=server_url,
+        kernel_id=kernel_id,
+        proxy_token=proxy_token,
+        token=token,
+        run_url=run_url,
+        gpu=gpu,
+    ) as sandbox:
+        if quiet:
+            result = sandbox.run_code(snippet)
+            show_result(result, console=console, labelled=False)
+        else:
+            result = show_and_run(sandbox, snippet, console=console)
+    if not result.success:
+        raise typer.Exit(code=1)
 
 
 def _manager_kwargs(

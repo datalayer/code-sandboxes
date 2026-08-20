@@ -90,7 +90,7 @@ pip install code-sandboxes[kaggle]
 export KAGGLE_API_KEY="<your-kaggle-api-key>"
 
 # Launch the REPL
-sandbox repl --variant kaggle
+code-sandboxes repl --variant kaggle
 ```
 
 For batch execution, configure Kaggle credentials and create the sandbox

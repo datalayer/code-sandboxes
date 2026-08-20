@@ -8,6 +8,18 @@
 
 ## Unreleased
 
+- Added `code-sandboxes exec`, which runs one snippet in a fresh sandbox of any
+  variant and exits with the status the code earned — `0` when it ran cleanly,
+  `1` when it raised — so it composes in a shell. The code comes from an
+  argument, from `--file`, or from standard input; `--quiet` prints only what
+  the code produced. `exec` and `repl` take the same options.
+- Moved the machinery for showing a run — `show_code`, `show_result`,
+  `show_and_run`, `run_repl`, `repl_prompt` — into `code_sandboxes.console`,
+  exported from the package. It existed three times over: in the CLI, in the
+  REPL examples and in the exec examples, disagreeing about whether the value
+  of a trailing expression is shown, whether stderr is told apart from stdout,
+  and which words end a session. The examples now import it like any other
+  consumer, and `examples/*/[exec|repl]_common.py` are gone.
 - Added the `daytona` sandbox variant (`DaytonaSandbox`), running code in a
   [Daytona](https://www.daytona.io/docs/) cloud sandbox. It drives the
   sandbox's code interpreter rather than `process.code_run`, so state persists

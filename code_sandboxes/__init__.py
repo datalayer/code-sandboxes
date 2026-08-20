@@ -61,6 +61,14 @@ Style usage:
 from .base import Sandbox
 from .client import CodeExecutionOutcome, CodeSandboxClient, execution_result_to_reply
 from .commands import CommandResult, ProcessHandle, SandboxCommands
+from .console import (
+    EXIT_COMMANDS,
+    repl_prompt,
+    run_repl,
+    show_and_run,
+    show_code,
+    show_result,
+)
 from .datalayer_sandbox import DatalayerSandbox
 from .daytona_sandbox import DaytonaSandbox
 from .docker_sandbox import DockerSandbox
@@ -135,6 +143,7 @@ from .providers import (
 #: Everything this package exports, in one sorted list — the groups it
 #: used to be split into stopped matching what they sat above.
 __all__ = [
+    "EXIT_COMMANDS",
     "KAGGLE_API_TOKEN_ENV",
     "PROVIDERS",
     "CodeError",
@@ -203,4 +212,9 @@ __all__ = [
     "manageable_variants",
     "parse_google_colab_channels_url",
     "parse_kaggle_channels_url",
+    "repl_prompt",
+    "run_repl",
+    "show_and_run",
+    "show_code",
+    "show_result",
 ]

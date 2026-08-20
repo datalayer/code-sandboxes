@@ -10,10 +10,16 @@
 
 # { } 📦 Code Sandboxes Examples
 
-This folder now contains two example sets:
+This folder contains two example sets:
 
 - `exec/`: one-shot execution examples (run a predefined script and exit).
 - `repl/`: interactive REPL examples (run ad-hoc code in a loop).
+
+Neither set carries machinery of its own. Both import it from the package —
+`show_and_run` prints a snippet, runs it and prints what came back;
+`run_repl` holds a prompt open — which is the same code behind
+`code-sandboxes exec` and `code-sandboxes repl`. That is the point of an
+example here: it shows how to use a sandbox, not how to print things.
 
 Supported sandbox variants:
 

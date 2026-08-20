@@ -7,9 +7,7 @@ import argparse
 import os
 from pathlib import Path
 
-from repl_common import run_repl
-
-from code_sandboxes import Sandbox
+from code_sandboxes import Sandbox, run_repl
 
 
 def _has_modal_auth() -> bool:

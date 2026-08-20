@@ -160,5 +160,7 @@ class TestTheSandboxesExposeTheClient:
         _binds(KaggleLiveSession.stop, None, shutdown_kernel=False)
         _binds(KaggleLiveSession.get_variable, None, "x")
 
-        session = KaggleLiveSession(executor=object())
+        # Its own `api`, so the shapes can be checked without the `kaggle`
+        # distribution: the constructor imports it only to default this.
+        session = KaggleLiveSession(executor=object(), api=object())
         assert isinstance(session.id, str) and session.id

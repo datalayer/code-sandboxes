@@ -17,9 +17,7 @@ line that is an expression answers with its value.
 import argparse
 import os
 
-from repl_common import run_repl
-
-from code_sandboxes import Sandbox
+from code_sandboxes import Sandbox, run_repl
 
 
 def _has_daytona_auth() -> bool:

@@ -28,9 +28,7 @@ Run with:
 import argparse
 import os
 
-from exec_common import show_and_run, show_code
-
-from code_sandboxes import CodeError, Sandbox
+from code_sandboxes import CodeError, Sandbox, show_and_run, show_code
 
 GPU_PROBE = """
 import shutil
