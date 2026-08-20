@@ -13,7 +13,7 @@ sandboxes (in-process execution):
 
 Remote sandboxes (out-of-process execution via Jupyter kernel protocol):
     - DockerSandbox: Docker container based, good isolation
-    - JupyterSandbox: Jupyter Server with persistent kernel state
+    - JupyterServerSandbox: Jupyter Server with persistent kernel state
     - DatalayerSandbox: Cloud-based Datalayer runtime, full isolation
     - GoogleColabSandbox: Google Colab runtime, connects to an assigned kernel
     - KaggleSandbox: Kaggle runtime, connects to an interactive notebook kernel
@@ -91,7 +91,7 @@ from .google_colab import (
 )
 from .google_colab_sandbox import GoogleColabSandbox
 from .interfaces import ISandboxClient
-from .jupyter_sandbox import JupyterSandbox
+from .jupyter_server_sandbox import JupyterServerSandbox
 from .kaggle import KAGGLE_API_TOKEN_ENV, KaggleKernelClient, parse_kaggle_channels_url
 from .kaggle_execute import KaggleExecutionResult, KaggleKernelExecutor
 from .kaggle_sandbox import KaggleSandbox
@@ -158,7 +158,7 @@ __all__ = [
     "GoogleColabKernelClient",
     "GoogleColabSandbox",
     "ISandboxClient",
-    "JupyterSandbox",
+    "JupyterServerSandbox",
     "KaggleExecutionResult",
     "KaggleKernelClient",
     "KaggleKernelExecutor",

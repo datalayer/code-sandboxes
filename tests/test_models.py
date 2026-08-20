@@ -43,7 +43,7 @@ class TestModels:
         """Test SandboxVariant enum values."""
         assert SandboxVariantEnum.EVAL.value == "eval"
         assert SandboxVariantEnum.DOCKER.value == "docker"
-        assert SandboxVariantEnum.JUPYTER.value == "jupyter"
+        assert SandboxVariantEnum.JUPYTER.value == "jupyter-server"
         assert SandboxVariantEnum.DATALAYER.value == "datalayer"
         assert SandboxVariantEnum.GOOGLE_COLAB.value == "google_colab"
         assert SandboxVariantEnum.KAGGLE.value == "kaggle"

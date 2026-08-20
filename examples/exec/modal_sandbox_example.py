@@ -84,8 +84,7 @@ def main() -> None:
             gpu=gpu,
             pip_packages=["numpy"],
         ) as sandbox:
-            result = show_and_run(sandbox, "import numpy as np; print(int(np.arange(5).sum()))")
-            print("stdout:", result.stdout.strip())
+            show_and_run(sandbox, "import numpy as np; print(int(np.arange(5).sum()))")
 
             if gpu:
                 gpu_result = show_and_run(sandbox, _gpu_probe_code())
@@ -103,12 +102,16 @@ def main() -> None:
                     )
                 print(f"GPU verified: flavor {gpu} is present.")
 
+            # The error path, demonstrated ON PURPOSE: the run must not die,
+            # the failure must come back as a `code_error` on the result. Said
+            # before it happens, or the example's last lines read as a crash.
+            print("-- error handling: the next snippet raises deliberately --")
             error_result = show_and_run(sandbox, "raise RuntimeError('modal failure example')")
-            if error_result.code_error:
-                print(
-                    "code_error:",
-                    f"{error_result.code_error.name}: {error_result.code_error.value}",
+            if error_result.code_error is None:
+                raise RuntimeError(
+                    "The deliberate failure did not surface as a code_error."
                 )
+            print("error captured as expected — modal example completed.")
     except Exception as exc:
         print("modal example failed:", exc)
         raise SystemExit(1)

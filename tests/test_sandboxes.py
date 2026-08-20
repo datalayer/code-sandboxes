@@ -41,7 +41,7 @@ class TestModels:
         """Test SandboxVariant enum values."""
         assert SandboxVariantEnum.EVAL.value == "eval"
         assert SandboxVariantEnum.DOCKER.value == "docker"
-        assert SandboxVariantEnum.JUPYTER.value == "jupyter"
+        assert SandboxVariantEnum.JUPYTER.value == "jupyter-server"
         assert SandboxVariantEnum.DATALAYER.value == "datalayer"
 
     def test_gpu_type_enum(self):
@@ -679,7 +679,7 @@ class TestSandboxFactory:
         sandbox = Sandbox.create(variant=SandboxVariant.JUPYTER)
 
         assert sandbox is not None
-        assert isinstance(sandbox, JupyterSandbox)
+        assert isinstance(sandbox, JupyterServerSandbox)
 
     def test_create_with_config(self):
         """Test creating sandbox with config."""
@@ -715,8 +715,8 @@ class TestSandboxFactory:
 # =============================================================================
 
 
-class TestJupyterSandbox:
-    """Tests for JupyterSandbox."""
+class TestJupyterServerSandbox:
+    """Tests for JupyterServerSandbox."""
 
     def test_local_jupyter_persistence(self, tmp_path: Path):
         """Test persistence across requests in jupyter sandbox."""
@@ -727,7 +727,7 @@ class TestJupyterSandbox:
         except Exception:
             pytest.skip("jupyter_server is not available")
 
-        sandbox = JupyterSandbox(config=SandboxConfig(working_dir=str(tmp_path)))
+        sandbox = JupyterServerSandbox(config=SandboxConfig(working_dir=str(tmp_path)))
         try:
             sandbox.start()
         except Exception as exc:

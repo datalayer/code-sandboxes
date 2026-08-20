@@ -17,6 +17,55 @@ Runs code on Kaggle with two transparent modes:
 - **Batch credentials:** `~/.kaggle/kaggle.json`, `KAGGLE_API_TOKEN`, or
   `KAGGLE_USERNAME` / `KAGGLE_KEY`.
 
+## Batch Sessions
+
+A batch job is a fresh machine, so nothing survives from one `run_code` to the
+next on its own. The sandbox carries state anyway, by **replaying the code**:
+every snippet that ran without error is re-executed ahead of the next one, and
+only the new snippet's output is surfaced. `x = 1` in one call and `print(x)`
+in the following one therefore works — at an honest price: each turn re-runs
+the whole session on a machine where a job already takes about a minute, and
+code with side effects (downloads, writes, randomness) runs again every turn.
+
+Pass `session=False` to `Sandbox.create(variant="kaggle", ...)` to turn the
+replay off. A snippet that fails is not added to the session, so one bad turn
+does not poison the turns after it.
+
+## Live Mode
+
+`Sandbox.create(variant="kaggle", live=True)` goes further: one batch job runs
+an **agent** that starts a real ipykernel and holds it for the whole session.
+The code travels over two private datasets of your account — client-to-kernel
+and kernel-to-client — which is the only rendezvous both ends can reach:
+Kaggle exposes no API for its interactive sessions, and this mode depends on
+no service other than Kaggle itself.
+
+What it costs, stated plainly:
+
+- **Boot**: the agent is a batch job, so it queues and boots like one —
+  minutes, longer for a GPU. After that, a turn costs a dataset round trip:
+  seconds, with true state and no replay.
+- **Quota**: the job runs until you close the session or it sits idle for
+  30 minutes, and that time counts against your Kaggle quota.
+- **Credentials in the artifact**: the agent authenticates against the
+  datasets API with your token, embedded in the (private) kernel source —
+  Kaggle offers no other way to hand credentials to a job started via the
+  API. The mode is opt-in for exactly this reason.
+- **Phone verification required**: the agent needs internet from inside the
+  job to reach the dataset bus, and Kaggle grants kernels internet **only to
+  phone-verified accounts** — the `enable_internet` flag is accepted and then
+  silently ignored for everyone else, and the job dies unable to resolve
+  `api.kaggle.com`. Verify once at
+  [kaggle.com/settings](https://www.kaggle.com/settings), under *Phone
+  verification*. Batch mode is not affected: it needs no network from inside
+  the job.
+
+```python
+with Sandbox.create(variant="kaggle", live=True) as sandbox:
+    sandbox.run_code("x = 1")
+    print(sandbox.run_code("print(x)").stdout)  # 1 — same kernel
+```
+
 ## Sandbox Usage
 
 ```python

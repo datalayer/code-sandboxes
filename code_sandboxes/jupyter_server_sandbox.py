@@ -49,7 +49,7 @@ DEFAULT_STARTUP_TIMEOUT = 30.0
 logger = logging.getLogger(__name__)
 
 
-class JupyterSandbox(Sandbox):
+class JupyterServerSandbox(Sandbox):
     """Jupyter Server sandbox using a persistent kernel.
 
     Pass ``headers`` to send extra HTTP headers on every request to an external
@@ -129,13 +129,13 @@ class JupyterSandbox(Sandbox):
     def list_environments(cls) -> list[SandboxEnvironment]:
         return [
             SandboxEnvironment(
-                name="jupyter",
+                name="jupyter-server",
                 title="Jupyter",
                 language="python",
                 owner="local",
                 visibility="local",
                 burning_rate=0.0,
-                metadata={"variant": "jupyter"},
+                metadata={"variant": "jupyter-server"},
             )
         ]
 
@@ -260,7 +260,7 @@ class JupyterSandbox(Sandbox):
             from jupyter_server.serverapp import ServerApp
         except Exception as exc:
             raise SandboxConfigurationError(
-                "jupyter_server is required for JupyterSandbox. "
+                "jupyter_server is required for JupyterServerSandbox. "
                 "Install it with: pip install code-sandboxes[test]"
             ) from exc
 
@@ -369,7 +369,7 @@ class JupyterSandbox(Sandbox):
             from jupyter_kernel_client import JupyterKernelClient
         except ImportError as exc:
             raise SandboxConfigurationError(
-                "jupyter-kernel-client is required for JupyterSandbox. "
+                "jupyter-kernel-client is required for JupyterServerSandbox. "
                 "Install it with: pip install code-sandboxes[test]"
             ) from exc
 
@@ -407,7 +407,7 @@ class JupyterSandbox(Sandbox):
         self._default_context = self.create_context("default")
         self._info = SandboxInfo(
             id=self._sandbox_id,
-            variant="jupyter",
+            variant="jupyter-server",
             status=SandboxStatus.RUNNING,
             created_at=time.time(),
             name=self.config.name,
@@ -525,7 +525,7 @@ class JupyterSandbox(Sandbox):
             raise SandboxNotStartedError()
 
         if language != "python":
-            raise ValueError(f"JupyterSandbox only supports Python, got: {language}")
+            raise ValueError(f"JupyterServerSandbox only supports Python, got: {language}")
 
         started_at = time.time()
 

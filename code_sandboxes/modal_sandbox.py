@@ -80,6 +80,50 @@ def _resolve_modal_gpu(gpu_flavor: str, modal_module: Any) -> Any:
         return candidate
 
 
+#: The process that holds the session inside the container.
+#:
+#: `sandbox.exec("python", "-c", code)` is a fresh interpreter per snippet, so
+#: `x = 1` in one call and `x` in the next was a NameError: the container
+#: persists, the namespace did not. This driver is started once and fed JSON
+#: lines on stdin — one request, one reply — executing everything in a single
+#: namespace, with stdout/stderr captured per request and the value of a
+#: trailing expression repr'd the way a REPL would.
+_DRIVER_SOURCE = """
+import ast, contextlib, io, json, sys, traceback
+
+namespace = {"__name__": "__main__"}
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    request = json.loads(line)
+    out, err = io.StringIO(), io.StringIO()
+    reply = {"seq": request.get("seq"), "status": "ok"}
+    try:
+        tree = ast.parse(request.get("code", ""), mode="exec")
+        trailing = None
+        if tree.body and isinstance(tree.body[-1], ast.Expr):
+            trailing = ast.Expression(tree.body.pop(-1).value)
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            if tree.body:
+                exec(compile(tree, "<sandbox>", "exec"), namespace)
+            if trailing is not None:
+                value = eval(compile(trailing, "<sandbox>", "eval"), namespace)
+                if value is not None:
+                    reply["result"] = repr(value)
+    except BaseException as error:
+        reply["status"] = "error"
+        reply["error"] = {
+            "name": type(error).__name__,
+            "value": str(error),
+            "traceback": traceback.format_exc(),
+        }
+    reply["stdout"] = out.getvalue()
+    reply["stderr"] = err.getvalue()
+    print(json.dumps(reply), flush=True)
+"""
+
+
 def _modal_exec_timeout_seconds(timeout: float | None, default: float) -> int:
     """Return a Modal-compatible timeout in integer seconds."""
     value = timeout if timeout is not None else default
@@ -184,6 +228,7 @@ class ModalSandbox(Sandbox):
             create_kwargs["secrets"] = secrets
 
         self._sandbox = modal.Sandbox.create(**create_kwargs)
+        self._start_driver()
 
         self._default_context = self.create_context("default")
         self._info = SandboxInfo(
@@ -199,6 +244,80 @@ class ModalSandbox(Sandbox):
             config=self.config,
         )
         self._started = True
+
+    def _start_driver(self) -> None:
+        """Start the session process, and fall back to nothing on failure.
+
+        A driver that cannot come up leaves `self._driver` unset, and
+        `run_code` then executes each snippet in its own process as before —
+        working, merely stateless.
+        """
+        import queue
+        import threading
+
+        try:
+            driver = self._sandbox.exec(self._python_executable, "-u", "-c", _DRIVER_SOURCE)
+        except Exception:
+            logger.warning(
+                "The Modal session driver could not be started; snippets will "
+                "not share state.",
+                exc_info=True,
+            )
+            return
+        replies: queue.Queue = queue.Queue()
+
+        def pump() -> None:
+            try:
+                for line in driver.stdout:
+                    replies.put(line)
+            except Exception:  # noqa: BLE001 — the reader dies with the driver
+                pass
+            replies.put(None)
+
+        # A thread reads the replies: the stream blocks, and a request that
+        # never gets its answer must time out rather than hang run_code.
+        thread = threading.Thread(target=pump, name="modal-driver-stdout", daemon=True)
+        thread.start()
+        self._driver = driver
+        self._driver_replies = replies
+        self._driver_seq = 0
+
+    def _driver_request(self, code: str, timeout: float) -> dict | None:
+        """One request to the session process, or None when it cannot serve."""
+        import json as json_module
+        import queue
+
+        if getattr(self, "_driver", None) is None:
+            return None
+        self._driver_seq += 1
+        try:
+            self._driver.stdin.write(
+                json_module.dumps({"seq": self._driver_seq, "code": code}) + "\n"
+            )
+            self._driver.stdin.drain()
+        except Exception:
+            logger.warning("The Modal session driver went away; restarting stateless.")
+            self._driver = None
+            return None
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"No reply from the Modal session within {timeout:.0f}s.")
+            try:
+                line = self._driver_replies.get(timeout=remaining)
+            except queue.Empty:
+                continue
+            if line is None:
+                # The reader reached EOF: the driver is gone.
+                self._driver = None
+                return None
+            try:
+                reply = json_module.loads(line)
+            except ValueError:
+                continue
+            if reply.get("seq") == self._driver_seq:
+                return reply
 
     def stop(self) -> None:
         if not self._started:
@@ -246,6 +365,59 @@ class ModalSandbox(Sandbox):
         stdout_messages: list[OutputMessage] = []
         stderr_messages: list[OutputMessage] = []
         code_error: CodeError | None = None
+
+        # One process for the session: state persists between snippets, and a
+        # trailing expression answers with its repr, as a REPL would. The
+        # fresh-process path below stays as the fallback when the driver is
+        # not there.
+        reply = None
+        try:
+            reply = self._driver_request(code, timeout or self.config.timeout)
+        except TimeoutError as error:
+            return ExecutionResult(
+                execution_ok=False,
+                execution_error=str(error),
+                started_at=started_at,
+                completed_at=time.time(),
+                context_id=context.id if context else "default",
+            )
+        if reply is not None:
+            current_time = time.time()
+            results: list[Result] = []
+            for line in (reply.get("stdout") or "").splitlines():
+                msg = OutputMessage(line=line, timestamp=current_time, error=False)
+                stdout_messages.append(msg)
+                if on_stdout:
+                    on_stdout(msg)
+            for line in (reply.get("stderr") or "").splitlines():
+                msg = OutputMessage(line=line, timestamp=current_time, error=True)
+                stderr_messages.append(msg)
+                if on_stderr:
+                    on_stderr(msg)
+            if reply.get("result") is not None:
+                value = Result(data={"text/plain": reply["result"]}, is_main_result=True)
+                results.append(value)
+                if on_result:
+                    on_result(value)
+            if reply.get("status") == "error":
+                detail = reply.get("error") or {}
+                code_error = CodeError(
+                    name=detail.get("name", "Error"),
+                    value=detail.get("value", ""),
+                    traceback=detail.get("traceback", ""),
+                )
+                if on_error:
+                    on_error(code_error)
+            return ExecutionResult(
+                results=results,
+                logs=Logs(stdout=stdout_messages, stderr=stderr_messages),
+                execution_ok=True,
+                code_error=code_error,
+                started_at=started_at,
+                completed_at=current_time,
+                execution_count=self._execution_count,
+                context_id=context.id if context else "default",
+            )
 
         try:
             process = self._sandbox.exec(
@@ -310,12 +482,12 @@ class ModalSandbox(Sandbox):
 
     def _get_internal_variable(self, name: str, context: Context | None = None):
         raise NotImplementedError(
-            "ModalSandbox executes each snippet in a fresh process and does not "
-            "support cross-call variable access."
+            "ModalSandbox holds variables in its session process; read them by "
+            "running code, e.g. run_code(f'print({name})')."
         )
 
     def _set_internal_variable(self, name: str, value, context: Context | None = None) -> None:
         raise NotImplementedError(
-            "ModalSandbox executes each snippet in a fresh process and does not "
-            "support cross-call variable access."
+            "ModalSandbox holds variables in its session process; set them by "
+            "running code, e.g. run_code(f'{name} = ...')."
         )

@@ -24,7 +24,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Mapping, Optional
 
 from .models import SandboxEnvironment, SandboxVariant
 
@@ -33,6 +33,7 @@ __all__ = [
     "SandboxProvider",
     "PROVIDERS",
     "available_providers",
+    "provider_catalog",
     "get_provider",
 ]
 
@@ -53,11 +54,21 @@ class ProviderRequirement:
     #: What to tell someone who has none of it.
     hint: str = ""
 
-    def is_met(self) -> bool:
-        """Whether this way of providing the credentials is satisfied here."""
-        if self.env_vars and all(os.environ.get(name) for name in self.env_vars):
+    def is_met(self, secrets: Optional[Mapping[str, str]] = None) -> bool:
+        """Whether this way of providing the credentials is satisfied.
+
+        Args:
+            secrets: Where to look the variables up. The process environment
+                by default; a service passes the secrets of an ACCOUNT here,
+                so "enabled for this user" and "enabled on this machine" are
+                the same question asked of different stores.
+        """
+        store: Mapping[str, str] = os.environ if secrets is None else secrets
+        if self.env_vars and all(store.get(name) for name in self.env_vars):
             return True
-        if self.file and Path(self.file).expanduser().is_file():
+        # A file only answers for the local machine: a remote store of
+        # secrets has no files to offer.
+        if secrets is None and self.file and Path(self.file).expanduser().is_file():
             return True
         return False
 
@@ -85,11 +96,11 @@ class SandboxProvider:
         """The identifier of the provider, which is that of its variant."""
         return self.variant.value
 
-    def is_available(self) -> bool:
-        """Whether this machine has what the provider requires."""
+    def is_available(self, secrets: Optional[Mapping[str, str]] = None) -> bool:
+        """Whether the provider's requirements are met, here or in `secrets`."""
         if not self.needs_credentials or not self.requirements:
             return True
-        return any(requirement.is_met() for requirement in self.requirements)
+        return any(requirement.is_met(secrets) for requirement in self.requirements)
 
     def missing(self) -> tuple[ProviderRequirement, ...]:
         """The ways of satisfying it, when none of them is satisfied."""
@@ -165,7 +176,11 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
         requirements=(
             ProviderRequirement(
                 env_vars=("KAGGLE_API_TOKEN",),
-                hint="Set KAGGLE_API_TOKEN to the contents of your kaggle.json.",
+                hint=(
+                    "Set KAGGLE_API_TOKEN to an access token from "
+                    "kaggle.com/settings (KGAT_…), or to the contents of "
+                    "your kaggle.json."
+                ),
             ),
             ProviderRequirement(
                 env_vars=("KAGGLE_USERNAME", "KAGGLE_KEY"),
@@ -223,11 +238,57 @@ def get_provider(name: str) -> Optional[SandboxProvider]:
     """
     wanted = (name or "").replace("-", "_").lower()
     for provider in PROVIDERS:
-        if provider.name == wanted:
+        # The value of a variant may carry a dash — `jupyter-server` — while
+        # lookups arrive in either spelling: compare in one normal form.
+        if provider.name.replace("-", "_") == wanted:
             return provider
     return None
 
 
-def available_providers() -> tuple[SandboxProvider, ...]:
-    """The providers this machine has the credentials for."""
-    return tuple(provider for provider in PROVIDERS if provider.is_available())
+def available_providers(
+    secrets: Optional[Mapping[str, str]] = None,
+) -> tuple[SandboxProvider, ...]:
+    """The providers whose credentials are on hand, here or in `secrets`."""
+    return tuple(p for p in PROVIDERS if p.is_available(secrets))
+
+
+def provider_catalog(
+    secrets: Optional[Mapping[str, str]] = None,
+) -> list[dict]:
+    """Every provider as plain data, for a service to serve.
+
+    The services of the platform — the operator first — answer "which
+    environments exist, and which can this account use" over HTTP; they need
+    the registry as JSON, not as dataclasses holding callables. Environments
+    are read only for providers that are enabled: asking an unusable provider
+    what it ships is a call that fails.
+    """
+    catalog: list[dict] = []
+    for provider in PROVIDERS:
+        enabled = provider.is_available(secrets)
+        catalog.append(
+            {
+                "name": provider.name,
+                "title": provider.title,
+                "description": provider.description,
+                "enabled": enabled,
+                "needs_credentials": provider.needs_credentials,
+                "requirements": [
+                    {
+                        "env_vars": list(requirement.env_vars),
+                        "file": requirement.file,
+                        "hint": requirement.hint,
+                    }
+                    for requirement in provider.requirements
+                ],
+                "environments": [
+                    {
+                        "name": environment.name,
+                        "title": environment.title,
+                        "language": environment.language,
+                    }
+                    for environment in (provider.environments() if enabled else [])
+                ],
+            }
+        )
+    return catalog

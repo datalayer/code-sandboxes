@@ -26,7 +26,7 @@ kernel and persistent state across requests.
   ```
   You can also pass the full `http://host:port/?token=...` URL as `server_url`;
   the token is parsed automatically.
-- If you omit `server_url`, `JupyterSandbox` **starts and manages its own local
+- If you omit `server_url`, `JupyterServerSandbox` **starts and manages its own local
   Jupyter Server** and generates the token for you — no configuration needed.
 
 ## Usage
@@ -36,7 +36,7 @@ from code_sandboxes import Sandbox
 
 # Connect to an existing server:
 with Sandbox.create(
-    variant="jupyter",
+    variant="jupyter-server",
     server_url="http://localhost:8888",
     token="MY_TOKEN",
 ) as sandbox:
@@ -45,12 +45,12 @@ with Sandbox.create(
     print(result.text)  # 42
 
 # Or let the sandbox manage a local server automatically:
-with Sandbox.create(variant="jupyter") as sandbox:
+with Sandbox.create(variant="jupyter-server") as sandbox:
     print(sandbox.run_code("1 + 1").text)  # 2
 ```
 
 The concrete implementation is available from a top-level module:
 
 ```python
-from code_sandboxes.jupyter_sandbox import JupyterSandbox
+from code_sandboxes.jupyter_server_sandbox import JupyterServerSandbox
 ```

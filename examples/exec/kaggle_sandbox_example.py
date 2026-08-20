@@ -28,7 +28,7 @@ Run with:
 import argparse
 import os
 
-from exec_common import show_and_run
+from exec_common import show_and_run, show_code
 
 from code_sandboxes import CodeError, Sandbox
 
@@ -99,6 +99,9 @@ def _run_batch(gpu: str | None) -> None:
     if gpu:
         print(f"accelerator requested: {gpu}")
     code = BATCH_SNIPPET + (GPU_PROBE if gpu else "")
+    # The streamed lines below ARE the result; the code is stated first so the
+    # output reads as submission then outcome, like every other example.
+    show_code(code)
     # A batch job queues, boots and converts the notebook: minutes, not
     # seconds — and a GPU job queues longer than a CPU one.
     timeout = 900 if gpu else 600
@@ -150,10 +153,8 @@ def _run_interactive(gpu: str | None) -> None:
     with Sandbox.create(variant="kaggle", timeout=60, **kwargs) as sandbox:
         show_and_run(sandbox, "x = 40")
         result = show_and_run(sandbox, "x + 2")
-        print("result:", result.text)
 
         result = show_and_run(sandbox, "print('hello from kaggle')")
-        print("stdout:", result.stdout)
 
         if gpu:
             probe = show_and_run(sandbox, GPU_PROBE).stdout.strip()

@@ -26,7 +26,7 @@ def test_every_variant_has_a_manager():
         "docker",
         "eval",
         "google_colab",
-        "jupyter",
+        "jupyter-server",
         "kaggle",
         "modal",
         "monty",

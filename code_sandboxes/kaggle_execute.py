@@ -399,13 +399,13 @@ class KaggleKernelExecutor:
             A :class:`KaggleExecutionResult` describing the run.
         """
         username = self._resolve_username()
-        slug = slug or _slugify(title or f"jkc-run-{uuid.uuid4().hex[:8]}")
+        slug = slug or _slugify(title or f"code-sandbox-run-{uuid.uuid4().hex[:8]}")
         ref = f"{username}/{slug}"
         title = title or slug
         normalized_accelerator = _normalize_accelerator(accelerator)
         resolved_enable_gpu = bool(enable_gpu or normalized_accelerator)
 
-        with tempfile.TemporaryDirectory(prefix="jkc-kaggle-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="code-sandbox-kaggle-") as tmp:
             folder = Path(tmp)
             code_file = self._write_sources(folder, code, kernel_type, language)
             self._write_metadata(
@@ -573,7 +573,7 @@ class KaggleKernelExecutor:
     ) -> None:
         try:
             if output_dir is None:
-                output_dir = tempfile.mkdtemp(prefix="jkc-kaggle-out-")
+                output_dir = tempfile.mkdtemp(prefix="code-sandbox-kaggle-out-")
             files = self.output(slug, output_dir)
             result.output_dir = output_dir
             result.output_files = files

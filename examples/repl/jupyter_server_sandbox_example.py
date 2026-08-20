@@ -10,7 +10,7 @@ from code_sandboxes import Sandbox
 
 def main() -> None:
     try:
-        with Sandbox.create(variant="jupyter", timeout=30) as sandbox:
+        with Sandbox.create(variant="jupyter-server", timeout=30) as sandbox:
             run_repl(sandbox)
     except ModuleNotFoundError as exc:
         print("jupyter sandbox is not available:", exc)

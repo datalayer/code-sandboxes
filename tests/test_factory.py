@@ -11,7 +11,7 @@ from code_sandboxes.datalayer_sandbox import DatalayerSandbox
 from code_sandboxes.docker_sandbox import DockerSandbox
 from code_sandboxes.eval_sandbox import EvalSandbox
 from code_sandboxes.google_colab_sandbox import GoogleColabSandbox
-from code_sandboxes.jupyter_sandbox import JupyterSandbox
+from code_sandboxes.jupyter_server_sandbox import JupyterServerSandbox
 from code_sandboxes.kaggle_sandbox import KaggleSandbox
 from code_sandboxes.modal_sandbox import ModalSandbox
 from code_sandboxes.models import SandboxConfig
@@ -33,7 +33,7 @@ class TestSandboxFactory:
         sandbox = Sandbox.create(variant=SandboxVariant.JUPYTER)
 
         assert sandbox is not None
-        assert isinstance(sandbox, JupyterSandbox)
+        assert isinstance(sandbox, JupyterServerSandbox)
 
     def test_create_with_config(self):
         """Test creating sandbox with config."""
@@ -67,7 +67,7 @@ class TestSandboxFactory:
         "variant,expected_type",
         [
             ("eval", EvalSandbox),
-            ("jupyter", JupyterSandbox),
+            ("jupyter-server", JupyterServerSandbox),
             ("docker", DockerSandbox),
             ("datalayer", DatalayerSandbox),
             ("google_colab", GoogleColabSandbox),

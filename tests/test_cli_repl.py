@@ -43,10 +43,10 @@ def test_repl_jupyter_variant_uses_random_port(monkeypatch):
 
     monkeypatch.setattr(sandbox_cli.Sandbox, "create", staticmethod(_fake_create))
 
-    result = runner.invoke(sandbox_cli.app, ["repl", "--variant", "jupyter"], input=":exit\n")
+    result = runner.invoke(sandbox_cli.app, ["repl", "--variant", "jupyter-server"], input=":exit\n")
 
     assert result.exit_code == 0
-    assert captured["kwargs"]["variant"] == "jupyter"
+    assert captured["kwargs"]["variant"] == "jupyter-server"
     assert captured["kwargs"]["port"] == 0
     assert fake_sandbox.exited is True
 
@@ -133,7 +133,7 @@ def test_root_defaults_to_jupyter_repl(monkeypatch):
     result = runner.invoke(sandbox_cli.app, [], input=":exit\n")
 
     assert result.exit_code == 0
-    assert captured["kwargs"]["variant"] == "jupyter"
+    assert captured["kwargs"]["variant"] == "jupyter-server"
     assert captured["kwargs"]["port"] == 0
 
 

@@ -37,10 +37,8 @@ def main() -> None:
         ) as sandbox:
             show_and_run(sandbox, "x = 40")
             result = show_and_run(sandbox, "x + 2")
-            print("result:", result.text)
 
             result = show_and_run(sandbox, "print('hello from colab')")
-            print("stdout:", result.stdout)
     except Exception as exc:
         print("colab example failed:", exc)
         print(

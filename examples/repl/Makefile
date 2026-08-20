@@ -2,9 +2,9 @@
 
 PYTHON ?= python
 
-.PHONY: all eval docker jupyter monty google-colab kaggle modal modal-gpu datalayer
+.PHONY: all eval docker jupyter-server monty google-colab kaggle kaggle-gpu kaggle-live kaggle-gpu-live modal modal-gpu datalayer
 
-all: eval docker jupyter monty google-colab modal datalayer
+all: eval docker jupyter-server monty google-colab modal datalayer
 
 eval:
 	$(PYTHON) eval_sandbox_example.py
@@ -12,14 +12,26 @@ eval:
 docker:
 	$(PYTHON) docker_sandbox_example.py
 
-jupyter:
-	$(PYTHON) jupyter_sandbox_example.py
+jupyter-server:
+	$(PYTHON) jupyter_server_sandbox_example.py
 
 monty:
 	$(PYTHON) monty_sandbox_example.py
 
 google-colab:
 	$(PYTHON) google_colab_sandbox_example.py
+
+kaggle-live: ## Kaggle REPL on one persistent kernel (agent job + dataset bus)
+	@echo "==> Kaggle REPL (live: one batch job holds the kernel; boot takes minutes)"
+	KAGGLE_LIVE=1 $(PYTHON) kaggle_sandbox_example.py
+
+kaggle-gpu-live: ## Kaggle live REPL on a GPU (KAGGLE_GPU flavor, default t4)
+	@echo "==> Kaggle REPL (live, GPU: $${KAGGLE_GPU:-t4}; a GPU job queues longer before it boots)"
+	KAGGLE_LIVE=1 KAGGLE_GPU=$${KAGGLE_GPU:-t4} $(PYTHON) kaggle_sandbox_example.py
+
+kaggle-gpu: ## Kaggle batch REPL on a GPU (KAGGLE_GPU flavor, default t4)
+	@echo "==> Kaggle REPL (batch, GPU: $${KAGGLE_GPU:-t4}; each input is a batch job, and a GPU one queues longer)"
+	KAGGLE_GPU=$${KAGGLE_GPU:-t4} $(PYTHON) kaggle_sandbox_example.py
 
 kaggle: ## Kaggle REPL — batch job per input by default, live session when RUNTIME_URL is set
 	@echo "==> Kaggle REPL"
