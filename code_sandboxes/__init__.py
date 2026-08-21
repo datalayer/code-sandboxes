@@ -130,6 +130,7 @@ from .models import (
     SandboxVariant,
     SnapshotInfo,
     TunnelInfo,
+    normalize_variant,
 )
 from .monty_sandbox import MontySandbox
 from .providers import (
@@ -210,6 +211,7 @@ __all__ = [
     "get_manager",
     "get_provider",
     "manageable_variants",
+    "normalize_variant",
     "parse_google_colab_channels_url",
     "parse_kaggle_channels_url",
     "repl_prompt",
