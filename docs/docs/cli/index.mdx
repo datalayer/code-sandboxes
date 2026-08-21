@@ -1,21 +1,21 @@
 ---
-title: Running Code
+title: CLI
 sidebar_position: 1
 ---
 
-# Running Code
+# The Command Line
 
-Code Sandboxes ships a Typer CLI with two ways to run code in any variant:
-`exec` for one snippet, `repl` for a prompt. The same CLI also
-[creates, lists and deletes sandboxes](/cli/management) across variants.
+Code Sandboxes ships a Typer CLI that does two things: it RUNS code in any
+variant — `exec` for one snippet, `repl` for a prompt — and it MANAGES
+sandboxes across variants, with the same four verbs everywhere. Running comes
+first below, managing after it.
 
-Both commands create a sandbox, use it, and terminate it. Nothing is left
-running behind you — to keep one, see
-[`code-sandboxes create`](/cli/management).
+`exec` and `repl` create a sandbox, use it, and terminate it. Nothing is left
+running behind you — to keep one, see [`create`](#creating-and-managing-sandboxes).
 
 For canonical variant setup details (requirements, credentials, and parameters),
-see [Sandboxes](/sandboxes). For package installation and extras, see
-[Installation](/installation).
+see [Providers](/providers). For package installation and extras, see
+[Installation](/install).
 
 ```bash
 code-sandboxes exec --variant eval 'print(40 + 2)'
@@ -24,7 +24,9 @@ code-sandboxes repl --variant jupyter-server
 
 `code-sandbox` is available as an alias for the same command.
 
-## `exec` — one snippet
+## Running Code
+
+### `exec` — one snippet
 
 The code comes from an argument, from `--file`, or from standard input:
 
@@ -44,7 +46,7 @@ if code-sandboxes exec -v eval -q 'import numpy' ; then
 fi
 ```
 
-## `repl` — a prompt
+### `repl` — a prompt
 
 ```bash
 # Explicit variant
@@ -71,7 +73,7 @@ sandbox(daytona:tan-law-5384)>>> x + 2
 Use any of `:exit`, `:quit`, `exit`, `quit` or `Ctrl+D` to leave, and `:help`
 for a reminder. On exit, the sandbox is terminated.
 
-## Variant Selection
+### Variant Selection
 
 Supported variants:
 
@@ -92,7 +94,7 @@ Supported variants:
 `--environment`, `--gpu`, `--spot`, and the connection settings a variant
 needs.
 
-## Variant-specific Behavior
+### Variant-specific Behavior
 
 - `cloudflare`: talks to a deployed sandbox bridge Worker, named by
   `CLOUDFLARE_SANDBOX_API_URL` with the `CLOUDFLARE_SANDBOX_API_KEY` it was
@@ -114,7 +116,7 @@ needs.
 - `modal`: starts a Modal sandbox container.
 - `monty`: starts a Monty REPL-backed sandbox.
 
-## The Same Machinery, From Python
+### The Same Machinery, From Python
 
 The CLI has nothing of its own: `exec` and `repl` are `show_and_run` and
 `run_repl`, which the package exports and every example uses.
@@ -134,9 +136,122 @@ with Sandbox.create(variant="eval") as sandbox:
 `show_code`, `show_result` and `repl_prompt` are exported too, for a program
 that wants the pieces rather than the whole.
 
+## Creating and Managing Sandboxes
+
+Beyond running code, sandboxes can be created, listed, inspected and deleted —
+from the CLI or from Python. Every variant answers the same four verbs:
+
+| Verb | CLI | Python |
+| --- | --- | --- |
+| Create | `code-sandboxes create -v <variant>` | `get_manager(variant).create(**kwargs)` |
+| Read (all) | `code-sandboxes list [-v <variant>]` | `get_manager(variant).list()` |
+| Read (one) | `code-sandboxes get <id> -v <variant>` | `get_manager(variant).get(id)` |
+| Update | `code-sandboxes update <id> -v <variant> [...]` | `get_manager(variant).update(id, **changes)` |
+| Delete | `code-sandboxes delete <id> -v <variant>` | `get_manager(variant).delete(id)` |
+
+### CLI
+
+```bash
+# Every variant that answers, in one table
+code-sandboxes list
+
+# One variant
+code-sandboxes list -v kaggle
+code-sandboxes list -v modal
+
+# One sandbox, with its live status
+code-sandboxes get sb-XXXX -v modal
+code-sandboxes get my-kernel-slug -v kaggle   # user/slug or bare slug
+
+# Update — what changes depends on the variant
+code-sandboxes update <container> -v docker --name proud-noether
+code-sandboxes update sb-XXXX -v modal --tag team=ai --tag env=dev
+code-sandboxes update <runtime-uid> -v datalayer --capability gpu
+code-sandboxes update my-kernel -v kaggle --code "print('v2')"
+
+# Delete (asks for confirmation without --yes)
+code-sandboxes delete sb-XXXX -v modal --yes
+
+# Create a sandbox and leave it running, detached from this process
+code-sandboxes create -v modal
+code-sandboxes create -v docker
+code-sandboxes create -v jupyter --server-url http://localhost:8888
+
+# The environments sandboxes can be created in
+code-sandboxes environments
+```
+
+Results are rendered as tables (via [rich](https://rich.readthedocs.io/)). When
+`list` is asked for every variant, a variant that cannot answer — no
+credentials, no daemon, no runtime URL — is skipped with the reason printed
+below the table instead of hiding the ones that answered.
+
+### Python
+
+```python
+from code_sandboxes import get_manager, manageable_variants
+
+print(manageable_variants())
+# ['cloudflare', 'coreweave', 'datalayer', 'daytona', 'docker', 'e2b', 'eval', 'google-colab', 'jupyter-server', 'kaggle', 'modal', 'monty']
+
+manager = get_manager("modal")
+for info in manager.list():
+    print(info.id, info.status)
+
+info = manager.create()          # detached: keeps running after this process
+manager.delete(info.id)
+```
+
+Connection settings go to `get_manager` and stay out of the verbs:
+
+```python
+get_manager("jupyter-server", server_url="http://localhost:8888", token="...")
+get_manager("google-colab", server_url="https://...", proxy_token="...")
+get_manager("modal", app_name="code-sandboxes")
+get_manager("daytona", api_key="dtn_...", target="eu")
+get_manager("e2b", api_key="e2b_...", domain="e2b.example.com")
+get_manager("coreweave", api_key="...", base_url="https://api.cwsandbox.com")
+get_manager("cloudflare", api_url="https://...workers.dev", api_key="...")
+get_manager("kaggle", username="...")
+get_manager("datalayer", token="...", run_url="https://...")
+```
+
+### What each variant maps to
+
+| Variant | A sandbox is | Update changes | Delete removes |
+| --- | --- | --- | --- |
+| `cloudflare` | a container of a deployed sandbox bridge | — nothing in place | the Cloudflare sandbox |
+| `coreweave` | a sandbox of the CoreWeave organization | — nothing in place | the CoreWeave sandbox |
+| `datalayer` | a runtime of the Datalayer platform | the capabilities | the runtime |
+| `daytona` | a sandbox of the Daytona organization | the labels | the Daytona sandbox |
+| `docker` | a container labelled `code-sandboxes` | the name | the container (forced) |
+| `e2b` | a sandbox of the E2B account | — nothing in place | the E2B sandbox |
+| `eval`, `monty` | an object inside the creating process | — not supported | — not supported |
+| `google-colab` | a kernel of the Colab runtime | — nothing in place | the kernel |
+| `jupyter-server` | a kernel of the Jupyter Server | — nothing in place | the kernel |
+| `kaggle` | a kernel on kaggle.com (batch mode creates one per run) | the code (a new version) | the kernel |
+| `modal` | a Modal sandbox of the `code-sandboxes` app | the tags | the Modal sandbox |
+
+Not every backend can honour every verb. A manager states what it supports
+through `manager.capabilities` and raises `SandboxManagementError` with the
+reason for the rest — an `eval` sandbox lives and dies inside the process that
+made it, so `list` truthfully answers `[]` and `delete` explains itself rather
+than silently doing nothing.
+
+Cloudflare notes: `create`, `get` and `delete` are answered; `list` is **not**.
+The sandbox bridge exposes a sandbox by its id and has no endpoint that
+enumerates them, so `code-sandboxes list -v cloudflare` raises with that
+reason instead of answering with an empty list — "none" and "cannot know" are
+different facts, and a management tool that confuses them loses sandboxes.
+
+Kaggle notes: `list` enumerates your kernels (`mine=True`), `get` adds the
+live run status, and `create` pushes a batch kernel with the given `--code` —
+creation on Kaggle *is* a code push. Both `user/slug` and a bare `slug` of
+the authenticated user are accepted as ids.
+
+
 ## Related Docs
 
-- [Managing Sandboxes](/cli/management)
-- [Sandboxes](/sandboxes)
-- [Installation](/installation)
+- [Providers](/providers)
+- [Installation](/install)
 - [API Reference](/api-reference)

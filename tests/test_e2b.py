@@ -317,8 +317,11 @@ def test_a_gpu_that_cannot_be_given_is_refused_rather_than_ignored():
     """Running on a CPU while looking as though it asked for a GPU is worse."""
     sandbox = E2BSandbox(SandboxConfig(gpu="H100"))
 
+    # Refused by `start` before the SDK is even reached for, so a caller hears
+    # that the request is impossible rather than being sent to install a
+    # package first.
     with pytest.raises(SandboxConfigurationError, match="no GPU"):
-        sandbox._create_params()
+        sandbox.start()
 
 
 def test_a_sandbox_cut_off_from_the_network_says_so():

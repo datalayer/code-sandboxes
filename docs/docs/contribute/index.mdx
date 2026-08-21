@@ -1,0 +1,108 @@
+---
+title: Contribute
+sidebar_position: 1
+---
+
+# Contribute
+
+Code Sandboxes is developed in the open at
+[github.com/datalayer/code-sandboxes](https://github.com/datalayer/code-sandboxes).
+Issues and pull requests are welcome.
+
+## Getting Set Up
+
+```bash
+git clone https://github.com/datalayer/code-sandboxes.git
+cd code-sandboxes
+pip install -e ".[all,test]"
+```
+
+The `all` extra pulls the SDK of every variant, which is what lets the whole
+test suite run. Without it the tests for a variant whose package is absent are
+skipped rather than failed, so a narrower install still works — it simply
+covers less.
+
+## Development
+
+Run the local test suite:
+
+```bash
+pytest tests/
+```
+
+Default local test suite environment variables:
+
+- None for core local suites (`eval`, factory, model, and local Jupyter tests).
+
+Optional integration test variables:
+
+- `DATALAYER_API_KEY` for Datalayer runtime smoke tests.
+- `DATALAYER_RUN_URL` for a custom Datalayer runtime URL.
+- `DATALAYER_ENVIRONMENT` for Datalayer environment override.
+- `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` for Modal integration tests.
+
+## CI Workflows
+
+This repository uses a reusable GitHub Actions workflow at
+`.github/workflows/reusable-python.yml`.
+
+Workflows that call it:
+
+- `.github/workflows/build.yml`
+- `.github/workflows/py-tests.yml`
+- `.github/workflows/py-code-style.yml`
+- `.github/workflows/py-typing.yml`
+
+Reusable workflow inputs:
+
+- `python-version`
+- `install-system-deps`
+- `install-extras`
+- `extra-packages`
+- `run-tests`
+- `test-command`
+- `run-mypy`
+- `mypy-target`
+- `run-pre-commit`
+
+## Adding a Variant
+
+A variant is registered by hand, in one place each, and the compiler will not
+remind you of the ones you miss — the tests will. In order:
+
+1. `code_sandboxes/models.py` — a member of `SandboxVariant`.
+2. `code_sandboxes/<name>_sandbox.py` — the class, subclassing `Sandbox`.
+3. `code_sandboxes/base.py` — a branch in `Sandbox.create` and one in
+   `Sandbox.list_environments`.
+4. `code_sandboxes/providers.py` — an entry in `PROVIDERS`, saying what
+   credentials it needs and which extra installs it.
+5. `code_sandboxes/manage.py` — a `SandboxManager` and its entry in
+   `_MANAGERS`.
+6. `code_sandboxes/cli.py` — the variant in `_SUPPORTED_RUN_VARIANTS`.
+7. `code_sandboxes/__init__.py` — the import and `__all__`.
+8. `pyproject.toml` — the optional dependency, and the same package in `all`.
+
+Then an example under `examples/exec` and one under `examples/repl` with their
+Makefile targets, a page under `docs/docs/sandboxes/`, and a test module. Two
+tests in the suite fail until a new variant is wired everywhere —
+`test_every_variant_of_the_enum_can_be_created` and
+`test_every_variant_has_a_manager` — which is the reminder the compiler cannot
+give.
+
+Two rules the existing variants follow, and worth following:
+
+- **The SDK is imported lazily**, inside the call that needs it, and a missing
+  one raises `SandboxConfigurationError` naming the extra that installs it.
+  Nothing may be imported at module import time: listing the variants must
+  work on a machine that has none of them installed.
+- **What a backend cannot do is refused, not ignored.** A GPU asked of a
+  variant that has none, a network policy it cannot apply, a variable it
+  cannot keep — each is an error that names the reason and points at a variant
+  that can. A sandbox that looks as though it was given an H100 and was not is
+  the failure worth designing against.
+
+## Related Docs
+
+- [Guide](/guide) — what the package adds, and how the backends differ
+- [Providers](/providers) — the variants themselves
+- [API Reference](/api-reference)

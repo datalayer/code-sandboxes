@@ -199,10 +199,31 @@ class E2BSandbox(Sandbox):
             ),
         ]
 
+    def _refuse_what_cannot_be_honoured(self) -> None:
+        """What this variant can never do, said before anything is installed.
+
+        Judged from the configuration alone, so it comes BEFORE the import of
+        the SDK: a caller who asked for a GPU E2B has not got should hear that
+        first, rather than be sent to install a package and only then be told
+        the request was impossible all along.
+        """
+        if self.config.gpu:
+            # Silently running on a CPU is the worse failure: a sandbox that
+            # looks as though it asked for an H100 and did not is one whose
+            # timings mean nothing.
+            raise SandboxConfigurationError(
+                "E2B sandboxes have no GPU, so gpu=" + repr(self.config.gpu) + " "
+                "cannot be honoured. Use the daytona, coreweave or modal "
+                "variant for a GPU."
+            )
+        # The network policy is judged here too, for the same reason.
+        self._network_allowed()
+
     def start(self) -> None:
         if self._started:
             return
 
+        self._refuse_what_cannot_be_honoured()
         e2b = _import_e2b()
         self._sandbox = e2b.Sandbox.create(**self._create_params())
 
@@ -234,15 +255,6 @@ class E2BSandbox(Sandbox):
         environment for exactly the arguments that are absent, and handing it
         an explicit ``None`` is not the same as handing it nothing.
         """
-        if self.config.gpu:
-            # Silently running on a CPU is the worse failure: a sandbox that
-            # looks as though it asked for an H100 and did not is one whose
-            # timings mean nothing.
-            raise SandboxConfigurationError(
-                "E2B sandboxes have no GPU, so gpu=" + repr(self.config.gpu) + " "
-                "cannot be honoured. Use the daytona, coreweave or modal "
-                "variant for a GPU."
-            )
         params: dict[str, Any] = {
             "template": self._template or DEFAULT_TEMPLATE,
             "metadata": self._metadata(),

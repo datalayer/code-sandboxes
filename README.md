@@ -33,12 +33,12 @@ Canonical variant names:
 The full documentation is the single source of truth:
 
 - Docs home: [https://code-sandboxes.datalayer.tech](https://code-sandboxes.datalayer.tech)
-- Sandboxes and variant setup: [https://code-sandboxes.datalayer.tech/sandboxes](https://code-sandboxes.datalayer.tech/sandboxes)
-- Installation: [https://code-sandboxes.datalayer.tech/installation](https://code-sandboxes.datalayer.tech/installation)
+- Providers and variant setup: [https://code-sandboxes.datalayer.tech/providers](https://code-sandboxes.datalayer.tech/providers)
+- Installation: [https://code-sandboxes.datalayer.tech/install](https://code-sandboxes.datalayer.tech/install)
 - CLI usage: [https://code-sandboxes.datalayer.tech/cli](https://code-sandboxes.datalayer.tech/cli)
 - API reference: [https://code-sandboxes.datalayer.tech/api-reference](https://code-sandboxes.datalayer.tech/api-reference)
 - Examples: [https://code-sandboxes.datalayer.tech/examples](https://code-sandboxes.datalayer.tech/examples)
-- Comparison: [https://code-sandboxes.datalayer.tech/comparison](https://code-sandboxes.datalayer.tech/comparison)
+- Guide: [https://code-sandboxes.datalayer.tech/guide](https://code-sandboxes.datalayer.tech/guide)
 
 Published site:
 
@@ -50,7 +50,7 @@ Published site:
 pip install code-sandboxes
 ```
 
-For backend-specific extras and credentials, see [https://code-sandboxes.datalayer.tech/installation](https://code-sandboxes.datalayer.tech/installation) and [https://code-sandboxes.datalayer.tech/sandboxes](https://code-sandboxes.datalayer.tech/sandboxes).
+For backend-specific extras and credentials, see [https://code-sandboxes.datalayer.tech/install](https://code-sandboxes.datalayer.tech/install) and [https://code-sandboxes.datalayer.tech/providers](https://code-sandboxes.datalayer.tech/providers).
 
 ### Jupyter Server Sandbox
 
@@ -133,7 +133,7 @@ with KaggleKernelClient.from_channels_url(channels_url, token=None) as kernel:
     print(kernel.execute("x = 1 + 1; print(x)"))
 ```
 
-See the [complete Kaggle guide](https://code-sandboxes.datalayer.tech/sandboxes/kaggle) for authentication,
+See the [complete Kaggle guide](https://code-sandboxes.datalayer.tech/providers/kaggle) for authentication,
 accelerators, channels URL retrieval, and execution options.
 
 ## Google Colab
@@ -159,7 +159,7 @@ with GoogleColabKernelClient.from_channels_url(channels_url) as kernel:
     print(kernel.execute("print('hello from colab')"))
 ```
 
-See the [complete Google Colab guide](https://code-sandboxes.datalayer.tech/sandboxes/google-colab) for
+See the [complete Google Colab guide](https://code-sandboxes.datalayer.tech/providers/google-colab) for
 proxy authentication, explicit connection values, and channels URL retrieval.
 
 ## Manage Sandboxes (CRUD)
@@ -189,7 +189,7 @@ for info in manager.list():
 manager.delete("sb-...")
 ```
 
-See the [management guide](https://code-sandboxes.datalayer.tech/cli/management)
+See the [management guide](https://code-sandboxes.datalayer.tech/cli#creating-and-managing-sandboxes)
 for what each variant maps to and its connection settings.
 
 ## License

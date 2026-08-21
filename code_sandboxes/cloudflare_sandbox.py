@@ -233,31 +233,19 @@ class CloudflareSandbox(Sandbox):
     def start(self) -> None:
         if self._started:
             return
+
+        # What this variant can never do comes first: a caller who asked for a
+        # GPU, or for a network it cannot restrict, should hear that before
+        # being sent to deploy a bridge for a request that was impossible
+        # anyway.
+        self._refuse_what_cannot_be_honoured()
+
         if not self._api_url:
             raise SandboxConfigurationError(
                 "CloudflareSandbox needs the URL of a deployed sandbox bridge: "
                 f"set {API_URL_ENV_VAR}, or pass api_url=. Deploy one with "
                 "`npm create cloudflare -- sandbox-bridge "
                 "--template=cloudflare/sandbox-sdk/bridge/worker`."
-            )
-
-        if self.config.gpu:
-            raise SandboxConfigurationError(
-                "Cloudflare sandboxes have no GPU, so gpu=" + repr(self.config.gpu) + " "
-                "cannot be honoured. Use the daytona, coreweave or modal "
-                "variant for a GPU."
-            )
-
-        # The bridge exposes no networking controls at all — no egress rules,
-        # no allowlist, no switch — so a policy asked for here could only be
-        # accepted and then not applied. A sandbox believed to be cut off from
-        # the network while it is not is the failure that matters.
-        if self.config.network_policy in ("none", "allowlist") or self.config.allowed_hosts:
-            raise SandboxConfigurationError(
-                f"Cloudflare sandboxes cannot restrict the network, so "
-                f"network_policy={self.config.network_policy!r} cannot be "
-                "honoured. Use the e2b variant to cut a sandbox off, or the "
-                "daytona or coreweave variant for an allowlist."
             )
 
         self._client = self.build_client()
@@ -281,6 +269,26 @@ class CloudflareSandbox(Sandbox):
             config=self.config,
         )
         self._started = True
+
+    def _refuse_what_cannot_be_honoured(self) -> None:
+        """What this variant can never do, judged from the configuration alone."""
+        if self.config.gpu:
+            raise SandboxConfigurationError(
+                "Cloudflare sandboxes have no GPU, so gpu=" + repr(self.config.gpu) + " "
+                "cannot be honoured. Use the daytona, coreweave or modal "
+                "variant for a GPU."
+            )
+        # The bridge exposes no networking controls at all — no egress rules,
+        # no allowlist, no switch — so a policy asked for here could only be
+        # accepted and then not applied. A sandbox believed to be cut off from
+        # the network while it is not is the failure that matters.
+        if self.config.network_policy in ("none", "allowlist") or self.config.allowed_hosts:
+            raise SandboxConfigurationError(
+                f"Cloudflare sandboxes cannot restrict the network, so "
+                f"network_policy={self.config.network_policy!r} cannot be "
+                "honoured. Use the e2b variant to cut a sandbox off, or the "
+                "daytona or coreweave variant for an allowlist."
+            )
 
     def build_client(self) -> Any:
         """An HTTP client for the bridge, with no sandbox behind it yet.

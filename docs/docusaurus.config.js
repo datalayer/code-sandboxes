@@ -38,15 +38,27 @@ module.exports = {
       items: [
         {
           type: 'doc',
-          docId: 'sandboxes/index',
+          docId: 'guide/index',
           position: 'left',
-          label: 'Sandboxes',
+          label: 'Guide',
         },
         {
           type: 'doc',
-          docId: 'installation/index',
+          docId: 'install/index',
           position: 'left',
-          label: 'Installation',
+          label: 'Install',
+        },
+        {
+          type: 'doc',
+          docId: 'cli/index',
+          position: 'left',
+          label: 'CLI',
+        },
+        {
+          type: 'doc',
+          docId: 'providers/index',
+          position: 'left',
+          label: 'Providers',
         },
         {
           type: 'doc',
@@ -56,15 +68,15 @@ module.exports = {
         },
         {
           type: 'doc',
-          docId: 'comparison/index',
-          position: 'left',
-          label: 'Comparison',
-        },
-        {
-          type: 'doc',
           docId: 'api-reference/index',
           position: 'left',
           label: 'API Reference',
+        },
+        {
+          type: 'doc',
+          docId: 'contribute/index',
+          position: 'left',
+          label: 'Contribute',
         },
         {
           href: 'https://discord.gg/YQFwvmSSuR',

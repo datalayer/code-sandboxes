@@ -1,14 +1,18 @@
 ---
-title: Comparison
-sidebar_position: 3
+title: Guide
+sidebar_position: 1
 ---
 
-# Comparison with Other Solutions
+# Guide
 
-This page used to weigh Code Sandboxes against E2B and Modal as alternatives.
+One package, many places to run code. This page is the one to read before the
+rest: what Code Sandboxes actually gives you over calling a backend's own SDK,
+what each backend still decides for you, and how to choose between them.
+
+It used to weigh Code Sandboxes against E2B and Modal as alternatives.
 They are not alternatives any more: both are **backends this package drives**,
-alongside [Daytona](/sandboxes/daytona), [CoreWeave](/sandboxes/coreweave) and
-[Cloudflare](/sandboxes/cloudflare). `variant="e2b"` and `variant="modal"` run
+alongside [Daytona](/providers/daytona), [CoreWeave](/providers/coreweave) and
+[Cloudflare](/providers/cloudflare). `variant="e2b"` and `variant="modal"` run
 code on E2B and on Modal, through their own SDKs, with their own accounts and
 their own bills.
 
@@ -28,7 +32,7 @@ still decides for you once you are on it.
   API where there is one, a snippet that decodes base64 where there is not.
 - **CRUD in one place.** `code-sandboxes list`, `get`, `create` and `delete`
   work across the backends that can answer them; see the
-  [management guide](/cli/management).
+  [management guide](/cli#creating-and-managing-sandboxes).
 - **A refusal instead of a surprise.** Where a backend cannot do what was
   asked, the call says so rather than quietly doing something else:
   `network_policy="allowlist"` on E2B is refused because E2B has no host
@@ -60,21 +64,21 @@ That is the other half of the comparison, and it is the table below.
 
 | Backend | Runs code in | State between calls | Rich display data | GPU | Management verbs |
 | --- | --- | --- | --- | --- | --- |
-| [`cloudflare`](/sandboxes/cloudflare) | a container on the edge, through a bridge Worker | none — a process per snippet | no | not exposed here | create, get, delete |
-| [`coreweave`](/sandboxes/coreweave) | a container on CoreWeave | a session process, falling back to none | no | `gpu=` | create, list, get, delete |
-| [`datalayer`](/sandboxes/datalayer) | a Datalayer runtime | a kernel | yes | `gpu=` | create, list, get, update, delete |
-| [`daytona`](/sandboxes/daytona) | a Daytona sandbox | the code interpreter, one namespace per context | no | `gpu=`, spot capacity | create, list, get, update, delete |
-| [`e2b`](/sandboxes/e2b) | a Firecracker microVM | a Jupyter kernel per context | yes | not exposed here | create, list, get, delete |
-| [`modal`](/sandboxes/modal) | a Modal container | a session process, falling back to none | no | `gpu=` | create, list, get, update, delete |
+| [`cloudflare`](/providers/cloudflare) | a container on the edge, through a bridge Worker | none — a process per snippet | no | not exposed here | create, get, delete |
+| [`coreweave`](/providers/coreweave) | a container on CoreWeave | a session process, falling back to none | no | `gpu=` | create, list, get, delete |
+| [`datalayer`](/providers/datalayer) | a Datalayer runtime | a kernel | yes | `gpu=` | create, list, get, update, delete |
+| [`daytona`](/providers/daytona) | a Daytona sandbox | the code interpreter, one namespace per context | no | `gpu=`, spot capacity | create, list, get, update, delete |
+| [`e2b`](/providers/e2b) | a Firecracker microVM | a Jupyter kernel per context | yes | not exposed here | create, list, get, delete |
+| [`modal`](/providers/modal) | a Modal container | a session process, falling back to none | no | `gpu=` | create, list, get, update, delete |
 
 "Not exposed here" is about this package, not about the vendor: it means the
 variant has no `gpu=` to pass on, not that the platform has no hardware.
 
 The local backends answer the same interface with none of the accounts:
-[`docker`](/sandboxes/docker) runs a container on this machine,
-[`jupyter-server`](/sandboxes/jupyter-server) a kernel of a Jupyter Server,
-[`monty`](/sandboxes/monty) a restricted Python subset in this process, and
-[`eval`](/sandboxes/eval) plain `exec()` — which isolates nothing and is for
+[`docker`](/providers/docker) runs a container on this machine,
+[`jupyter-server`](/providers/jupyter-server) a kernel of a Jupyter Server,
+[`monty`](/providers/monty) a restricted Python subset in this process, and
+[`eval`](/providers/eval) plain `exec()` — which isolates nothing and is for
 development and tests.
 
 ## What The Package Calls On Your Behalf
@@ -102,7 +106,41 @@ Cloudflare and CoreWeave run each snippet through a small program that reports
 the trailing expression and the traceback, because `exec` on its own reports
 neither — or refuses it, and its page says which.
 
-## Coming From The E2B SDK
+## Coming from Daytona
+
+```python
+# Daytona, directly
+from daytona import CreateSandboxFromSnapshotParams, Daytona
+
+client = Daytona()
+sandbox = client.create(CreateSandboxFromSnapshotParams(labels={"app": "mine"}))
+reply = sandbox.code_interpreter.run_code("print('hello')")
+print(reply.result)
+sandbox.delete()
+
+# Through Code Sandboxes
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="daytona") as sandbox:
+    result = sandbox.run_code("print('hello')")
+    print(result.stdout)
+```
+
+Both go through Daytona's CODE INTERPRETER rather than `process.code_run`, so
+the namespace survives between calls either way. Credentials are Daytona's own
+— `DAYTONA_API_KEY`, or `DAYTONA_JWT_TOKEN` with `DAYTONA_ORGANIZATION_ID` —
+and `DAYTONA_API_URL` and `DAYTONA_TARGET` still choose the API and the region.
+
+Two things the variant adds beyond the shared interface. The value of a
+trailing expression is reported: Daytona's interpreter answers with what the
+code PRINTED and drops the value of a last expression, so `1 + 1` returns
+nothing there and `"2"` here. And a GPU is asked for by argument rather than by
+assembling an image — `gpu="H100"`, or `gpu="H100,H200"` for the fallback
+order Daytona walks when the first is unavailable, with `spot=True` for
+preemptible capacity and `preempted_at()` to find out whether it was
+reclaimed. See [Daytona](/providers/daytona).
+
+## Coming from E2B
 
 The sandbox is the same sandbox; what changes is the interface in front of it,
 and that a second backend costs one string.
@@ -126,9 +164,9 @@ with Sandbox.create(variant="e2b") as sandbox:
 `E2B_API_KEY` is read the same way in both, and `E2B_DOMAIN` still points at a
 self-hosted cluster. What the variant adds is the shared result model, the
 management verbs, and the refusal where E2B's own model has no answer — see
-[E2B](/sandboxes/e2b).
+[E2B](/providers/e2b).
 
-## Coming From The Modal SDK
+## Coming from Modal
 
 ```python
 # Modal, directly
@@ -149,9 +187,9 @@ with Sandbox.create(variant="modal", gpu="T4") as sandbox:
 ```
 
 Credentials are Modal's own — `modal token new`, or `MODAL_TOKEN_ID` with
-`MODAL_TOKEN_SECRET`. See [Modal](/sandboxes/modal).
+`MODAL_TOKEN_SECRET`. See [Modal](/providers/modal).
 
-## Choosing A Backend
+## Choosing a Backend
 
 | Use case | Backend |
 |----------|---------|

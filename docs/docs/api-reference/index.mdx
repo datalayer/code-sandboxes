@@ -52,7 +52,7 @@ def create(
 | `network_policy` | `str` | Network access policy: `"inherit"`, `"none"`, `"allowlist"`, `"all"` |
 | `allowed_hosts` | `list[str]` | Hosts reachable when the policy is `"allowlist"` |
 | `config` | `SandboxConfig` | Full configuration object |
-| `**kwargs` | `dict` | Variant-specific arguments handed to the sandbox constructor — `template=` (e2b), `container_image=` (coreweave), `api_url=` (cloudflare), and the rest documented on each [variant's page](/sandboxes) |
+| `**kwargs` | `dict` | Variant-specific arguments handed to the sandbox constructor — `template=` (e2b), `container_image=` (coreweave), `api_url=` (cloudflare), and the rest documented on each [variant's page](/providers) |
 
 #### `Sandbox.from_id()`
 
@@ -314,7 +314,7 @@ from code_sandboxes import (
 - `GoogleColabKernelClient` connects to an already-running Google Colab kernel.
 - The parser helpers extract connection details from browser channels URLs.
 
-See [Kaggle](/sandboxes/kaggle) and [Google Colab](/sandboxes/google-colab) for
+See [Kaggle](/providers/kaggle) and [Google Colab](/providers/google-colab) for
 authentication and complete examples.
 
 ---

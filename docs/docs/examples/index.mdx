@@ -5,124 +5,82 @@ sidebar_position: 6
 
 # Examples
 
-Run the examples from the `examples/` directory in this repository.
+The repository carries a runnable example for every variant, in two sets that
+differ only in what they do with the sandbox once it is open.
 
-For canonical setup details per variant (requirements, credentials, and
-parameters), see [Sandboxes](/sandboxes). For installation extras, see
-[Installation](/installation).
+| Set | What it does | Entry point |
+| --- | --- | --- |
+| [`examples/exec`](https://github.com/datalayer/code-sandboxes/tree/main/examples/exec) | Runs a handful of snippets, prints what came back, and exits `1` if any of them failed. Read this one first. | `show_and_run` |
+| [`examples/repl`](https://github.com/datalayer/code-sandboxes/tree/main/examples/repl) | Opens the same sandbox and hands you a prompt to type into. | `run_repl` |
 
-## Cloudflare
+Both are built on what the package exports, and it is the same code behind
+`code-sandboxes exec` and `code-sandboxes repl` — so an example is a readable
+version of what the CLI does, not a separate demonstration. See
+[the CLI](/cli).
 
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/cloudflare_sandbox_example.py
+## Running One
 
-Needs a deployed sandbox bridge Worker, named by `CLOUDFLARE_SANDBOX_API_URL`
-with the `CLOUDFLARE_SANDBOX_API_KEY` it generated. The example shows what a
-stateless runner means and the two ways round it — one snippet, or a file.
-
-```bash
-make cloudflare
-```
-
-## CoreWeave
-
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/coreweave_sandbox_example.py
+Each set has a Makefile with one target per variant, named after it:
 
 ```bash
-make coreweave
-make coreweave-gpu   # COREWEAVE_GPU, default H100
+cd examples/exec
+make eval        # runs in this very process — needs nothing at all
+make docker      # needs a Docker daemon
+make e2b         # needs E2B_API_KEY
 ```
 
-## Datalayer
+A target whose credentials are missing stops at once, naming what it wants,
+rather than failing somewhere in the middle. `make all` runs the targets in
+sequence and therefore stops at the first one you are not set up for — it is
+a way to run the local ones, not a way to run everything.
 
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/datalayer_sandbox_example.py
+The variants that can take a GPU have a second target for it:
 
 ```bash
-make datalayer
+make modal-gpu            # MODAL_GPU, default T4
+make daytona-gpu          # DAYTONA_GPU, default H100
+make daytona-gpu-spot     # the same on preemptible capacity
+make coreweave-gpu        # COREWEAVE_GPU, default H100
+make kaggle-gpu           # KAGGLE_GPU, default T4
 ```
 
-## Daytona
+## What Each One Needs
 
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/daytona_sandbox_example.py
+Nothing here is a substitute for the per-variant pages — this is only enough
+to pick one to run. The credentials themselves are documented under
+[Providers](/providers), and the extras under [Installation](/install).
 
-```bash
-make daytona
-```
+| Variant | Target | Needs | Extra |
+| --- | --- | --- | --- |
+| [Eval](/providers/eval) | `make eval` | nothing | — |
+| [Monty](/providers/monty) | `make monty` | nothing | `[monty]` |
+| [Docker](/providers/docker) | `make docker` | a Docker daemon | `[docker]` |
+| [Jupyter Server](/providers/jupyter-server) | `make jupyter-server` | a running Jupyter Server, `JUPYTER_SERVER_URL` | — |
+| [Datalayer](/providers/datalayer) | `make datalayer` | `DATALAYER_TOKEN` | `[datalayer]` |
+| [E2B](/providers/e2b) | `make e2b` | `E2B_API_KEY` | `[e2b]` |
+| [Modal](/providers/modal) | `make modal` | `MODAL_TOKEN_ID` + `MODAL_TOKEN_SECRET` | `[modal]` |
+| [Daytona](/providers/daytona) | `make daytona` | `DAYTONA_API_KEY` | `[daytona]` |
+| [CoreWeave](/providers/coreweave) | `make coreweave` | `CWSANDBOX_API_KEY` | `[coreweave]` |
+| [Cloudflare](/providers/cloudflare) | `make cloudflare` | a deployed bridge Worker | `[cloudflare]` |
+| [Kaggle](/providers/kaggle) | `make kaggle` | `KAGGLE_API_TOKEN`, or `~/.kaggle/kaggle.json` | `[kaggle]` |
+| [Google Colab](/providers/google-colab) | `make google-colab` | `RUNTIME_URL`, `RUNTIME_ID`, `RUNTIME_PROXY_TOKEN` from a Colab session | — |
 
-## Docker
+## Two Worth Reading Rather Than Only Running
 
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/docker_sandbox_example.py
+Most of the examples say the same thing in the same shape, because most of the
+variants behave the same way. Two do not, and the difference is the point:
 
-```bash
-make docker
-```
-
-## E2B
-
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/e2b_sandbox_example.py
-
-```bash
-make e2b
-```
-
-## Eval
-
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/eval_sandbox_example.py
-
-```bash
-make eval
-```
-
-## Google Colab
-
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/google_colab_sandbox_example.py
-
-```bash
-make google-colab
-```
-
-## Jupyter Server
-
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/jupyter_server_sandbox_example.py
-
-```bash
-make jupyter-server
-```
-
-## Kaggle
-
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/kaggle_sandbox_example.py
-
-```bash
-make kaggle
-```
-
-## Modal
-
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/modal_sandbox_example.py
-
-```bash
-make modal
-```
-
-## Monty
-
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/monty_sandbox_example.py
-
-```bash
-make monty
-```
-
-See the Makefiles for all targets — one per set:
-https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/Makefile
-and https://github.com/datalayer/code-sandboxes/blob/main/examples/repl/Makefile
-
-Every example runs on the machinery the package exports — `show_and_run`
-for the exec examples, `run_repl` for the REPL ones — which is the same code
-behind `code-sandboxes exec` and `code-sandboxes repl`. See
-[Running Code](/cli).
+- **[Cloudflare](https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/cloudflare_sandbox_example.py)**
+  demonstrates a stateless backend: it shows `x = 1` in one snippet failing to
+  be there in the next, and then both ways round it — putting what shares state
+  into one snippet, or keeping it in a file, which does persist.
+- **[E2B](https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/e2b_sandbox_example.py)**
+  demonstrates the opposite end: a kernel that keeps its namespace, an HTML
+  result coming back as HTML rather than as the text of a repr, and the two
+  things only this variant offers — `set_timeout` and `get_host(port)`.
 
 ## Related Docs
 
-- [Sandboxes](/sandboxes)
-- [Installation](/installation)
-- [Running Code](/cli)
+- [Providers](/providers) — what each variant needs, in full
+- [Installation](/install) — the extras
+- [CLI](/cli) — the commands the examples are built on
