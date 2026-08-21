@@ -67,6 +67,42 @@ def _resolve_variant(variant: str | None) -> str:
     return selected
 
 
+def _colab_kwargs(
+    server_url: str | None, kernel_id: str | None, proxy_token: str | None
+) -> dict[str, Any]:
+    """What a Colab runtime needs, asked for whatever was not given."""
+    return {
+        "server_url": server_url or typer.prompt("Colab runtime URL (RUNTIME_URL)"),
+        "kernel_id": kernel_id or typer.prompt("Colab kernel id (RUNTIME_ID)"),
+        "proxy_token": proxy_token
+        or typer.prompt(
+            "Colab runtime proxy token (RUNTIME_PROXY_TOKEN)",
+            hide_input=True,
+        ),
+    }
+
+
+def _kaggle_kwargs(
+    server_url: str | None, kernel_id: str | None, token: str | None
+) -> dict[str, Any]:
+    """What a Kaggle runtime needs; the kernel is optional, the URL is not."""
+    kwargs: dict[str, Any] = {
+        "server_url": server_url or typer.prompt("Kaggle runtime proxy URL (RUNTIME_URL)"),
+    }
+    # kernel_id is optional: leave empty to create a new kernel (needs a token).
+    resolved_kernel_id = kernel_id or typer.prompt(
+        "Kaggle kernel id (RUNTIME_ID, leave empty to create a new kernel)",
+        default="",
+        show_default=False,
+    )
+    if resolved_kernel_id:
+        kwargs["kernel_id"] = resolved_kernel_id
+    resolved_token = token or os.environ.get("KAGGLE_API_TOKEN")
+    if resolved_token:
+        kwargs["token"] = resolved_token
+    return kwargs
+
+
 def _resolve_variant_kwargs(
     variant: str,
     server_url: str | None,
@@ -75,6 +111,7 @@ def _resolve_variant_kwargs(
     token: str | None,
     run_url: str | None,
     gpu: str | None,
+    spot: bool = False,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
 
@@ -83,26 +120,10 @@ def _resolve_variant_kwargs(
         kwargs["port"] = 0
 
     if variant == "google-colab":
-        kwargs["server_url"] = server_url or typer.prompt("Colab runtime URL (RUNTIME_URL)")
-        kwargs["kernel_id"] = kernel_id or typer.prompt("Colab kernel id (RUNTIME_ID)")
-        kwargs["proxy_token"] = proxy_token or typer.prompt(
-            "Colab runtime proxy token (RUNTIME_PROXY_TOKEN)",
-            hide_input=True,
-        )
+        kwargs.update(_colab_kwargs(server_url, kernel_id, proxy_token))
 
     if variant == "kaggle":
-        kwargs["server_url"] = server_url or typer.prompt("Kaggle runtime proxy URL (RUNTIME_URL)")
-        # kernel_id is optional: leave empty to create a new kernel (needs a token).
-        resolved_kernel_id = kernel_id or typer.prompt(
-            "Kaggle kernel id (RUNTIME_ID, leave empty to create a new kernel)",
-            default="",
-            show_default=False,
-        )
-        if resolved_kernel_id:
-            kwargs["kernel_id"] = resolved_kernel_id
-        resolved_token = token or os.environ.get("KAGGLE_API_TOKEN")
-        if resolved_token:
-            kwargs["token"] = resolved_token
+        kwargs.update(_kaggle_kwargs(server_url, kernel_id, token))
 
     if variant == "datalayer":
         if token:
@@ -112,6 +133,11 @@ def _resolve_variant_kwargs(
 
     if variant in {"modal", "daytona", "datalayer", "kaggle"} and gpu:
         kwargs["gpu"] = gpu
+
+    if spot:
+        if variant != "daytona":
+            raise typer.BadParameter(f"--spot is a daytona option; {variant} has none.")
+        kwargs["spot"] = True
 
     return kwargs
 
@@ -148,6 +174,14 @@ _EXEC_QUIET_OPTION = typer.Option(
     "-q",
     help="Print only what the code produced — no banner, no echo of the code.",
 )
+_RUN_SPOT_OPTION = typer.Option(
+    False,
+    "--spot",
+    help=(
+        "Run on preemptible GPU capacity (daytona): far cheaper and outside "
+        "the GPU quota, and reclaimed without warning. Needs --gpu."
+    ),
+)
 _RUN_GPU_OPTION = typer.Option(
     None,
     "--gpu",
@@ -173,6 +207,7 @@ def _started_sandbox(
     token: str | None = None,
     run_url: str | None = None,
     gpu: str | None = None,
+    spot: bool = False,
 ) -> Iterator[Sandbox]:
     """A started sandbox of the variant asked for, gone again on the way out.
 
@@ -193,6 +228,7 @@ def _started_sandbox(
         token=token,
         run_url=run_url,
         gpu=gpu,
+        spot=spot,
     )
     if announce:
         console.print(f"Starting sandbox variant: {selected}", style="cyan")
@@ -231,6 +267,7 @@ def repl(
     token: str | None = _RUN_TOKEN_OPTION,
     run_url: str | None = _RUN_RUN_URL_OPTION,
     gpu: str | None = _RUN_GPU_OPTION,
+    spot: bool = _RUN_SPOT_OPTION,
 ) -> None:
     """Open an interactive prompt on a sandbox of the selected variant.
 
@@ -247,6 +284,7 @@ def repl(
         token=token,
         run_url=run_url,
         gpu=gpu,
+        spot=spot,
     )
 
 
@@ -260,6 +298,7 @@ def _run_repl(
     token: str | None = None,
     run_url: str | None = None,
     gpu: str | None = None,
+    spot: bool = False,
 ) -> None:
     with _started_sandbox(
         variant,
@@ -271,6 +310,7 @@ def _run_repl(
         token=token,
         run_url=run_url,
         gpu=gpu,
+        spot=spot,
     ) as sandbox:
         run_repl(sandbox, console=console)
 
@@ -304,6 +344,7 @@ def exec_code(
     token: str | None = _RUN_TOKEN_OPTION,
     run_url: str | None = _RUN_RUN_URL_OPTION,
     gpu: str | None = _RUN_GPU_OPTION,
+    spot: bool = _RUN_SPOT_OPTION,
 ) -> None:
     """Run one snippet in a fresh sandbox and print what it produced.
 
@@ -325,6 +366,7 @@ def exec_code(
         token=token,
         run_url=run_url,
         gpu=gpu,
+        spot=spot,
     ) as sandbox:
         if quiet:
             result = sandbox.run_code(snippet)

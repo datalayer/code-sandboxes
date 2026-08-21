@@ -19,7 +19,8 @@ sandbox.run_code("x + 2").text  # "42"
 
 - **Requirements:** `code-sandboxes[daytona]` (installs `daytona`).
 - **Parameters:** `api_key`, `api_url`, `target`, `jwt_token`,
-  `organization_id`, `snapshot`, `image`, `python_version`, `delete_on_stop`.
+  `organization_id`, `snapshot`, `image`, `python_version`, `gpu_count`,
+  `spot`, `delete_on_stop`.
 
 ## How To Obtain Daytona Credentials
 
@@ -77,6 +78,15 @@ created, naming the ones it does:
 
 ```python
 Sandbox.create(variant="daytona", gpu="H100")
+Sandbox.create(variant="daytona", gpu="H100", gpu_count=2)
+```
+
+Name several, comma-separated, to say which you would **prefer**. Daytona takes
+the first of them it can find, so a workload that runs on either does not fail
+because the better card is busy:
+
+```python
+Sandbox.create(variant="daytona", gpu="H100,H200,RTX-4090")
 ```
 
 A GPU — like any request for `cpu` or `memory` — is a machine specification,
@@ -85,6 +95,63 @@ asking for resources builds from `Image.debian_slim()` instead of starting from
 the default snapshot, and takes longer to come up. Pass `image=` to choose that
 image yourself, or `snapshot=` to start from a snapshot of your organization
 when you need no specification.
+
+### Spot GPUs
+
+`spot=True` runs on **preemptible** capacity: far cheaper than on-demand, and
+outside your organization's GPU quota — available capacity is the only limit.
+The price is that Daytona can take the sandbox back at any moment, without
+warning, when on-demand capacity needs it.
+
+```python
+Sandbox.create(variant="daytona", gpu="H100,H200", spot=True)
+```
+
+Spot is GPU-only, and it is built from an image with `auto_delete_interval=0`
+so a reclaimed sandbox does not linger. Both are checked here: `spot=True`
+without a `gpu=`, or together with a `snapshot=`, is refused with the reason
+rather than coming back as an API error.
+
+An ordered list of GPUs is worth more on spot than anywhere else — what is
+free changes minute to minute.
+
+#### Surviving preemption
+
+There is no warning and no webhook. What there is, is a timestamp: a reclaimed
+sandbox is marked and stays retrievable for 24 hours. Ask it directly:
+
+```python
+if sandbox.preempted_at():
+    print("reclaimed, start again elsewhere")
+```
+
+You rarely have to. A reclaimed sandbox fails the way a dropped connection
+does, so `run_code` asks on your behalf and says which it was:
+
+```python
+result = sandbox.run_code("train()")
+if not result.execution_ok:
+    print(result.execution_error)
+    # "The spot sandbox was reclaimed at 2026-08-21T10:00:00Z: preemptible
+    #  capacity is taken back when on-demand capacity needs it. ..."
+```
+
+The question costs a round trip, so it is only asked of a sandbox that could
+have been reclaimed at all.
+
+#### Falling back to on-demand
+
+When there is no spot capacity, creation **fails immediately** — there is no
+queue to wait in. Falling back is left to you, deliberately: on-demand costs
+more and counts against your quota, and that is not a decision to make quietly
+on your behalf.
+
+```python
+try:
+    sandbox = Sandbox.create(variant="daytona", gpu="H100", spot=True)
+except Exception:
+    sandbox = Sandbox.create(variant="daytona", gpu="H100")
+```
 
 ### Network policy
 

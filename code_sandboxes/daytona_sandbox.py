@@ -22,6 +22,7 @@ has no channel at all, and is not reported.
 from __future__ import annotations
 
 import ast
+import contextlib
 import json
 import logging
 import math
@@ -180,27 +181,39 @@ class _Lines:
         return [rest] if rest else []
 
 
-def _gpu_type(flavor: str, daytona: Any) -> Any:
-    """The Daytona GPU of that name, or a refusal naming the ones there are.
+def _gpu_types(flavors: str, daytona: Any) -> list[Any]:
+    """The Daytona GPUs named, in the order they are preferred.
+
+    One name asks for one GPU; several, comma-separated, ask for the first of
+    them that Daytona can find — `"H100,H200,RTX-4090"` takes an H100 when
+    there is one and an H200 when there is not, rather than failing. That is
+    Daytona's own fallback, and it matters most for spot capacity, where what
+    is free changes minute to minute.
 
     The flavours differ from one provider to the next — a `T4` is Modal's
     vocabulary, not Daytona's — so a name that means nothing here is said so
     at once, rather than reaching the API as an invalid enum.
     """
-    wanted = flavor.strip().upper().replace("_", "-")
     offered = [
         candidate
         for candidate in daytona.GpuType
         if not candidate.value.lower().startswith("unknown")
     ]
-    for candidate in offered:
-        if candidate.value.upper() == wanted:
-            return candidate
-    raise SandboxConfigurationError(
-        f"Daytona has no GPU called {flavor!r}. It offers: "
-        + ", ".join(candidate.value for candidate in offered)
-        + "."
-    )
+    by_name = {candidate.value.upper(): candidate for candidate in offered}
+    wanted: list[Any] = []
+    for flavor in flavors.split(","):
+        name = flavor.strip().upper().replace("_", "-")
+        if not name:
+            continue
+        if name not in by_name:
+            raise SandboxConfigurationError(
+                f"Daytona has no GPU called {flavor.strip()!r}. It offers: "
+                + ", ".join(candidate.value for candidate in offered)
+                + "."
+            )
+        if by_name[name] not in wanted:
+            wanted.append(by_name[name])
+    return wanted
 
 
 def _import_daytona() -> Any:
@@ -232,6 +245,12 @@ class DaytonaSandbox(Sandbox):
             image, so asking for any of them builds one when none is given.
         python_version: Python of that image. Daytona's own default when
             omitted.
+        gpu_count: How many GPUs to attach when one is asked for.
+        spot: Whether to run on PREEMPTIBLE GPU capacity. Much cheaper than
+            on-demand and outside the organization's GPU quota, at the price
+            of being reclaimed without warning at any moment — see
+            :meth:`preempted_at`. GPU-only, and Daytona refuses it for a
+            sandbox that asks for none.
         delete_on_stop: Whether :meth:`stop` DELETES the sandbox, which is the
             default and what a ``with`` block should do, or merely stops it —
             leaving it in the organization, to be started again.
@@ -248,6 +267,8 @@ class DaytonaSandbox(Sandbox):
         snapshot: str | None = None,
         image: Any | None = None,
         python_version: str | None = None,
+        gpu_count: int = 1,
+        spot: bool = False,
         delete_on_stop: bool = True,
         **kwargs,
     ):
@@ -260,6 +281,8 @@ class DaytonaSandbox(Sandbox):
         self._snapshot = snapshot
         self._image = image
         self._python_version = python_version
+        self._gpu_count = gpu_count
+        self._spot = spot
         self._delete_on_stop = delete_on_stop
         self._daytona: Any | None = None
         self._sandbox: Any | None = None
@@ -275,10 +298,12 @@ class DaytonaSandbox(Sandbox):
         """The environments this provider ships.
 
         Daytona takes a machine specification per sandbox rather than a
-        catalogue of named ones, so what is offered here are the two shapes
-        worth naming — a plain sandbox, and one with a GPU attached — and
-        choosing an environment stays what it is everywhere else: choosing
-        between named things.
+        catalogue of named ones, so what is offered here are the shapes worth
+        naming — a plain sandbox, one with a GPU, and one on the preemptible
+        capacity a GPU can be had cheaply on — and choosing an environment
+        stays what it is everywhere else: choosing between named things.
+
+        The shape is asked for by argument, not by name: `gpu=` and `spot=`.
         """
         return [
             SandboxEnvironment(
@@ -297,7 +322,16 @@ class DaytonaSandbox(Sandbox):
                 owner="daytona",
                 visibility="cloud",
                 burning_rate=0.0,
-                metadata={"variant": "daytona", "gpu": "H100"},
+                metadata={"variant": "daytona", "gpu": "H100", "spot": False},
+            ),
+            SandboxEnvironment(
+                name="daytona-gpu-spot",
+                title="Daytona GPU (spot)",
+                language="python",
+                owner="daytona",
+                visibility="cloud",
+                burning_rate=0.0,
+                metadata={"variant": "daytona", "gpu": "H100", "spot": True},
             ),
         ]
 
@@ -320,11 +354,13 @@ class DaytonaSandbox(Sandbox):
                 "daytona_sandbox_id": self._sandbox.id,
                 "snapshot": getattr(self._sandbox, "snapshot", None),
                 "target": getattr(self._sandbox, "target", None),
+                "spot": bool(getattr(self._sandbox, "spot", self._spot)),
             },
             resources=ResourceConfig(
                 cpu=getattr(self._sandbox, "cpu", None),
                 memory=getattr(self._sandbox, "memory", None),
                 gpu=getattr(self._sandbox, "gpu_type", None),
+                gpu_count=getattr(self._sandbox, "gpu", None) or 1,
             ),
             config=self.config,
         )
@@ -359,6 +395,8 @@ class DaytonaSandbox(Sandbox):
         common.update(self._network_params())
 
         resources = self._resources(daytona)
+        if self._spot:
+            common.update(self._spot_params(resources))
         if self._image is not None or resources is not None:
             image = self._image
             if image is None:
@@ -369,6 +407,29 @@ class DaytonaSandbox(Sandbox):
                 )
             return daytona.CreateSandboxFromImageParams(image=image, resources=resources, **common)
         return daytona.CreateSandboxFromSnapshotParams(snapshot=self._snapshot, **common)
+
+    def _spot_params(self, resources: Any | None) -> dict[str, Any]:
+        """What asking for preemptible capacity commits the sandbox to.
+
+        Spot is GPU-only — Daytona refuses it for a sandbox that asks for no
+        GPU — and it is built from an IMAGE with `auto_delete_interval=0`, so
+        a reclaimed sandbox does not linger. Both are said here rather than
+        left to come back as an API error a caller cannot act on.
+        """
+        if resources is None or getattr(resources, "gpu", None) in (None, 0):
+            raise SandboxConfigurationError(
+                "spot=True asks for preemptible GPU capacity, so it needs a "
+                "GPU: pass gpu=... (for example gpu='H100', or "
+                "gpu='H100,H200' to fall back to the second when the first "
+                "is unavailable)."
+            )
+        if self._snapshot is not None:
+            raise SandboxConfigurationError(
+                "spot=True builds from an image, which is what carries a "
+                "machine specification; snapshot= cannot be used with it. "
+                "Pass image=, or leave both out for a Debian image."
+            )
+        return {"spot": True, "auto_delete_interval": 0}
 
     def _labels(self) -> dict[str, str]:
         """The metadata the sandbox carries in Daytona.
@@ -409,14 +470,17 @@ class DaytonaSandbox(Sandbox):
         memory = None
         if self.config.memory_limit:
             memory = max(1, math.ceil(self.config.memory_limit / 1024**3))
-        gpu_type = _gpu_type(self.config.gpu, daytona) if self.config.gpu else None
-        if cpu is None and memory is None and gpu_type is None:
+        gpu_types = _gpu_types(self.config.gpu, daytona) if self.config.gpu else []
+        if cpu is None and memory is None and not gpu_types:
             return None
         return daytona.Resources(
             cpu=cpu,
             memory=memory,
-            gpu=1 if gpu_type is not None else None,
-            gpu_type=gpu_type,
+            gpu=max(1, self._gpu_count) if gpu_types else None,
+            # One name goes as one name and several as the ordered list
+            # Daytona falls back along; a list of one would work too, but the
+            # simple case should read like the simple case in the request.
+            gpu_type=gpu_types[0] if len(gpu_types) == 1 else (gpu_types or None),
         )
 
     def stop(self) -> None:
@@ -436,6 +500,46 @@ class DaytonaSandbox(Sandbox):
         self._started = False
         if self._info:
             self._info.status = SandboxStatus.STOPPED
+
+    def preempted_at(self) -> str | None:
+        """When this spot sandbox was reclaimed, or `None` while it still runs.
+
+        Daytona takes preemptible capacity back without warning — no signal,
+        no webhook — so the only way to know is to ask, which this does
+        freshly rather than from the record the sandbox was made with. A
+        reclaimed sandbox stays retrievable for 24 hours, which is long
+        enough to find out what became of it.
+
+        Always `None` for a sandbox that is not on spot capacity: there is
+        nothing that would reclaim it.
+        """
+        if self._sandbox is None:
+            return None
+        with contextlib.suppress(Exception):
+            # A sandbox that has just gone away cannot always be asked; the
+            # answer then is whatever was last known, which is honest.
+            self._sandbox.refresh_data()
+        evicted = getattr(self._sandbox, "spot_evicted_at", None)
+        return str(evicted) if evicted else None
+
+    def _failure_reason(self, error: Exception) -> str:
+        """Why the execution did not happen, named as closely as it can be.
+
+        A reclaimed spot sandbox fails the way a dropped connection does, and
+        a caller reading "the websocket closed" has no way to tell that it was
+        outbid rather than broken. Asking costs a round trip, so it is only
+        asked of a sandbox that could have been reclaimed at all.
+        """
+        if self._spot:
+            evicted = self.preempted_at()
+            if evicted:
+                return (
+                    f"The spot sandbox was reclaimed at {evicted}: preemptible "
+                    "capacity is taken back when on-demand capacity needs it. "
+                    "Run this again on a new sandbox, or ask for on-demand "
+                    "capacity with spot=False."
+                )
+        return f"Failed to execute code on Daytona: {error}"
 
     def _interpreter_context(self, context: Context | None) -> Any | None:
         """The Daytona context one of ours stands for, made on first use.
@@ -519,7 +623,7 @@ class DaytonaSandbox(Sandbox):
         except Exception as error:
             return ExecutionResult(
                 execution_ok=False,
-                execution_error=f"Failed to execute code on Daytona: {error}",
+                execution_error=self._failure_reason(error),
                 started_at=started_at,
                 completed_at=time.time(),
                 context_id=context.id if context else "default",

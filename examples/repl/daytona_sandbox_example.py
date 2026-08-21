@@ -31,7 +31,20 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gpu",
         default=os.environ.get("DAYTONA_GPU"),
-        help="Optional GPU (for example: H100, H200, RTX-4090).",
+        help=(
+            "Optional GPU (for example: H100, H200, RTX-4090). Several, "
+            "comma-separated, are an ordered list of preferences Daytona "
+            "falls back along."
+        ),
+    )
+    parser.add_argument(
+        "--spot",
+        action="store_true",
+        default=bool(os.environ.get("DAYTONA_SPOT")),
+        help=(
+            "Run on preemptible GPU capacity: far cheaper and outside the GPU "
+            "quota, and reclaimed without warning. Needs --gpu."
+        ),
     )
     parser.add_argument(
         "--keep",
@@ -53,7 +66,11 @@ def main() -> None:
         raise SystemExit(1)
 
     if args.gpu:
-        print(f"Launching daytona sandbox REPL with GPU: {args.gpu}")
+        capacity = "spot (preemptible)" if args.spot else "on-demand"
+        print(f"Launching daytona sandbox REPL with GPU: {args.gpu} on {capacity}")
+    elif args.spot:
+        print("--spot needs --gpu: preemptible capacity is GPU capacity.")
+        raise SystemExit(1)
     else:
         print("Launching daytona sandbox REPL without GPU.")
 
@@ -62,6 +79,7 @@ def main() -> None:
             variant="daytona",
             timeout=60,
             gpu=args.gpu,
+            spot=args.spot,
             delete_on_stop=not args.keep,
         ) as sandbox:
             print(f"Sandbox: {sandbox.sandbox_id}")

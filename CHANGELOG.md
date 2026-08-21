@@ -8,6 +8,18 @@
 
 ## Unreleased
 
+- Added GPU support to the `daytona` variant. `gpu=` takes Daytona's own
+  flavors, `gpu_count=` how many, and several names comma-separated are an
+  ordered list of preferences Daytona falls back along — `gpu="H100,H200"`
+  takes an H200 when no H100 is free. `spot=True` runs on preemptible
+  capacity, which is far cheaper and outside the GPU quota; it is GPU-only and
+  built from an image with `auto_delete_interval=0`, both checked before the
+  request rather than left to come back as an API error.
+  `DaytonaSandbox.preempted_at()` answers when a spot sandbox was reclaimed,
+  and `run_code` asks on your behalf so that an eviction is not reported as a
+  dropped connection. `code-sandboxes exec/repl --spot` reaches it from the
+  CLI.
+
 - Renamed the `google_colab` variant to `google-colab`, so every canonical
   variant name is spelled the one way (`jupyter-server` already was). Any
   spelling is still accepted everywhere a variant is named — `normalize_variant`

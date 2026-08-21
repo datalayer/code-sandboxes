@@ -86,12 +86,14 @@ Supported variants:
 - `monty`
 
 `exec` and `repl` take the same options: `--variant`, `--timeout`,
-`--environment`, `--gpu`, and the connection settings a variant needs.
+`--environment`, `--gpu`, `--spot`, and the connection settings a variant
+needs.
 
 ## Variant-specific Behavior
 
 - `daytona`: starts a Daytona sandbox; `--gpu` takes Daytona's own flavors
-  (`H100`, `H200`, `RTX-4090`, ...).
+  (`H100`, `H200`, `RTX-4090`, ...), several of them comma-separated to fall
+  back along, and `--spot` runs on preemptible capacity.
 - `google-colab`: prompts for runtime URL, kernel ID, and proxy token.
 - `jupyter-server`: starts a managed local Jupyter server on a random port.
 - `kaggle`: supports either interactive runtime settings or credential-based batch execution.

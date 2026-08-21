@@ -109,6 +109,13 @@ class _FakeDaytonaSandbox:
         self.fs = _FakeFilesystem()
         self.deleted = False
         self.stopped = False
+        self.spot_evicted_at = None
+        #: How often the record was re-read. Asking Daytona is a round trip,
+        #: so a test can say when one was worth making.
+        self.refreshes = 0
+
+    def refresh_data(self):
+        self.refreshes += 1
 
     def delete(self):
         self.deleted = True
@@ -436,12 +443,30 @@ def test_the_name_travels_as_a_label_not_as_daytonas_name():
 
 def test_a_gpu_daytona_does_not_have_is_refused_by_name():
     daytona = pytest.importorskip("daytona")
-    from code_sandboxes.daytona_sandbox import _gpu_type
+    from code_sandboxes.daytona_sandbox import _gpu_types
 
     with pytest.raises(SandboxConfigurationError, match="no GPU called 'T4'"):
-        _gpu_type("T4", daytona)
+        _gpu_types("T4", daytona)
 
-    assert _gpu_type("h100", daytona) == daytona.GpuType.H100
+    assert _gpu_types("h100", daytona) == [daytona.GpuType.H100]
+
+
+def test_several_gpus_are_an_ordered_list_of_preferences():
+    """Daytona takes the first of them it can find, which is the point."""
+    daytona = pytest.importorskip("daytona")
+    from code_sandboxes.daytona_sandbox import _gpu_types
+
+    assert _gpu_types("H100, rtx_4090 ,H200", daytona) == [
+        daytona.GpuType.H100,
+        daytona.GpuType.RTX_4090,
+        daytona.GpuType.H200,
+    ]
+    # A name repeated is still one preference, in the place it was first named.
+    assert _gpu_types("H100,H100", daytona) == [daytona.GpuType.H100]
+    # And one bad name in a list is still a refusal: falling back silently to
+    # the rest would hand out a GPU nobody asked for.
+    with pytest.raises(SandboxConfigurationError, match="no GPU called 'T4'"):
+        _gpu_types("H100,T4", daytona)
 
 
 def test_resources_are_only_asked_for_when_the_configuration_says_so():
@@ -453,6 +478,108 @@ def test_resources_are_only_asked_for_when_the_configuration_says_so():
     )._resources(daytona)
     assert (resources.cpu, resources.memory, resources.gpu) == (2, 4, 1)
     assert resources.gpu_type == daytona.GpuType.H100
+
+
+def test_spot_asks_for_exactly_what_the_documented_example_does():
+    """Preemptible capacity: an image, `spot`, and no lingering afterwards."""
+    daytona = pytest.importorskip("daytona")
+
+    params = _started(SandboxConfig(gpu="H100,H200"), spot=True, gpu_count=2)._create_params(
+        daytona
+    )
+
+    assert isinstance(params, daytona.CreateSandboxFromImageParams)
+    assert params.spot is True
+    # Mandatory for spot: a reclaimed sandbox does not hang about.
+    assert params.auto_delete_interval == 0
+    assert params.resources.gpu == 2
+    assert params.resources.gpu_type == [daytona.GpuType.H100, daytona.GpuType.H200]
+
+
+def test_one_gpu_goes_as_one_name_not_as_a_list_of_one():
+    daytona = pytest.importorskip("daytona")
+
+    resources = _started(SandboxConfig(gpu="H100"))._resources(daytona)
+
+    assert resources.gpu_type == daytona.GpuType.H100
+
+
+def test_spot_without_a_gpu_is_refused_with_the_reason():
+    """Daytona rejects it too; saying so here costs no round trip."""
+    daytona = pytest.importorskip("daytona")
+
+    with pytest.raises(SandboxConfigurationError, match="needs a GPU"):
+        _started(SandboxConfig(), spot=True)._create_params(daytona)
+
+
+def test_spot_from_a_snapshot_is_refused():
+    """Only an image carries a machine specification, and spot needs one."""
+    daytona = pytest.importorskip("daytona")
+
+    sandbox = _started(SandboxConfig(gpu="H100"), spot=True, snapshot="my-snapshot")
+    with pytest.raises(SandboxConfigurationError, match="snapshot"):
+        sandbox._create_params(daytona)
+
+
+def test_a_sandbox_that_was_not_asked_for_on_spot_does_not_say_spot():
+    daytona = pytest.importorskip("daytona")
+
+    params = _started(SandboxConfig(gpu="H100"))._create_params(daytona)
+
+    assert params.spot is None
+
+
+def test_being_reclaimed_is_reported_as_being_reclaimed():
+    """A dropped connection and an eviction read alike without asking."""
+    sandbox = _started(SandboxConfig(gpu="H100"), spot=True)
+    sandbox._sandbox.spot_evicted_at = "2026-08-21T10:00:00Z"
+
+    def gone(*_args, **_kwargs):
+        raise RuntimeError("websocket closed")
+
+    sandbox._sandbox.code_interpreter.run_code = gone
+    result = sandbox.run_code("1 + 1")
+
+    assert not result.execution_ok
+    assert "reclaimed at 2026-08-21T10:00:00Z" in (result.execution_error or "")
+
+
+def test_a_failure_that_is_not_an_eviction_is_still_reported_as_itself():
+    sandbox = _started(SandboxConfig(gpu="H100"), spot=True)
+
+    def gone(*_args, **_kwargs):
+        raise RuntimeError("websocket closed")
+
+    sandbox._sandbox.code_interpreter.run_code = gone
+    result = sandbox.run_code("1 + 1")
+
+    assert "websocket closed" in (result.execution_error or "")
+    assert "reclaimed" not in (result.execution_error or "")
+
+
+def test_a_sandbox_on_demand_is_never_asked_whether_it_was_reclaimed():
+    """The question costs a round trip and has one answer for on-demand."""
+    sandbox = _started(SandboxConfig())
+
+    def gone(*_args, **_kwargs):
+        raise RuntimeError("websocket closed")
+
+    sandbox._sandbox.code_interpreter.run_code = gone
+    result = sandbox.run_code("1 + 1")
+
+    assert "websocket closed" in (result.execution_error or "")
+    assert sandbox._sandbox.refreshes == 0
+
+
+def test_the_eviction_is_read_freshly_rather_than_from_the_old_record():
+    """It happened after the sandbox was made, so the copy it holds is stale."""
+    sandbox = _started(SandboxConfig(gpu="H100"), spot=True)
+
+    assert sandbox.preempted_at() is None
+    assert sandbox._sandbox.refreshes == 1
+
+    sandbox._sandbox.spot_evicted_at = "2026-08-21T10:00:00Z"
+    assert sandbox.preempted_at() == "2026-08-21T10:00:00Z"
 
 
 def test_asking_for_resources_creates_from_an_image():
@@ -485,6 +612,7 @@ def test_the_variant_is_registered_everywhere_a_variant_is_named():
     assert [env.name for env in Sandbox.list_environments(variant="daytona")] == [
         "daytona-default",
         "daytona-gpu",
+        "daytona-gpu-spot",
     ]
     assert get_provider("daytona") is not None
     assert "daytona" in manageable_variants()

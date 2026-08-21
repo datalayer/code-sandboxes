@@ -13,6 +13,10 @@ Auth:
 GPU options:
 - pass `--gpu H100` (or H200/RTX-4090/RTX-5090/RTX-PRO-6000), or
 - set DAYTONA_GPU in the environment.
+- name several — `--gpu H100,H200` — to fall back to the second when the
+  first is unavailable.
+- add `--spot` for preemptible capacity: far cheaper, outside the GPU quota,
+  and reclaimed without warning. The run below says which happened.
 
 Asking for a GPU asks for a machine specification, and Daytona takes one only
 when the sandbox is built from an IMAGE — so a GPU run starts from a Debian
@@ -36,7 +40,20 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gpu",
         default=os.environ.get("DAYTONA_GPU"),
-        help="Optional GPU (for example: H100, H200, RTX-4090).",
+        help=(
+            "Optional GPU (for example: H100, H200, RTX-4090). Several, "
+            "comma-separated, are an ordered list of preferences Daytona "
+            "falls back along."
+        ),
+    )
+    parser.add_argument(
+        "--spot",
+        action="store_true",
+        default=bool(os.environ.get("DAYTONA_SPOT")),
+        help=(
+            "Run on preemptible GPU capacity: far cheaper and outside the GPU "
+            "quota, and reclaimed without warning. Needs --gpu."
+        ),
     )
     return parser.parse_args()
 
@@ -61,6 +78,22 @@ if smi:
 """
 
 
+def _verify_gpu(sandbox, gpu: str, *, spot: bool) -> None:
+    """Prove the GPU is there, and say whether spot capacity still holds it."""
+    probe = show_and_run(sandbox, _gpu_probe_code()).stdout.strip()
+    # A GPU run must PROVE the GPU: the driver present, and at least one
+    # device listed.
+    if "nvidia-smi present" not in probe:
+        raise RuntimeError("GPU requested but nvidia-smi is missing in the sandbox.")
+    if "devices NONE" in probe or "GPU-PROBE: devices" not in probe:
+        raise RuntimeError("GPU requested but no device is listed by nvidia-smi.")
+    print(f"GPU verified: {gpu} is present.")
+    if spot:
+        # No warning is given before spot capacity is taken back, so the only
+        # way to know is to ask.
+        print("spot: reclaimed at", sandbox.preempted_at() or "not yet")
+
+
 def main() -> None:
     args = _parse_args()
     if not _has_daytona_auth():
@@ -70,12 +103,16 @@ def main() -> None:
         raise SystemExit(1)
 
     if args.gpu:
-        print(f"Launching daytona sandbox with GPU: {args.gpu}")
+        capacity = "spot (preemptible)" if args.spot else "on-demand"
+        print(f"Launching daytona sandbox with GPU: {args.gpu} on {capacity} capacity")
+    elif args.spot:
+        print("--spot needs --gpu: preemptible capacity is GPU capacity.")
+        raise SystemExit(1)
     else:
         print("Launching daytona sandbox without GPU.")
 
     try:
-        with Sandbox.create(variant="daytona", timeout=60, gpu=args.gpu) as sandbox:
+        with Sandbox.create(variant="daytona", timeout=60, gpu=args.gpu, spot=args.spot) as sandbox:
             print(f"Sandbox: {sandbox.sandbox_id}")
 
             # What tells this variant apart from a per-snippet runner: the
@@ -96,15 +133,7 @@ def main() -> None:
             print("file round trip:", sandbox.files.read_bytes("/tmp/hello.bin"))
 
             if args.gpu:
-                gpu_result = show_and_run(sandbox, _gpu_probe_code())
-                probe = gpu_result.stdout.strip()
-                # A GPU run must PROVE the GPU: the driver present, and at
-                # least one device listed.
-                if "nvidia-smi present" not in probe:
-                    raise RuntimeError("GPU requested but nvidia-smi is missing in the sandbox.")
-                if "devices NONE" in probe or "GPU-PROBE: devices" not in probe:
-                    raise RuntimeError("GPU requested but no device is listed by nvidia-smi.")
-                print(f"GPU verified: {args.gpu} is present.")
+                _verify_gpu(sandbox, args.gpu, spot=args.spot)
 
             # The error path, demonstrated ON PURPOSE: the run must not die,
             # the failure must come back as a `code_error` on the result. Said

@@ -2,7 +2,7 @@
 
 PYTHON ?= python
 
-.PHONY: all eval docker jupyter-server monty google-colab kaggle kaggle-gpu kaggle-live kaggle-gpu-live modal modal-gpu daytona daytona-gpu datalayer
+.PHONY: all eval docker jupyter-server monty google-colab kaggle kaggle-gpu kaggle-live kaggle-gpu-live modal modal-gpu daytona daytona-gpu daytona-gpu-spot datalayer
 
 all: eval docker jupyter-server monty google-colab modal daytona datalayer
 
@@ -58,6 +58,13 @@ daytona: ## Daytona REPL (CPU)
 daytona-gpu: ## Daytona REPL on a GPU (DAYTONA_GPU flavor, default H100)
 	@echo "==> Daytona REPL (GPU: $${DAYTONA_GPU:-H100}; built from an image, so slower to start)"
 	DAYTONA_GPU=$${DAYTONA_GPU:-H100} $(PYTHON) daytona_sandbox_example.py --gpu "$${DAYTONA_GPU:-H100}"
+
+daytona-gpu-spot: ## Daytona REPL on a SPOT GPU (DAYTONA_GPU flavor, default H100,H200)
+	@echo "==> Daytona REPL (spot GPU: $${DAYTONA_GPU:-H100,H200})"
+	@echo "    Preemptible capacity: cheaper, outside the GPU quota, and"
+	@echo "    reclaimed without warning. Creation fails at once when there"
+	@echo "    is none free — there is no queue to wait in."
+	DAYTONA_GPU=$${DAYTONA_GPU:-H100,H200} $(PYTHON) daytona_sandbox_example.py --gpu "$${DAYTONA_GPU:-H100,H200}" --spot
 
 datalayer:
 	$(PYTHON) datalayer_sandbox_example.py
