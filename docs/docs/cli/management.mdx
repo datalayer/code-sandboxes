@@ -59,7 +59,7 @@ below the table instead of hiding the ones that answered.
 from code_sandboxes import get_manager, manageable_variants
 
 print(manageable_variants())
-# ['datalayer', 'daytona', 'docker', 'eval', 'google-colab', 'jupyter-server', 'kaggle', 'modal', 'monty']
+# ['cloudflare', 'coreweave', 'datalayer', 'daytona', 'docker', 'e2b', 'eval', 'google-colab', 'jupyter-server', 'kaggle', 'modal', 'monty']
 
 manager = get_manager("modal")
 for info in manager.list():
@@ -76,6 +76,9 @@ get_manager("jupyter-server", server_url="http://localhost:8888", token="...")
 get_manager("google-colab", server_url="https://...", proxy_token="...")
 get_manager("modal", app_name="code-sandboxes")
 get_manager("daytona", api_key="dtn_...", target="eu")
+get_manager("e2b", api_key="e2b_...", domain="e2b.example.com")
+get_manager("coreweave", api_key="...", base_url="https://api.cwsandbox.com")
+get_manager("cloudflare", api_url="https://...workers.dev", api_key="...")
 get_manager("kaggle", username="...")
 get_manager("datalayer", token="...", run_url="https://...")
 ```
@@ -84,9 +87,12 @@ get_manager("datalayer", token="...", run_url="https://...")
 
 | Variant | A sandbox is | Update changes | Delete removes |
 | --- | --- | --- | --- |
+| `cloudflare` | a container of a deployed sandbox bridge | — nothing in place | the Cloudflare sandbox |
+| `coreweave` | a sandbox of the CoreWeave organization | — nothing in place | the CoreWeave sandbox |
 | `datalayer` | a runtime of the Datalayer platform | the capabilities | the runtime |
 | `daytona` | a sandbox of the Daytona organization | the labels | the Daytona sandbox |
 | `docker` | a container labelled `code-sandboxes` | the name | the container (forced) |
+| `e2b` | a sandbox of the E2B account | — nothing in place | the E2B sandbox |
 | `eval`, `monty` | an object inside the creating process | — not supported | — not supported |
 | `google-colab` | a kernel of the Colab runtime | — nothing in place | the kernel |
 | `jupyter-server` | a kernel of the Jupyter Server | — nothing in place | the kernel |
@@ -98,6 +104,12 @@ through `manager.capabilities` and raises `SandboxManagementError` with the
 reason for the rest — an `eval` sandbox lives and dies inside the process that
 made it, so `list` truthfully answers `[]` and `delete` explains itself rather
 than silently doing nothing.
+
+Cloudflare notes: `create`, `get` and `delete` are answered; `list` is **not**.
+The sandbox bridge exposes a sandbox by its id and has no endpoint that
+enumerates them, so `code-sandboxes list -v cloudflare` raises with that
+reason instead of answering with an empty list — "none" and "cannot know" are
+different facts, and a management tool that confuses them loses sandboxes.
 
 Kaggle notes: `list` enumerates your kernels (`mine=True`), `get` adds the
 live run status, and `create` pushes a batch kernel with the given `--code` —

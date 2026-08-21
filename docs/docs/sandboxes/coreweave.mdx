@@ -1,0 +1,189 @@
+---
+sidebar_position: 3
+title: CoreWeave
+---
+
+# CoreWeave
+
+Runs code in a
+[CoreWeave Sandbox](https://www.coreweave.com/products/coreweave-sandboxes) — a
+container on CoreWeave's own GPU cloud, placed on a managed runner and
+addressed through the `cwsandbox` SDK.
+
+State **persists** between calls, though CoreWeave itself offers nothing that
+holds a Python namespace: what it offers is a container and `exec`, a process
+at a time. So the variant holds one itself. A single `python -u -c` process is
+started with the sandbox and fed JSON lines on stdin, one request and one reply
+each — the same arrangement the [Modal](./modal) variant uses, and for the same
+reason:
+
+```python
+sandbox.run_code("x = 40")
+sandbox.run_code("x + 2").text  # "42"
+```
+
+A session process that cannot be started, or that goes away mid-session, drops
+the sandbox back to a process per snippet — working, merely stateless — rather
+than failing the run. Which of the two you got is recorded on the sandbox, so a
+caller who depends on state can ask rather than assume:
+
+```python
+sandbox.info.metadata["stateful"]  # True when the session process is there
+```
+
+Pass `stateful=False` to turn the session process off and run every snippet on
+its own.
+
+- **Requirements:** `code-sandboxes[coreweave]` (installs `cwsandbox`).
+- **Parameters:** `api_key`, `base_url`, `container_image`, `profile_names`,
+  `runner_ids`, `python_executable`, `stateful`.
+
+## How To Obtain CoreWeave Credentials
+
+1. Create an access token in the CoreWeave console and export it:
+   ```bash
+   export CWSANDBOX_API_KEY="..."
+   ```
+   It travels as a bearer token.
+2. Optionally point at another control plane:
+   ```bash
+   export CWSANDBOX_BASE_URL="https://api.cwsandbox.com"   # the default
+   ```
+
+Both can be passed to the sandbox instead of exported. The SDK authenticates
+from the environment and takes no token argument, so passing one here sets the
+variable for this process:
+
+```python
+Sandbox.create(variant="coreweave", api_key="...", base_url="https://api.cwsandbox.com")
+```
+
+The product documentation is at
+[docs.coreweave.com/products/sandboxes](https://docs.coreweave.com/products/sandboxes).
+
+## Usage
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="coreweave") as sandbox:
+    result = sandbox.run_code("import sys; sys.version_info[:2]")
+    print(result.text)  # "(3, 11)"
+```
+
+The container is `python:3.11` unless `container_image=` names another. An
+image that carries what the code needs saves installing it on every run:
+
+```python
+Sandbox.create(variant="coreweave", container_image="my-registry/analysis:2026-08")
+```
+
+### GPUs
+
+CoreWeave is a GPU cloud, and a GPU is asked for the way it is everywhere else
+in this package:
+
+```python
+Sandbox.create(variant="coreweave", gpu="H100")
+```
+
+CoreWeave places a sandbox on a runner of one kind and has no fallback list of
+its own, so a comma-separated list is read as the first name in it rather than
+as preferences to fall back along. The image has to carry what the code needs
+to use the card — `python:3.11` carries nothing of CUDA.
+
+### CPU and memory
+
+`cpu` and `memory` become Kubernetes quantities, sent as both the requests and
+the limits of the container — cores as a whole number, memory rounded up to
+whole gibibytes:
+
+```python
+Sandbox.create(variant="coreweave", cpu=2.0, memory=4096)
+```
+
+Left out, CoreWeave's own defaults for the runner apply.
+
+### Network policy
+
+The policy of the configuration becomes CoreWeave's own network options:
+
+```python
+# No egress and no ingress at all.
+Sandbox.create(variant="coreweave", network_policy="none")
+
+# Only these hosts, as egress rules — naming what may be reached denies the rest.
+Sandbox.create(
+    variant="coreweave",
+    network_policy="allowlist",
+    allowed_hosts=["pypi.org", "files.pythonhosted.org"],
+)
+```
+
+`network_policy="allowlist"` with no `allowed_hosts` is refused with the
+reason: a sandbox allowed nothing is a sandbox with no network at all, which is
+`network_policy="none"` and should say so.
+
+### Sandbox profiles and runners
+
+`profile_names` names CoreWeave's own policy objects — what a sandbox is
+allowed to do — and `runner_ids` pins it to particular managed runners. Both
+are left to CoreWeave when omitted, which is the usual case:
+
+```python
+Sandbox.create(variant="coreweave", profile_names=["restricted"])
+```
+
+### Names and tags
+
+CoreWeave keeps tags as a flat list of strings rather than as a map, so a pair
+is written `key=value`. That is how the name and the tags of the configuration
+survive the crossing and can be read back by `list`, next to
+`created-by=code-sandboxes`, which is what tells the sandboxes this package
+made from the rest of the organization's:
+
+```python
+Sandbox.create(variant="coreweave", name="nightly-report", tags={"team": "ai"})
+```
+
+`code-sandboxes list -v coreweave` shows what is there; see the
+[management guide](/cli/management).
+
+## What Is Not Reported
+
+The session process answers with what the code printed, the value of its
+trailing expression, and the error it raised. There is no channel for anything
+else, so:
+
+- The value of a trailing expression **is** reported — it is evaluated and its
+  `repr` carried back in the reply, which is what makes `result.text` work
+  above.
+- Rich display data — a figure, an HTML repr, a PNG — has no channel at all and
+  is **not** returned. `result.results` only ever holds the text value.
+- There is no interrupt: `sandbox.interrupt()` answers `False`. A snippet that
+  runs past its timeout has the SESSION stopped — not just the wait for its
+  answer — because a snippet nobody is waiting for would otherwise go on
+  changing the namespace. The next execution starts a new session, so nothing
+  defined before the timeout is still there; the timeout message says so.
+- Contexts do not isolate: there is one session process and therefore one
+  namespace. `create_context()` gives a context back, but two of them see each
+  other's variables.
+
+Variables cross as JSON (`get_variable`, `set_variable`, and everything built
+on them such as `sandbox.commands.run`), so a value that cannot be encoded
+comes back as its `repr` rather than as the object itself, and one that cannot
+be *sent* is refused with a reason.
+
+They need the session process, and say so when there is none — under
+`stateful=False`, or after a session was stopped. Without it each snippet runs
+in a process of its own, so a variable set by one would be gone before the next
+could read it; refusing is the honest answer, and reporting a successful set
+would not be.
+
+Binary files go straight to CoreWeave's filesystem API rather than through a
+program that decodes them:
+
+```python
+sandbox.files.write_bytes("/tmp/data.parquet", payload)
+sandbox.files.read_bytes("/tmp/data.parquet")
+```

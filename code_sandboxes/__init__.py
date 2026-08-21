@@ -21,6 +21,9 @@ Remote sandboxes (out-of-process execution via Jupyter kernel protocol):
 Cloud container sandboxes:
     - ModalSandbox: Modal cloud containers, per-snippet process execution
     - DaytonaSandbox: Daytona cloud sandboxes, stateful Python interpreter
+    - E2BSandbox: E2B microVMs, stateful Python kernel and rich outputs
+    - CoreWeaveSandbox: CoreWeave containers, stateful Python session
+    - CloudflareSandbox: Cloudflare containers, through a sandbox bridge Worker
 
 Features:
 - Code execution with streaming support
@@ -60,6 +63,7 @@ Style usage:
 
 from .base import Sandbox
 from .client import CodeExecutionOutcome, CodeSandboxClient, execution_result_to_reply
+from .cloudflare_sandbox import CloudflareSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .console import (
     EXIT_COMMANDS,
@@ -69,9 +73,11 @@ from .console import (
     show_code,
     show_result,
 )
+from .coreweave_sandbox import CoreWeaveSandbox
 from .datalayer_sandbox import DatalayerSandbox
 from .daytona_sandbox import DaytonaSandbox
 from .docker_sandbox import DockerSandbox
+from .e2b_sandbox import E2BSandbox
 from .eval_sandbox import EvalSandbox
 from .exceptions import (
     ContextNotFoundError,
@@ -147,15 +153,18 @@ __all__ = [
     "EXIT_COMMANDS",
     "KAGGLE_API_TOKEN_ENV",
     "PROVIDERS",
+    "CloudflareSandbox",
     "CodeError",
     "CodeExecutionOutcome",
     "CodeSandboxClient",
     "CommandResult",
     "Context",
     "ContextNotFoundError",
+    "CoreWeaveSandbox",
     "DatalayerSandbox",
     "DaytonaSandbox",
     "DockerSandbox",
+    "E2BSandbox",
     "EvalSandbox",
     "ExecutionResult",
     "FileInfo",

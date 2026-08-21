@@ -1,0 +1,72 @@
+# Copyright (c) 2025-2026 Datalayer, Inc.
+# BSD 3-Clause License
+
+"""REPL example: e2b sandbox (Firecracker microVM with a Jupyter kernel).
+
+Run with:
+  python examples/repl/e2b_sandbox_example.py
+
+Auth:
+- create an API key at https://e2b.dev and export E2B_API_KEY.
+- export E2B_DOMAIN as well to talk to a self-hosted cluster rather than to
+  e2b.dev.
+
+The prompt behaves as a REPL should: the kernel holds one namespace, so
+definitions persist between lines, and a line that is an expression answers
+with its value.
+"""
+
+import argparse
+import os
+
+from code_sandboxes import Sandbox, run_repl
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the e2b sandbox REPL example.")
+    parser.add_argument(
+        "--template",
+        default=os.environ.get("E2B_TEMPLATE"),
+        help=(
+            "The E2B template to create from. `code-interpreter-v1` unless "
+            "told otherwise — and anything named here has to be built on top "
+            "of it, since only a template carrying a Jupyter kernel can serve "
+            "the interpreter this variant drives."
+        ),
+    )
+    parser.add_argument(
+        "--minutes",
+        type=float,
+        default=5.0,
+        help=(
+            "How long the sandbox may live. E2B takes one down when its "
+            "timeout runs out, whatever it is doing — including a prompt "
+            "somebody is still typing at."
+        ),
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = _parse_args()
+    if not os.environ.get("E2B_API_KEY"):
+        print("E2B auth not found.")
+        print("Set E2B_API_KEY. Create a key at https://e2b.dev.")
+        raise SystemExit(1)
+
+    print(f"Launching e2b sandbox REPL from template: {args.template or 'code-interpreter-v1'}")
+
+    try:
+        with Sandbox.create(variant="e2b", timeout=60, template=args.template) as sandbox:
+            print(f"Sandbox: {sandbox.sandbox_id}")
+            # A REPL is read at human speed, and the default life of a sandbox
+            # is shorter than a session usually is.
+            sandbox.set_timeout(args.minutes * 60)
+            run_repl(sandbox)
+    except Exception as exc:
+        print("e2b REPL failed:", exc)
+        raise SystemExit(1) from exc
+
+
+if __name__ == "__main__":
+    main()

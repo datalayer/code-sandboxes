@@ -32,9 +32,12 @@ def test_every_variant_of_the_enum_has_a_manager_in_any_spelling():
 
 def test_every_variant_has_a_manager():
     assert manageable_variants() == [
+        "cloudflare",
+        "coreweave",
         "datalayer",
         "daytona",
         "docker",
+        "e2b",
         "eval",
         "google-colab",
         "jupyter-server",

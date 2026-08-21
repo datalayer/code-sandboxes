@@ -11,9 +11,9 @@ A sandbox is an isolated environment where code can be executed safely. Code San
 
 Use `Sandbox.create()` to create a new sandbox:
 
-Canonical variant names are `datalayer`, `daytona`, `docker`, `eval`,
-`google-colab`, `jupyter-server`, `kaggle`, `modal`, and `monty`. Older `local-*`
-names are no longer supported.
+Canonical variant names are `cloudflare`, `coreweave`, `datalayer`,
+`daytona`, `docker`, `e2b`, `eval`, `google-colab`, `jupyter-server`, `kaggle`,
+`modal`, and `monty`. Older `local-*` names are no longer supported.
 
 A name is read in whatever spelling it arrives in: `google-colab`,
 `google_colab` and `Google Colab` all name the same variant.
@@ -64,9 +64,12 @@ Each page below explains how to configure each variant.
 
 | Variant | Summary |
 |---------|---------|
+| [`cloudflare`](./cloudflare) | Container on Cloudflare's edge, through a deployed sandbox bridge Worker |
+| [`coreweave`](./coreweave) | Container on CoreWeave with a session process and an optional GPU |
 | [`datalayer`](./datalayer) | Datalayer managed runtime with optional GPU |
 | [`daytona`](./daytona) | Daytona cloud sandbox with a stateful interpreter |
 | [`docker`](./docker) | Jupyter execution in a Docker container |
+| [`e2b`](./e2b) | E2B Firecracker microVM with a Jupyter kernel and rich outputs |
 | [`eval`](./eval) | In-process `exec()` for fast development-only runs |
 | [`google-colab`](./google-colab) | Google Colab runtime via runtime proxy |
 | [`jupyter-server`](./jupyter-server) | Jupyter kernel-backed execution with persistent state |
@@ -150,7 +153,7 @@ value * 2
 
 ## State Persistence
 
-All sandbox variants keep state (variables, imports, and definitions)
+Most sandbox variants keep state (variables, imports, and definitions)
 within the same sandbox instance. For example:
 
 ```python
@@ -160,6 +163,12 @@ with Sandbox.create() as sandbox:
     result = sandbox.run_code("counter")
     print(result.text)  # 2
 ```
+
+What a variant cannot do is hold a namespace open when its backend gives it
+nothing to hold one with. [`cloudflare`](./cloudflare) runs each snippet in a
+process of its own for that reason, and its page says what to do instead;
+[`coreweave`](./coreweave) keeps a session process and falls back to the same
+arrangement when that process cannot be started.
 
 ### Streaming Output
 

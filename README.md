@@ -15,9 +15,12 @@ Code Sandboxes (`code_sandboxes`) is a Python package for running code in isolat
 
 Canonical variant names:
 
+- `cloudflare`
+- `coreweave`
 - `datalayer`
 - `daytona`
 - `docker`
+- `e2b`
 - `eval`
 - `google-colab`
 - `jupyter-server`

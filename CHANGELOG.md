@@ -8,6 +8,62 @@
 
 ## Unreleased
 
+- Added three cloud variants: `e2b`, `coreweave` and `cloudflare`.
+
+  `e2b` runs in a Firecracker microVM through E2B's code interpreter SDK, so it
+  holds a Jupyter kernel per context — `x = 1` in one call is still there in
+  the next — and answers with rich display data: a figure comes back as an
+  image, an HTML repr as HTML. It needs `E2B_API_KEY` and
+  `pip install code-sandboxes[e2b]`. `set_timeout()` extends the life of a
+  running sandbox and `get_host(port)` gives the public host of a port inside.
+
+  `coreweave` runs a container on CoreWeave's GPU cloud. What the SDK offers is
+  `exec` — a process at a time — so a namespace is held here instead: one
+  `python -u -c` session is started with the sandbox and fed JSON lines on
+  stdin, the same arrangement the `modal` variant uses, and snippets share a
+  namespace as they do everywhere else. A session that cannot start, or that
+  goes away, drops back to a process per snippet rather than failing. It needs
+  `CWSANDBOX_API_KEY` and `pip install code-sandboxes[coreweave]`.
+
+  `cloudflare` runs a container on Cloudflare's edge. Cloudflare's own SDK is a
+  Workers binding written in TypeScript, which a Python process cannot hold, so
+  this variant drives the SANDBOX BRIDGE — the Worker Cloudflare publishes to
+  expose the SDK over HTTP. Deploy it once with
+  `npm create cloudflare -- sandbox-bridge --template=cloudflare/sandbox-sdk/bridge/worker`,
+  then set `CLOUDFLARE_SANDBOX_API_URL` and `CLOUDFLARE_SANDBOX_API_KEY`. The
+  bridge gives a started process nothing to write to, so each snippet runs in
+  one of its own and state does not carry between calls — put what shares state
+  in one snippet, or keep it in a file, which does persist. Its manager creates,
+  gets and deletes; it cannot list, because the bridge has no endpoint that
+  enumerates sandboxes, and says so rather than answering with an empty list.
+
+- Hardened the three new variants against silently doing something other than
+  what was asked. `cloudflare` now carries `SandboxConfig.env_vars` into every
+  snippet — the bridge takes no environment when it creates a sandbox, so they
+  had been accepted and dropped — refuses a `network_policy` it cannot apply
+  rather than leaving a sandbox believed to be cut off connected, refuses
+  `get_variable` with the reason instead of answering the misleading "no such
+  variable", and serves `files.read`/`files.write` through the bridge's own
+  file endpoints so they need no session at all. `coreweave` refuses the
+  variable APIs when there is no session process — under `stateful=False`, or
+  after one was lost — rather than reporting a successful set that vanishes
+  with the process, and a snippet that runs past its timeout now has its
+  session STOPPED rather than left running and changing the namespace behind a
+  call that already returned.
+
+- A GPU asked of a variant that has none is now REFUSED rather than dropped.
+  `--gpu` reaches `coreweave`, `datalayer`, `daytona`, `kaggle` and `modal`,
+  and `code-sandboxes exec -v e2b --gpu H100` says which variants can give one
+  instead of running on a CPU as though nothing had been asked — a sandbox that
+  looks as though it asked for an H100 and did not is one whose timings mean
+  nothing. `--gpu` was previously accepted and silently ignored for every other
+  variant.
+
+- Corrected the module docstring of the `modal` variant, which still described
+  the process-per-snippet behaviour that the session process replaced: `modal`
+  keeps a namespace between snippets, and falls back to a process per snippet
+  only when the session cannot be held.
+
 - Added GPU support to the `daytona` variant. `gpu=` takes Daytona's own
   flavors, `gpu_count=` how many, and several names comma-separated are an
   ordered list of preferences Daytona falls back along — `gpu="H100,H200"`

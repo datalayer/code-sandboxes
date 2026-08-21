@@ -256,6 +256,57 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
         list_environments=_environments_of(SandboxVariant.DAYTONA),
     ),
     SandboxProvider(
+        variant=SandboxVariant.E2B,
+        title="E2B",
+        description=(
+            "Sandboxes on E2B, in Firecracker microVMs that start in about 150 ms, "
+            "with a stateful Python kernel and rich outputs."
+        ),
+        extra="e2b",
+        requirements=(
+            ProviderRequirement(
+                env_vars=("E2B_API_KEY",),
+                hint="Create an API key at e2b.dev and set E2B_API_KEY.",
+            ),
+        ),
+        list_environments=_environments_of(SandboxVariant.E2B),
+    ),
+    SandboxProvider(
+        variant=SandboxVariant.COREWEAVE,
+        title="CoreWeave",
+        description=(
+            "Containers on CoreWeave, with a stateful Python session and an optional GPU."
+        ),
+        extra="coreweave",
+        requirements=(
+            ProviderRequirement(
+                env_vars=("CWSANDBOX_API_KEY",),
+                hint=("Create an access token in the CoreWeave console and set CWSANDBOX_API_KEY."),
+            ),
+        ),
+        list_environments=_environments_of(SandboxVariant.COREWEAVE),
+    ),
+    SandboxProvider(
+        variant=SandboxVariant.CLOUDFLARE,
+        title="Cloudflare",
+        description=(
+            "Containers on Cloudflare's edge, reached through a deployed sandbox "
+            "bridge Worker. Each snippet runs in a process of its own."
+        ),
+        extra="cloudflare",
+        requirements=(
+            ProviderRequirement(
+                env_vars=("CLOUDFLARE_SANDBOX_API_URL", "CLOUDFLARE_SANDBOX_API_KEY"),
+                hint=(
+                    "Deploy the sandbox bridge Worker, then set "
+                    "CLOUDFLARE_SANDBOX_API_URL to where it answers and "
+                    "CLOUDFLARE_SANDBOX_API_KEY to the secret it generated."
+                ),
+            ),
+        ),
+        list_environments=_environments_of(SandboxVariant.CLOUDFLARE),
+    ),
+    SandboxProvider(
         variant=SandboxVariant.DOCKER,
         title="Docker",
         description="Containers on the Docker daemon of this machine.",

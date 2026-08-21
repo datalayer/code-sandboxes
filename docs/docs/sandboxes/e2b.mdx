@@ -1,0 +1,188 @@
+---
+sidebar_position: 7
+title: E2B
+---
+
+# E2B
+
+Runs code in an [E2B](https://e2b.dev) sandbox — a Firecracker microVM that
+starts in about 150 ms.
+
+The variant drives E2B through its **code interpreter** SDK
+(`e2b-code-interpreter`) rather than through the plain `e2b` SDK, which is what
+makes it behave like the rest of this package: the interpreter keeps a Jupyter
+kernel per context, so state **persists** between calls, and rich display data
+arrives as results rather than being lost.
+
+```python
+sandbox.run_code("x = 40")
+sandbox.run_code("x + 2").text  # "42"
+```
+
+- **Requirements:** `code-sandboxes[e2b]` (installs `e2b-code-interpreter`).
+- **Parameters:** `api_key`, `domain`, `template`, `allow_internet_access`,
+  `secure`.
+
+## How To Obtain E2B Credentials
+
+1. Sign in at [e2b.dev](https://e2b.dev).
+2. Create an API key and export it:
+   ```bash
+   export E2B_API_KEY="e2b_..."
+   ```
+3. Optionally point at a self-hosted cluster rather than at e2b.dev:
+   ```bash
+   export E2B_DOMAIN="e2b.example.com"
+   ```
+
+Either can be passed to the sandbox instead of exported. What is left out is
+read from the environment by the E2B SDK, so passing nothing is not the same as
+passing `None`:
+
+```python
+Sandbox.create(variant="e2b", api_key="e2b_...", domain="e2b.example.com")
+```
+
+The SDK documentation is at [docs.e2b.dev](https://docs.e2b.dev).
+
+## Usage
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="e2b") as sandbox:
+    result = sandbox.run_code("import numpy as np; np.arange(5).sum()")
+    print(result.text)  # "10"
+```
+
+### Templates
+
+E2B takes a **template** per sandbox — an image with its packages already
+installed — rather than a catalogue of machines. Here it is always
+`code-interpreter-v1`, E2B's own interpreter template, unless `template=` names
+one of your own:
+
+```python
+Sandbox.create(variant="e2b", template="my-team-template")
+```
+
+A template named here has to be built **on top of** the interpreter's. This
+variant drives the code interpreter SDK, which talks to a Jupyter kernel inside
+the sandbox, and only a template carrying such a kernel can answer it. `base` —
+the default of the plain `e2b` SDK, where there is no kernel — would start a
+sandbox that then failed every execution, which is why it is not what you get
+here.
+
+For the same reason `Sandbox.list_environments(variant="e2b")` ships **one**
+environment, `e2b-code-interpreter`, rather than a menu including images that
+cannot serve the interpreter. It is what `code-sandboxes environments` shows.
+
+### Contexts
+
+The default namespace is shared by every call. `create_context()` asks E2B for
+a kernel it keeps apart, so two pieces of work can run in the same sandbox
+without seeing each other's variables:
+
+```python
+with Sandbox.create(variant="e2b") as sandbox:
+    other = sandbox.create_context()
+
+    sandbox.run_code("secret = 1")
+    sandbox.run_code("secret", context=other).code_error.name  # "NameError"
+```
+
+A context is created on first use, since creating one starts a kernel and most
+callers never need a second.
+
+### Rich Outputs
+
+A kernel has a channel for display data that a process writing to stdout has
+not, so what the code displays comes back as a result keyed by MIME type — a
+figure as `image/png`, an HTML repr as `text/html`:
+
+```python
+result = sandbox.run_code("""
+import matplotlib.pyplot as plt
+plt.plot([1, 2, 3])
+plt.show()
+""")
+figure = next(item for item in result.results if item.png)
+figure.png  # base64 PNG
+```
+
+E2B names each format with an attribute of its own (`png`, `html`, …) where
+this package keys them by MIME type; the translation happens here, including
+for a custom MIME type a library declares.
+
+### Timeouts
+
+E2B takes a sandbox down when its timeout runs out, whatever it is doing. A
+long-running job therefore has to say so before it starts, and `set_timeout`
+is how — the count restarts at the moment of the call:
+
+```python
+sandbox.set_timeout(600)  # ten more minutes, from now
+```
+
+`max_lifetime` on the configuration says the same thing at creation, in whole
+seconds.
+
+### Reaching A Service Inside
+
+Every port inside has a public hostname of its own, which is what makes a
+server started in the sandbox — a dashboard, an API under test — reachable
+from outside without a tunnel of your own:
+
+```python
+sandbox.run_code("import subprocess; subprocess.Popen(['python', '-m', 'http.server', '8000'])")
+print(f"https://{sandbox.get_host(8000)}")
+```
+
+### Network policy
+
+E2B offers one switch rather than a list of hosts:
+
+```python
+# No outbound network at all.
+Sandbox.create(variant="e2b", network_policy="none")
+```
+
+`network_policy="allowlist"` is **refused** with the reason: E2B has no host
+allowlist, and silently widening a policy that names hosts to the whole
+internet is the failure that matters. Use `"none"` to cut the network off, or
+`"all"` to allow it. `allow_internet_access=False` says the same thing as
+`"none"` for a caller who would rather pass it as an argument.
+
+`secure=True` — the default here as in the SDK — keeps E2B's own hardening of
+the sandbox's control plane.
+
+### Names and metadata
+
+E2B keeps a flat map of strings per sandbox and lets one be looked up by it, so
+the name and the tags of the configuration travel there, next to
+`created-by=code-sandboxes` — which is what tells the sandboxes this package
+made from the rest of the account's:
+
+```python
+Sandbox.create(variant="e2b", name="nightly-report", tags={"team": "ai"})
+```
+
+`code-sandboxes list -v e2b` shows what is there; see the
+[management guide](/cli/management).
+
+## What Is Not Reported
+
+- There is no interrupt: `sandbox.interrupt()` answers `False`, and a runaway
+  execution is stopped by its timeout.
+- Variables cross as JSON (`get_variable`, `set_variable`, and everything built
+  on them such as `sandbox.commands.run`), so a value that cannot be encoded
+  comes back as its `repr` rather than as the object itself, and one that
+  cannot be *sent* is refused with a reason.
+
+Binary files go straight to E2B's filesystem API rather than through a program
+that decodes them, so a large file does not have to become a large program:
+
+```python
+sandbox.files.write_bytes("/tmp/data.parquet", payload)
+sandbox.files.read_bytes("/tmp/data.parquet")
+```

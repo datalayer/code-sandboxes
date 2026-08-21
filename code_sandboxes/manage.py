@@ -827,6 +827,276 @@ class DatalayerSandboxManager(SandboxManager):
         return info
 
 
+#: What E2B calls the life of a sandbox, in the words used here.
+_E2B_STATES = {
+    "running": SandboxStatus.RUNNING,
+    "paused": SandboxStatus.STOPPED,
+    "pausing": SandboxStatus.STOPPING,
+    "resuming": SandboxStatus.STARTING,
+    "killed": SandboxStatus.TERMINATED,
+    "error": SandboxStatus.ERROR,
+}
+
+
+class E2BSandboxManager(SandboxManager):
+    """Sandboxes of an E2B account."""
+
+    variant = "e2b"
+    capabilities = frozenset({"create", "list", "get", "delete"})
+
+    def __init__(self, api_key: str | None = None, domain: str | None = None, **_: Any) -> None:
+        self._settings = {"api_key": api_key, "domain": domain}
+
+    def _sandbox_class(self) -> Any:
+        try:
+            from e2b_code_interpreter import Sandbox
+        except ImportError as exc:
+            raise SandboxManagementError(
+                "e2b-code-interpreter package is required: pip install code-sandboxes[e2b]"
+            ) from exc
+        return Sandbox
+
+    def _opts(self) -> dict[str, Any]:
+        """Only the settings that were given: the SDK reads the rest from the
+        environment, and an explicit ``None`` is not the same as nothing."""
+        return {key: value for key, value in self._settings.items() if value}
+
+    def _info(self, sandbox: Any) -> SandboxInfo:
+        metadata = dict(getattr(sandbox, "metadata", None) or {})
+        state = getattr(sandbox, "state", None)
+        state_value = getattr(state, "value", state)
+        return SandboxInfo(
+            id=getattr(sandbox, "sandbox_id", None) or str(sandbox),
+            variant=self.variant,
+            status=_E2B_STATES.get(str(state_value), SandboxStatus.PENDING),
+            # E2B has a name of its own, and this package puts the name it was
+            # given in the metadata; the sandbox's own wins when it has one.
+            name=getattr(sandbox, "name", None) or metadata.get("name"),
+            metadata={
+                "state": state_value,
+                "template": getattr(sandbox, "template_id", None),
+                "metadata": metadata,
+                "started_at": str(getattr(sandbox, "started_at", "") or "") or None,
+                "cpu_count": getattr(sandbox, "cpu_count", None),
+                "memory_mb": getattr(sandbox, "memory_mb", None),
+            },
+        )
+
+    def list(self) -> list[SandboxInfo]:
+        # `list` answers with a paginator rather than a list: E2B pages, and
+        # an account with more sandboxes than one page holds would otherwise
+        # be reported as having only the first of them.
+        paginator = self._sandbox_class().list(**self._opts())
+        sandboxes: list[Any] = []
+        if hasattr(paginator, "next_items"):
+            while paginator.has_next:
+                sandboxes.extend(paginator.next_items())
+        else:  # pragma: no cover - an older SDK answering with a plain list
+            sandboxes.extend(paginator)
+        return [self._info(sandbox) for sandbox in sandboxes]
+
+    def get(self, sandbox_id: str) -> SandboxInfo | None:
+        for info in self.list():
+            if info.id == sandbox_id:
+                return info
+        return None
+
+    def delete(self, sandbox_id: str) -> bool:
+        try:
+            return bool(self._sandbox_class().kill(sandbox_id, **self._opts()))
+        except Exception:
+            return False
+
+    def create(self, **kwargs: Any) -> SandboxInfo:
+        from .e2b_sandbox import E2BSandbox
+
+        sandbox = E2BSandbox(**self._opts(), **kwargs)
+        sandbox.start()
+        info = sandbox.info
+        if info is None:
+            raise SandboxManagementError("The sandbox started without an identity.")
+        # Detached, so it outlives this call: stopping it is `delete`.
+        sandbox._sandbox = None
+        sandbox._started = False
+        return info
+
+
+#: What CoreWeave calls the life of a sandbox, in the words used here.
+_COREWEAVE_STATES = {
+    "running": SandboxStatus.RUNNING,
+    "creating": SandboxStatus.STARTING,
+    "pending": SandboxStatus.PENDING,
+    "paused": SandboxStatus.STOPPED,
+    "terminating": SandboxStatus.STOPPING,
+    "completed": SandboxStatus.STOPPED,
+    "terminated": SandboxStatus.TERMINATED,
+    "failed": SandboxStatus.ERROR,
+    "unspecified": SandboxStatus.PENDING,
+}
+
+
+class CoreWeaveSandboxManager(SandboxManager):
+    """Sandboxes of a CoreWeave organization."""
+
+    variant = "coreweave"
+    capabilities = frozenset({"create", "list", "get", "delete"})
+
+    def __init__(self, api_key: str | None = None, base_url: str | None = None, **_: Any) -> None:
+        self._settings = {"api_key": api_key, "base_url": base_url}
+
+    def _sandbox_class(self) -> Any:
+        try:
+            from cwsandbox import Sandbox
+        except ImportError as exc:
+            raise SandboxManagementError(
+                "cwsandbox package is required: pip install code-sandboxes[coreweave]"
+            ) from exc
+        import os
+
+        # The SDK authenticates from the environment and takes no token
+        # argument, so a token given here is put where it looks for one.
+        if self._settings["api_key"]:
+            os.environ["CWSANDBOX_API_KEY"] = str(self._settings["api_key"])
+        if self._settings["base_url"]:
+            os.environ["CWSANDBOX_BASE_URL"] = str(self._settings["base_url"])
+        return Sandbox
+
+    def _info(self, sandbox: Any) -> SandboxInfo:
+        tags = list(getattr(sandbox, "tags", None) or [])
+        # CoreWeave keeps tags as a flat list of strings, so a pair travels as
+        # `key=value` and is read back the same way.
+        pairs = dict(tag.split("=", 1) for tag in tags if "=" in tag)
+        status = getattr(sandbox, "status", None)
+        status_value = getattr(status, "value", status)
+        return SandboxInfo(
+            id=sandbox.sandbox_id,
+            variant=self.variant,
+            status=_COREWEAVE_STATES.get(str(status_value), SandboxStatus.PENDING),
+            name=pairs.get("name"),
+            metadata={
+                "status": status_value,
+                "tags": tags,
+                "runner_id": getattr(sandbox, "runner_id", None),
+            },
+        )
+
+    def list(self) -> list[SandboxInfo]:
+        sandboxes = self._sandbox_class().list().result()
+        return [self._info(sandbox) for sandbox in sandboxes]
+
+    def get(self, sandbox_id: str) -> SandboxInfo | None:
+        try:
+            return self._info(self._sandbox_class().from_id(sandbox_id).result())
+        except Exception:
+            return None
+
+    def delete(self, sandbox_id: str) -> bool:
+        try:
+            sandbox = self._sandbox_class().from_id(sandbox_id).result()
+        except Exception:
+            return False
+        try:
+            sandbox.stop(missing_ok=True).result()
+        except Exception:
+            return False
+        return True
+
+    def create(self, **kwargs: Any) -> SandboxInfo:
+        from .coreweave_sandbox import CoreWeaveSandbox
+
+        given = {key: value for key, value in self._settings.items() if value}
+        # No session process: a sandbox nothing is holding open should not be
+        # paying for a driver waiting on a stdin that will never be written.
+        sandbox = CoreWeaveSandbox(stateful=False, **given, **kwargs)
+        sandbox.start()
+        info = sandbox.info
+        if info is None:
+            raise SandboxManagementError("The sandbox started without an identity.")
+        # Detached, so it outlives this call: stopping it is `delete`.
+        sandbox._sandbox = None
+        sandbox._started = False
+        return info
+
+
+class CloudflareSandboxManager(SandboxManager):
+    """Sandboxes of a deployed Cloudflare sandbox bridge.
+
+    The bridge exposes one sandbox at a time by its id and has no endpoint
+    that enumerates them, so `list` cannot be answered — which is said plainly
+    rather than answered with an empty list, since "none" and "cannot know"
+    are different facts.
+    """
+
+    variant = "cloudflare"
+    capabilities = frozenset({"create", "get", "delete"})
+
+    def __init__(self, api_url: str | None = None, api_key: str | None = None, **_: Any) -> None:
+        self._settings = {"api_url": api_url, "api_key": api_key}
+
+    def _client(self) -> Any:
+        """An HTTP client for the bridge, with no sandbox behind it.
+
+        Deleting a sandbox by id and asking after one by id are both plain
+        calls to the bridge; creating a container merely to have something to
+        make the call with would leave that container running and billed.
+        """
+        from .cloudflare_sandbox import CloudflareSandbox
+
+        given = {key: value for key, value in self._settings.items() if value}
+        try:
+            return CloudflareSandbox(**given).build_client()
+        except Exception as exc:
+            raise SandboxManagementError(str(exc)) from exc
+
+    def list(self) -> list[SandboxInfo]:
+        raise self._unsupported(
+            "list", "the sandbox bridge has no endpoint that enumerates sandboxes"
+        )
+
+    def get(self, sandbox_id: str) -> SandboxInfo | None:
+        from urllib.parse import quote
+
+        try:
+            with self._client() as client:
+                response = client.get(f"/v1/sandbox/{quote(sandbox_id)}/running")
+                if response.status_code >= 400:
+                    return None
+                running = bool(response.json().get("running"))
+        except Exception:
+            return None
+        return SandboxInfo(
+            id=sandbox_id,
+            variant=self.variant,
+            # The bridge knows one thing about a sandbox — whether its
+            # container is up — so that is all this claims to know.
+            status=SandboxStatus.RUNNING if running else SandboxStatus.STOPPED,
+        )
+
+    def delete(self, sandbox_id: str) -> bool:
+        from urllib.parse import quote
+
+        try:
+            with self._client() as client:
+                response = client.delete(f"/v1/sandbox/{quote(sandbox_id)}")
+        except Exception:
+            return False
+        return response.status_code < 400
+
+    def create(self, **kwargs: Any) -> SandboxInfo:
+        from .cloudflare_sandbox import CloudflareSandbox
+
+        given = {key: value for key, value in self._settings.items() if value}
+        sandbox = CloudflareSandbox(**given, **kwargs)
+        sandbox.start()
+        info = sandbox.info
+        if info is None:
+            raise SandboxManagementError("The sandbox started without an identity.")
+        # Detached, so it outlives this call: stopping it is `delete`.
+        sandbox._client = None
+        sandbox._started = False
+        return info
+
+
 _MANAGERS: dict[str, type[SandboxManager]] = {
     "eval": EvalSandboxManager,
     "monty": MontySandboxManager,
@@ -837,6 +1107,9 @@ _MANAGERS: dict[str, type[SandboxManager]] = {
     "modal": ModalSandboxManager,
     "daytona": DaytonaSandboxManager,
     "datalayer": DatalayerSandboxManager,
+    "e2b": E2BSandboxManager,
+    "coreweave": CoreWeaveSandboxManager,
+    "cloudflare": CloudflareSandboxManager,
 }
 
 

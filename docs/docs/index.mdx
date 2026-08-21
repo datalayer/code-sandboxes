@@ -51,7 +51,7 @@ This section clarifies what the package owns versus what is delegated to adjacen
 - **🧭 Unified Client API**: Use `CodeSandboxClient` for variant-agnostic execution and streaming
 - **📊 Detailed Status Reporting**: Distinguish between infrastructure and code-level failures
 - **🎯 Pydantic Models**: Type-safe models with automatic validation and JSON serialization
-- **⚡ Multiple Backends**: eval, Docker, Jupyter, Monty, Kaggle, Colab, Modal, and Datalayer
+- **⚡ Multiple Backends**: eval, Docker, Jupyter, Monty, Kaggle, Colab, Modal, Daytona, E2B, CoreWeave, Cloudflare, and Datalayer
 - **🔄 State Persistence**: Maintain variables and context between executions
 - **📊 Rich Output**: Support for text, HTML, images, and structured data
 - **📸 Snapshots**: Save and restore sandbox state
@@ -63,9 +63,12 @@ Code Sandboxes supports these execution variants:
 
 | Variant | Isolation Level | Best For |
 |---------|-----------------|----------|
+| `cloudflare` | Managed container on the edge | Short snippets, each on its own |
+| `coreweave` | Managed container | GPU work with a stateful session |
 | `datalayer` | Managed VM/runtime | Production and GPU workloads |
 | `daytona` | Managed cloud sandbox | Stateful agent sessions |
 | `docker` | Container | Isolated execution |
+| `e2b` | Firecracker microVM | Fast starts, stateful kernel, rich outputs |
 | `eval` | None (Python exec) | Development, testing |
 | `google-colab` | Managed notebook runtime | Interactive Colab-connected runs |
 | `jupyter-server` | Process (Jupyter kernel) | Persistent notebook-style state |

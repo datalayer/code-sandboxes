@@ -75,9 +75,12 @@ for a reminder. On exit, the sandbox is terminated.
 
 Supported variants:
 
+- `cloudflare`
+- `coreweave`
 - `datalayer`
 - `daytona`
 - `docker`
+- `e2b`
 - `eval`
 - `google-colab`
 - `jupyter-server`
@@ -91,9 +94,20 @@ needs.
 
 ## Variant-specific Behavior
 
+- `cloudflare`: talks to a deployed sandbox bridge Worker, named by
+  `CLOUDFLARE_SANDBOX_API_URL` with the `CLOUDFLARE_SANDBOX_API_KEY` it was
+  deployed with. Each snippet — and each line of the REPL — runs in a process
+  of its own, so a definition on one line is gone by the next.
+- `coreweave`: starts a CoreWeave sandbox and holds a session process for it,
+  so lines share a namespace. `--gpu` is not passed on for this variant; a GPU
+  is asked for from Python, `Sandbox.create(variant="coreweave", gpu="H100")`.
 - `daytona`: starts a Daytona sandbox; `--gpu` takes Daytona's own flavors
   (`H100`, `H200`, `RTX-4090`, ...), several of them comma-separated to fall
   back along, and `--spot` runs on preemptible capacity.
+- `e2b`: starts an E2B microVM from the interpreter's own template,
+  `code-interpreter-v1`. Another is named from Python with `template=`, and has
+  to be built on top of it — only a template carrying a Jupyter kernel can
+  serve this variant. State persists between lines.
 - `google-colab`: prompts for runtime URL, kernel ID, and proxy token.
 - `jupyter-server`: starts a managed local Jupyter server on a random port.
 - `kaggle`: supports either interactive runtime settings or credential-based batch execution.

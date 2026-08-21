@@ -1,5 +1,5 @@
 ---
-sidebar_position: 9
+sidebar_position: 12
 title: Modal
 ---
 
@@ -8,9 +8,13 @@ title: Modal
 Runs code in a [Modal](https://modal.com/docs/guide) cloud sandbox, providing
 fully isolated, on-demand containers with configurable images and secrets.
 
-Each `run_code` call executes in a fresh `python -c` process, so state does **not**
-persist across calls (use a single multi-statement snippet if you need shared
-state). Configure the image with additional pip packages as needed.
+State **persists** between calls, though Modal itself offers nothing that holds
+a Python namespace: what it offers is a container and `exec`, a process at a
+time. So the variant holds one itself — a single `python -u -c` session process
+is started with the sandbox and fed one snippet at a time. A session process
+that cannot be started, or that goes away mid-session, drops the sandbox back
+to a process per snippet — working, merely stateless — rather than failing the
+run. Configure the image with additional pip packages as needed.
 
 - **Requirements:** `code-sandboxes[modal]` (installs `modal`).
 - **Parameters:** `app_name`, `image` (a prebuilt `modal.Image`), `pip_packages`,
