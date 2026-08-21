@@ -20,6 +20,16 @@ from code_sandboxes.manage import (
 from code_sandboxes.models import SandboxInfo, SandboxStatus
 
 
+def test_every_variant_of_the_enum_has_a_manager_in_any_spelling():
+    """`manageable_variants` is the enum, and answers to how it is spelled."""
+    from code_sandboxes.models import SandboxVariant
+
+    for variant in SandboxVariant:
+        assert variant.value in manageable_variants()
+        for spelling in (variant.value, variant.value.replace("-", "_")):
+            assert get_manager(spelling).variant == variant.value
+
+
 def test_every_variant_has_a_manager():
     assert manageable_variants() == [
         "datalayer",

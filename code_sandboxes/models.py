@@ -76,6 +76,21 @@ class SandboxVariant(str, Enum):
     MONTY = "monty"
 
 
+def normalize_variant(variant: "SandboxVariant | str") -> str:
+    """One spelling of a variant, the canonical one.
+
+    A caller types a variant with a dash, with an underscore, in capitals, or
+    with the whitespace a configuration file left around it, and every
+    dispatcher in this package has to answer to all of them. The normal form
+    is the value of the enum — `google-colab`, `jupyter-server` — so that what
+    a dispatcher compares against reads exactly like what a caller types and
+    what `SandboxVariant` holds. Folding the other way, to underscores, meant
+    the two drifted apart the first time a variant was renamed.
+    """
+    value = variant.value if isinstance(variant, SandboxVariant) else str(variant)
+    return value.strip().lower().replace("_", "-")
+
+
 class GPUType(str, Enum):
     """Available GPU types for cloud sandboxes."""
 

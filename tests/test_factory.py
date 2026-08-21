@@ -4,6 +4,8 @@
 
 """Sandbox factory tests."""
 
+import warnings
+
 import pytest
 
 from code_sandboxes.base import Sandbox, SandboxVariant
@@ -94,6 +96,30 @@ class TestSandboxFactory:
         """
         assert isinstance(Sandbox.create(variant=variant), JupyterServerSandbox)
         assert Sandbox.list_environments(variant=variant)
+
+    @pytest.mark.parametrize("variant", list(SandboxVariant))
+    def test_every_variant_of_the_enum_can_be_created(self, variant):
+        """The enum and what the factory branches on cannot drift apart.
+
+        They did: `google_colab` was renamed to `google-colab` in the enum and
+        in the branch, while the normalizer between them still folded dashes
+        to underscores — so the one variant that had just been renamed was the
+        one that could no longer be created.
+        """
+        for spelling in (
+            variant,
+            variant.value,
+            variant.value.replace("-", "_"),
+            variant.value.upper(),
+            f"  {variant.value}  ",
+        ):
+            assert Sandbox.create(variant=spelling) is not None
+            with warnings.catch_warnings():
+                # Reaching the variant is what is under test. Some of them
+                # import a platform client on the way, which has deprecation
+                # notices of its own that are nothing to do with this.
+                warnings.simplefilter("ignore")
+                assert Sandbox.list_environments(variant=spelling) is not None
 
     def test_a_name_that_is_not_a_variant_still_raises(self):
         """Reading loosely is not guessing: `jupyter` names nothing."""

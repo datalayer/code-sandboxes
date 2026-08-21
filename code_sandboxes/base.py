@@ -27,6 +27,7 @@ from .models import (
     SandboxInfo,
     SandboxStatus,
     SandboxVariant,
+    normalize_variant,
 )
 
 
@@ -52,20 +53,6 @@ def generate_sandbox_name() -> str:
     fake = Faker()
     colour = fake.color_name().lower().replace(" ", "-")
     return f"{colour}-{fake.word()}-{suffix}"
-
-
-def normalize_variant(variant: SandboxVariant | str) -> str:
-    """One spelling of a variant, as every dispatcher of this package reads it.
-
-    The value of a variant may carry a dash — `jupyter-server` — and a caller
-    types it with a dash, with an underscore, in capitals, or with the
-    whitespace a configuration file left around it. `get_manager` and
-    `get_provider` have always answered to all of those; the factory here
-    accepted one spelling alone, which made the front door of the package the
-    strictest thing in it.
-    """
-    value = variant.value if isinstance(variant, SandboxVariant) else str(variant)
-    return value.strip().lower().replace("-", "_")
 
 
 #: The Datalayer environment used when a caller names none. Every cluster
@@ -309,7 +296,7 @@ class Sandbox(ABC):
             from .docker_sandbox import DockerSandbox
 
             sandbox = DockerSandbox(config=config, **kwargs)
-        elif variant_value == "jupyter_server":
+        elif variant_value == "jupyter-server":
             from .jupyter_server_sandbox import JupyterServerSandbox
 
             sandbox = JupyterServerSandbox(config=config, **kwargs)
@@ -395,7 +382,7 @@ class Sandbox(ABC):
             from .docker_sandbox import DockerSandbox
 
             return DockerSandbox.list_environments()
-        if variant_value == "jupyter_server":
+        if variant_value == "jupyter-server":
             from .jupyter_server_sandbox import JupyterServerSandbox
 
             return JupyterServerSandbox.list_environments()

@@ -19,7 +19,7 @@ Canonical variant names:
 - `daytona`
 - `docker`
 - `eval`
-- `google_colab`
+- `google-colab`
 - `jupyter-server`
 - `kaggle`
 - `modal`

@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from .models import SandboxEnvironment, SandboxVariant
+from .models import SandboxEnvironment, SandboxVariant, normalize_variant
 
 __all__ = [
     "PROVIDERS",
@@ -280,11 +280,11 @@ def get_provider(name: str) -> SandboxProvider | None:
     Args:
         name: Identifier of the provider, which is that of its variant.
     """
-    wanted = (name or "").replace("-", "_").lower()
+    # A provider is named by its variant, so the canonical name is what to
+    # compare against, whatever spelling the lookup arrived in.
+    wanted = normalize_variant(name or "")
     for provider in PROVIDERS:
-        # The value of a variant may carry a dash — `jupyter-server` — while
-        # lookups arrive in either spelling: compare in one normal form.
-        if provider.name.replace("-", "_") == wanted:
+        if provider.name == wanted:
             return provider
     return None
 

@@ -12,10 +12,11 @@ A sandbox is an isolated environment where code can be executed safely. Code San
 Use `Sandbox.create()` to create a new sandbox:
 
 Canonical variant names are `datalayer`, `daytona`, `docker`, `eval`,
-`google_colab`, `jupyter-server`, `kaggle`, `modal`, and `monty`. Older `local-*`
+`google-colab`, `jupyter-server`, `kaggle`, `modal`, and `monty`. Older `local-*`
 names are no longer supported.
 
-The CLI also accepts `google-colab` as an alias for `google_colab`.
+A name is read in whatever spelling it arrives in: `google-colab`,
+`google_colab` and `Google Colab` all name the same variant.
 
 ```python
 from code_sandboxes import Sandbox
@@ -67,7 +68,7 @@ Each page below explains how to configure each variant.
 | [`daytona`](./daytona) | Daytona cloud sandbox with a stateful interpreter |
 | [`docker`](./docker) | Jupyter execution in a Docker container |
 | [`eval`](./eval) | In-process `exec()` for fast development-only runs |
-| [`google_colab`](./google-colab) | Google Colab runtime via runtime proxy |
+| [`google-colab`](./google-colab) | Google Colab runtime via runtime proxy |
 | [`jupyter-server`](./jupyter-server) | Jupyter kernel-backed execution with persistent state |
 | [`kaggle`](./kaggle) | Kaggle runtime (interactive or batch) |
 | [`modal`](./modal) | Modal container execution |

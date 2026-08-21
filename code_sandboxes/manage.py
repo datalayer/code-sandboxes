@@ -42,7 +42,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any
 
-from .models import SandboxInfo, SandboxStatus
+from .models import SandboxInfo, SandboxStatus, normalize_variant
 
 __all__ = [
     "SandboxManagementError",
@@ -849,10 +849,11 @@ def get_manager(variant: str, **kwargs: Any) -> SandboxManager:
     """The manager for a variant.
 
     Args:
-        variant: One of :func:`manageable_variants` (``google-colab`` is
-            accepted for ``google_colab``).
+        variant: One of :func:`manageable_variants`, in any spelling —
+            ``google-colab``, ``google_colab`` and ``Google Colab`` all name
+            the same one.
         **kwargs: Variant-specific connection settings — ``server_url`` /
-            ``token`` (jupyter), ``proxy_token`` (google_colab), ``app_name``
+            ``token`` (jupyter), ``proxy_token`` (google-colab), ``app_name``
             (modal), ``api_key`` / ``api_url`` / ``target`` (daytona),
             ``username`` (kaggle), ``token`` / ``run_url`` (datalayer),
             ``docker_client`` (docker).
@@ -863,13 +864,9 @@ def get_manager(variant: str, **kwargs: Any) -> SandboxManager:
     Raises:
         ValueError: For an unknown variant.
     """
-    normalized = variant.strip().lower().replace("-", "_")
-    # Keys carry the variant's own spelling — `jupyter-server` with its dash —
-    # and lookups arrive in either form: compare in one normal form.
-    manager_class = next(
-        (cls for key, cls in _MANAGERS.items() if key.replace("-", "_") == normalized),
-        None,
-    )
+    # The keys are the canonical names, which is what `normalize_variant`
+    # answers with, so a lookup in any spelling lands on one of them.
+    manager_class = _MANAGERS.get(normalize_variant(variant))
     if manager_class is None:
         raise ValueError(
             f"Unknown sandbox variant: {variant}. "

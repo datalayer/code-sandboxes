@@ -20,23 +20,28 @@ from rich.table import Table
 from . import Sandbox
 from .console import run_repl, show_and_run, show_result
 from .manage import SandboxManagementError, get_manager, manageable_variants
+from .models import normalize_variant
 
 app = typer.Typer(help="Code sandboxes: run a REPL, list, create and delete sandboxes.")
 
 console = Console()
 
-_SUPPORTED_REPL_VARIANTS = {
-    "jupyter-server",
-    "docker",
-    "eval",
-    "monty",
-    "google-colab",
-    "google-colab",
-    "kaggle",
-    "modal",
-    "daytona",
-    "datalayer",
-}
+#: The variants code can be run in from here, by their canonical names. A
+#: caller may spell one with an underscore or in capitals; `normalize_variant`
+#: brings it back to one of these.
+_SUPPORTED_RUN_VARIANTS = frozenset(
+    {
+        "datalayer",
+        "daytona",
+        "docker",
+        "eval",
+        "google-colab",
+        "jupyter-server",
+        "kaggle",
+        "modal",
+        "monty",
+    }
+)
 
 
 @app.callback(invoke_without_command=True)
@@ -47,23 +52,18 @@ def _root(ctx: typer.Context) -> None:
 
 
 def _resolve_variant(variant: str | None) -> str:
-    if variant:
-        selected = variant.strip().lower()
-    else:
-        selected = typer.prompt(
+    if not variant:
+        variant = typer.prompt(
             "Sandbox variant",
             default="jupyter-server",
             show_default=True,
         )
-        selected = selected.strip().lower()
-
-    if selected not in _SUPPORTED_REPL_VARIANTS:
+    selected = normalize_variant(variant)
+    if selected not in _SUPPORTED_RUN_VARIANTS:
         raise typer.BadParameter(
-            f"Unsupported variant: {selected}. Supported values: "
-            + ", ".join(sorted(_SUPPORTED_REPL_VARIANTS))
+            f"Unsupported variant: {variant}. Supported values: "
+            + ", ".join(sorted(_SUPPORTED_RUN_VARIANTS))
         )
-    if selected == "google-colab":
-        return "google-colab"
     return selected
 
 
@@ -78,7 +78,7 @@ def _resolve_variant_kwargs(
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
 
-    if variant.strip().lower().replace("-", "_") == "jupyter_server":
+    if variant == "jupyter-server":
         # Match `jupyter console` behavior by launching local Jupyter on random port.
         kwargs["port"] = 0
 
@@ -125,7 +125,7 @@ _RUN_VARIANT_OPTION = typer.Option(
     "-v",
     help=(
         "Sandbox variant (datalayer, daytona, docker, eval, "
-        "google_colab/google-colab, jupyter-server, kaggle, modal, monty)."
+        "google-colab, jupyter-server, kaggle, modal, monty)."
     ),
 )
 _RUN_TIMEOUT_OPTION = typer.Option(60.0, help="Code execution timeout (seconds).")
@@ -382,7 +382,7 @@ _VARIANT_OPTION = typer.Option(
     "-v",
     help="Sandbox variant (" + ", ".join(manageable_variants()) + ").",
 )
-_SERVER_URL_OPTION = typer.Option(None, help="Server URL (jupyter, google_colab).")
+_SERVER_URL_OPTION = typer.Option(None, help="Server URL (jupyter, google-colab).")
 _TOKEN_OPTION = typer.Option(None, help="API token (jupyter, datalayer).")
 _PROXY_TOKEN_OPTION = typer.Option(None, help="Colab runtime proxy token.")
 _RUN_URL_OPTION = typer.Option(None, help="Datalayer run URL override.")

@@ -54,7 +54,7 @@ all = [
 ]
 test = [
   "ipykernel",
-  "jupyter_server>=1.6,<3",
+  "jupyter-server>=1.6,<3",
   "pytest>=7.0",
   "pytest-asyncio>=0.21",
   "pytest-cov>=4.0",
