@@ -1,0 +1,139 @@
+---
+sidebar_position: 2
+title: Cloudflare
+---
+
+# Cloudflare
+
+Runs code in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/)
+— a container on Cloudflare's edge, started next to the Worker that owns it.
+
+Cloudflare's own SDK is a **Workers binding** written in TypeScript, and a
+Python process cannot hold one: `getSandbox(env.Sandbox, id)` only means
+something inside a Worker. What a Python process can talk to is the **sandbox
+bridge**, a small reference-implementation Worker Cloudflare publishes that
+exposes the SDK over HTTP, and that is what this variant drives. It is deployed
+once per account; see [below](#deploying-the-bridge).
+
+State does **not** persist between calls. The bridge's exec starts a process
+and streams its output back, and gives nothing to write to its stdin, so a
+namespace cannot be held open between snippets the way the
+[CoreWeave](./coreweave) and [Modal](./modal) variants hold one — each snippet
+runs in a process of its own:
+
+```python
+sandbox.run_code("x = 40")
+sandbox.run_code("x + 2").code_error.name  # "NameError"
+```
+
+- **Requirements:** `code-sandboxes[cloudflare]` (installs `httpx`), and a
+  deployed sandbox bridge Worker.
+- **Parameters:** `api_url`, `api_key`, `python_executable`, `working_dir`.
+
+## Deploying The Bridge
+
+1. Create the Worker from Cloudflare's template, which deploys it and generates
+   the key it will accept:
+   ```bash
+   npm create cloudflare -- sandbox-bridge \
+       --template=cloudflare/sandbox-sdk/bridge/worker
+   ```
+   It answers with a URL of the shape
+   `https://cloudflare-sandbox-bridge.<subdomain>.workers.dev` and a
+   `SANDBOX_API_KEY` secret.
+2. Export both — this variant needs **both**, since a bridge on the public
+   internet with no key is a sandbox anybody may run code in:
+   ```bash
+   export CLOUDFLARE_SANDBOX_API_URL="https://cloudflare-sandbox-bridge.example.workers.dev"
+   export CLOUDFLARE_SANDBOX_API_KEY="..."
+   ```
+
+Either can be passed to the sandbox instead of exported:
+
+```python
+Sandbox.create(variant="cloudflare", api_url="https://...workers.dev", api_key="...")
+```
+
+The key travels as a bearer token. A bridge that refuses it says so with the
+reason rather than with a bare HTTP code — a 401 means the key is wrong, and
+the message names the variable to check.
+
+The bridge documentation is at
+[developers.cloudflare.com/sandbox/bridge](https://developers.cloudflare.com/sandbox/bridge/).
+
+## Usage
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="cloudflare") as sandbox:
+    result = sandbox.run_code("import sys; sys.version_info[:2]")
+    print(result.text)  # "(3, 11)"
+```
+
+Snippets run in `/workspace` unless `working_dir=` says otherwise.
+
+### Carrying State Between Calls
+
+Since each snippet is its own process, anything that has to survive a call has
+to be written down somewhere both processes can see. There are two ways, and
+neither is a workaround for a bug — it is what a stateless runner means.
+
+Put the statements that share state in **one snippet**:
+
+```python
+sandbox.run_code("""
+x = 40
+x + 2
+""").text  # "42"
+```
+
+Or keep the state in a **file**. The filesystem of the sandbox does persist
+between calls:
+
+```python
+sandbox.files.write("/workspace/state.json", '{"x": 40}')
+sandbox.run_code(
+    "import json; json.load(open('/workspace/state.json'))['x'] + 2"
+).text  # "42"
+```
+
+The same fact is what `set_variable` refuses to pretend about: a variable set
+from outside would be gone before the next snippet could read it, so the call
+explains that instead of quietly doing nothing.
+
+### Files
+
+Files go straight to the bridge's filesystem endpoints rather than through a
+program that decodes them, so a large file does not have to become a large
+snippet:
+
+```python
+sandbox.files.write_bytes("/workspace/data.parquet", payload)
+sandbox.files.read_bytes("/workspace/data.parquet")
+```
+
+### Management
+
+`create`, `get` and `delete` are answered; `list` is **not**. The bridge
+exposes a sandbox by its id and has no endpoint that enumerates them, so
+`code-sandboxes list -v cloudflare` raises with that reason rather than
+answering with an empty list — "none" and "cannot know" are different facts,
+and a management tool that confuses them loses sandboxes. See the
+[management guide](/cli/management).
+
+## What Is Not Reported
+
+Each snippet is run by a small program that captures the streams and answers
+with one JSON line, so:
+
+- The value of a trailing expression **is** reported — it is evaluated and its
+  `repr` carried back on that line, which is what makes `result.text` work
+  above.
+- Rich display data — a figure, an HTML repr, a PNG — has no channel at all and
+  is **not** returned. `result.results` only ever holds the text value.
+- There is no interrupt: `sandbox.interrupt()` answers `False`, and a runaway
+  execution is stopped by its timeout.
+- Reading a variable (`get_variable`, and `sandbox.commands.run` which is built
+  on it) can only see the snippet it is part of. There is no session to read
+  from between calls.

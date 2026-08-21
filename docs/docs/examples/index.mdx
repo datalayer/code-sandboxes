@@ -11,9 +11,30 @@ For canonical setup details per variant (requirements, credentials, and
 parameters), see [Sandboxes](/sandboxes). For installation extras, see
 [Installation](/installation).
 
+## Cloudflare
+
+- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/cloudflare_sandbox_example.py
+
+Needs a deployed sandbox bridge Worker, named by `CLOUDFLARE_SANDBOX_API_URL`
+with the `CLOUDFLARE_SANDBOX_API_KEY` it generated. The example shows what a
+stateless runner means and the two ways round it — one snippet, or a file.
+
+```bash
+make cloudflare
+```
+
+## CoreWeave
+
+- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/coreweave_sandbox_example.py
+
+```bash
+make coreweave
+make coreweave-gpu   # COREWEAVE_GPU, default H100
+```
+
 ## Datalayer
 
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/datalayer_sandbox_example.py
+- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/datalayer_sandbox_example.py
 
 ```bash
 make datalayer
@@ -29,15 +50,23 @@ make daytona
 
 ## Docker
 
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/docker_sandbox_example.py
+- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/docker_sandbox_example.py
 
 ```bash
 make docker
 ```
 
+## E2B
+
+- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/e2b_sandbox_example.py
+
+```bash
+make e2b
+```
+
 ## Eval
 
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/eval_sandbox_example.py
+- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/eval_sandbox_example.py
 
 ```bash
 make eval
@@ -51,12 +80,12 @@ make eval
 make google-colab
 ```
 
-## Jupyter
+## Jupyter Server
 
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/jupyter_server_sandbox_example.py
+- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/jupyter_server_sandbox_example.py
 
 ```bash
-make jupyter
+make jupyter-server
 ```
 
 ## Kaggle
@@ -69,7 +98,7 @@ make kaggle
 
 ## Modal
 
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/modal_sandbox_example.py
+- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/modal_sandbox_example.py
 
 ```bash
 make modal
@@ -77,13 +106,15 @@ make modal
 
 ## Monty
 
-- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/monty_sandbox_example.py
+- Source: https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/monty_sandbox_example.py
 
 ```bash
 make monty
 ```
 
-See the Makefile for all targets: https://github.com/datalayer/code-sandboxes/blob/main/examples/Makefile
+See the Makefiles for all targets — one per set:
+https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/Makefile
+and https://github.com/datalayer/code-sandboxes/blob/main/examples/repl/Makefile
 
 Every example runs on the machinery the package exports — `show_and_run`
 for the exec examples, `run_repl` for the REPL ones — which is the same code

@@ -8,10 +8,12 @@
 containers that can run arbitrary code. This sandbox uses ``modal.Sandbox`` to
 provision a container and executes Python snippets inside it via ``sandbox.exec``.
 
-Each ``run_code`` call runs the snippet as a fresh ``python -c`` process, so
-Python variables do **not** persist across calls (use the filesystem or a single
-snippet for stateful workflows). Rich display outputs (images, HTML) are not
-captured; only stdout/stderr text and the process exit code are returned.
+One ``python -u -c`` process is started with the sandbox and fed JSON lines on
+stdin — one request, one reply — so snippets share a namespace: ``x = 1`` in one
+call is still there in the next. A session that cannot be started, or that goes
+away mid-run, drops back to a fresh ``python -c`` process per snippet, which
+works and merely forgets. Rich display outputs (images, HTML) are not captured;
+stdout, stderr and the value of a trailing expression are.
 """
 
 from __future__ import annotations

@@ -18,6 +18,12 @@ pip install code-sandboxes
 Code Sandboxes supports different execution backends via extras:
 
 ```bash
+# With Cloudflare variant support (an HTTP client for the sandbox bridge)
+pip install code-sandboxes[cloudflare]
+
+# With CoreWeave variant support
+pip install code-sandboxes[coreweave]
+
 # With Datalayer variant support
 pip install code-sandboxes[datalayer]
 
@@ -26,6 +32,9 @@ pip install code-sandboxes[daytona]
 
 # With Docker variant support
 pip install code-sandboxes[docker]
+
+# With E2B variant support
+pip install code-sandboxes[e2b]
 
 # With Kaggle support
 pip install code-sandboxes[kaggle]
@@ -43,10 +52,20 @@ pip install code-sandboxes[all]
 ## Requirements
 
 - Python 3.10 or higher
+- For Cloudflare variant: `code-sandboxes[cloudflare]`, a deployed **sandbox
+  bridge** Worker (`npm create cloudflare -- sandbox-bridge
+  --template=cloudflare/sandbox-sdk/bridge/worker`), and both
+  `CLOUDFLARE_SANDBOX_API_URL` and `CLOUDFLARE_SANDBOX_API_KEY`. Cloudflare's
+  own SDK is a Workers binding, which a Python process cannot hold — the
+  bridge is what it talks to instead
+- For CoreWeave variant: `code-sandboxes[coreweave]` and `CWSANDBOX_API_KEY`,
+  an access token from the CoreWeave console
 - For Datalayer variant: valid `DATALAYER_API_KEY`
 - For Daytona variant: `code-sandboxes[daytona]` and a Daytona API key
   (`DAYTONA_API_KEY`, from app.daytona.io)
 - For Docker variant: Docker installed and running
+- For E2B variant: `code-sandboxes[e2b]` and an E2B API key (`E2B_API_KEY`,
+  from e2b.dev)
 - For Google Colab variant: a Colab runtime assignment
   (server URL, kernel id, proxy token)
 - For Kaggle variant: `code-sandboxes[kaggle]` and Kaggle credentials (for batch mode) or runtime connection values (for interactive mode)
@@ -67,6 +86,12 @@ pip install code-sandboxes[all]
 | `DAYTONA_API_KEY` | Daytona API key (Daytona variant) |
 | `DAYTONA_API_URL` | Daytona API URL (optional, defaults to app.daytona.io) |
 | `DAYTONA_TARGET` | Daytona region (optional) |
+| `E2B_API_KEY` | E2B API key (E2B variant) |
+| `E2B_DOMAIN` | E2B domain (optional, for a self-hosted cluster; defaults to e2b.dev) |
+| `CWSANDBOX_API_KEY` | CoreWeave access token (CoreWeave variant) |
+| `CWSANDBOX_BASE_URL` | CoreWeave control plane (optional, defaults to api.cwsandbox.com) |
+| `CLOUDFLARE_SANDBOX_API_URL` | Where the deployed sandbox bridge Worker answers (Cloudflare variant) |
+| `CLOUDFLARE_SANDBOX_API_KEY` | The key that bridge was deployed with (Cloudflare variant) |
 
 ### Programmatic Configuration
 

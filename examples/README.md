@@ -23,9 +23,12 @@ example here: it shows how to use a sandbox, not how to print things.
 
 Supported sandbox variants:
 
+- `cloudflare`
+- `coreweave`
 - `datalayer`
 - `daytona`
 - `docker`
+- `e2b`
 - `eval`
 - `google-colab`
 - `jupyter-server`
@@ -37,9 +40,12 @@ Run one-shot examples from `examples/exec/`:
 
 ```bash
 cd exec
+python cloudflare_sandbox_example.py
+python coreweave_sandbox_example.py
 python datalayer_sandbox_example.py
 python daytona_sandbox_example.py
 python docker_sandbox_example.py
+python e2b_sandbox_example.py
 python eval_sandbox_example.py
 python google_colab_sandbox_example.py
 python jupyter_server_sandbox_example.py
@@ -52,9 +58,12 @@ Or run one-shot examples via Make targets:
 
 ```bash
 cd exec
+make cloudflare
+make coreweave
 make datalayer
 make daytona
 make docker
+make e2b
 make eval
 make google-colab
 make jupyter-server
@@ -67,9 +76,12 @@ Run REPL examples from `examples/repl/`:
 
 ```bash
 cd repl
+make cloudflare
+make coreweave
 make datalayer
 make daytona
 make docker
+make e2b
 make eval
 make google-colab
 make jupyter-server
@@ -80,10 +92,20 @@ make monty
 
 Notes by variant:
 
+- `cloudflare`: requires `code-sandboxes[cloudflare]` and a deployed sandbox
+  bridge Worker — `npm create cloudflare -- sandbox-bridge
+  --template=cloudflare/sandbox-sdk/bridge/worker` — named by
+  `CLOUDFLARE_SANDBOX_API_URL` with the `CLOUDFLARE_SANDBOX_API_KEY` it
+  generated. Each snippet runs in a process of its own, so nothing crosses
+  between them.
+- `coreweave`: requires `code-sandboxes[coreweave]` and `CWSANDBOX_API_KEY`
+  (`CWSANDBOX_BASE_URL` for another control plane).
 - `datalayer`: requires Datalayer runtime credentials/config.
 - `daytona`: requires `code-sandboxes[daytona]` and `DAYTONA_API_KEY` (or
   `DAYTONA_JWT_TOKEN` with `DAYTONA_ORGANIZATION_ID`).
 - `docker`: requires Docker support and a Docker image (for example `code-sandboxes-jupyter:latest`).
+- `e2b`: requires `code-sandboxes[e2b]` and `E2B_API_KEY` (`E2B_DOMAIN` for a
+  self-hosted cluster).
 - `google-colab`: requires `RUNTIME_URL`, `RUNTIME_ID`, and `RUNTIME_PROXY_TOKEN`.
 - `kaggle`: requires `RUNTIME_CHANNELS_URL`, or `RUNTIME_URL` and `RUNTIME_ID`.
 - `modal`: requires `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or `~/.modal.toml`.

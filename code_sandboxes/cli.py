@@ -31,9 +31,12 @@ console = Console()
 #: brings it back to one of these.
 _SUPPORTED_RUN_VARIANTS = frozenset(
     {
+        "cloudflare",
+        "coreweave",
         "datalayer",
         "daytona",
         "docker",
+        "e2b",
         "eval",
         "google-colab",
         "jupyter-server",
@@ -42,6 +45,11 @@ _SUPPORTED_RUN_VARIANTS = frozenset(
         "monty",
     }
 )
+
+
+#: The variants a GPU can be asked of. The others have none at all, and say so
+#: rather than running on a CPU as though nothing had been asked.
+_GPU_VARIANTS = frozenset({"coreweave", "datalayer", "daytona", "kaggle", "modal"})
 
 
 @app.callback(invoke_without_command=True)
@@ -103,7 +111,7 @@ def _kaggle_kwargs(
     return kwargs
 
 
-def _resolve_variant_kwargs(
+def _resolve_variant_kwargs(  # noqa: C901
     variant: str,
     server_url: str | None,
     kernel_id: str | None,
@@ -131,7 +139,15 @@ def _resolve_variant_kwargs(
         if run_url:
             kwargs["run_url"] = run_url
 
-    if variant in {"modal", "daytona", "datalayer", "kaggle"} and gpu:
+    if gpu:
+        # A GPU reaches the variants that can give one, and is REFUSED by the
+        # rest rather than dropped: a sandbox that looks as though it asked
+        # for an H100 and did not is one whose timings mean nothing.
+        if variant not in _GPU_VARIANTS:
+            raise typer.BadParameter(
+                f"--gpu is not something {variant} can give. The variants with "
+                "a GPU are: " + ", ".join(sorted(_GPU_VARIANTS)) + "."
+            )
         kwargs["gpu"] = gpu
 
     if spot:
@@ -149,10 +165,10 @@ _RUN_VARIANT_OPTION = typer.Option(
     None,
     "--variant",
     "-v",
-    help=(
-        "Sandbox variant (datalayer, daytona, docker, eval, "
-        "google-colab, jupyter-server, kaggle, modal, monty)."
-    ),
+    # Built from the set itself, the way the management commands build theirs:
+    # a hand-written list is one more place to forget a variant, and it had
+    # already fallen behind twice.
+    help="Sandbox variant (" + ", ".join(sorted(_SUPPORTED_RUN_VARIANTS)) + ").",
 )
 _RUN_TIMEOUT_OPTION = typer.Option(60.0, help="Code execution timeout (seconds).")
 _RUN_ENVIRONMENT_OPTION = typer.Option(

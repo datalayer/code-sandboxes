@@ -5,165 +5,172 @@ sidebar_position: 3
 
 # Comparison with Other Solutions
 
-This page compares Code Sandboxes with other popular code execution platforms: E2B and Modal.
+This page used to weigh Code Sandboxes against E2B and Modal as alternatives.
+They are not alternatives any more: both are **backends this package drives**,
+alongside [Daytona](/sandboxes/daytona), [CoreWeave](/sandboxes/coreweave) and
+[Cloudflare](/sandboxes/cloudflare). `variant="e2b"` and `variant="modal"` run
+code on E2B and on Modal, through their own SDKs, with their own accounts and
+their own bills.
 
-## Overview
+So the question this page answers is not which of them to use instead. It is
+what the package adds over calling one of them directly, and what each of them
+still decides for you once you are on it.
 
-| Feature | Code Sandboxes | E2B | Modal |
-|---------|---------------|-----|-------|
-| **Open Source** | ✅ Yes (BSD-3) | ✅ Yes (Apache-2) | ❌ No |
-| **Self-hostable** | ✅ Yes | ✅ Yes | ❌ No |
-| **Cloud Offering** | ✅ Datalayer | ✅ E2B Cloud | ✅ Modal Cloud |
-| **Execution** | ✅ Yes | ❌ No | ❌ No |
-| **GPU Support** | ✅ Yes | ❌ No | ✅ Yes |
-| **Snapshots** | ✅ Yes | ✅ Yes | ✅ Yes |
-| **Jupyter Kernel** | ✅ Native | ✅ Yes | ❌ No |
+## What Code Sandboxes Adds
 
-## Feature Comparison
+- **One result, whichever backend answered.** `run_code` comes back as an
+  `ExecutionResult` everywhere, with the failure split three ways: the sandbox
+  (`execution_ok`), the process (`exit_code`), and the code itself
+  (`code_error`). A caller that handles those handles every backend.
+- **One vocabulary for the rest.** `sandbox.files`, `sandbox.commands`,
+  `create_context()`, `set_timeout()`, names and tags mean the same thing on
+  each backend and are mapped onto whatever it actually offers — a filesystem
+  API where there is one, a snippet that decodes base64 where there is not.
+- **CRUD in one place.** `code-sandboxes list`, `get`, `create` and `delete`
+  work across the backends that can answer them; see the
+  [management guide](/cli/management).
+- **A refusal instead of a surprise.** Where a backend cannot do what was
+  asked, the call says so rather than quietly doing something else:
+  `network_policy="allowlist"` on E2B is refused because E2B has no host
+  allowlist, `list` on Cloudflare raises because the bridge cannot enumerate
+  sandboxes, and a value that cannot cross as JSON is refused rather than
+  mangled.
+- **Nothing is required to be a cloud.** `eval`, `monty`, `docker` and
+  `jupyter-server` run on the machine in front of you, through the same
+  interface as the cloud backends — which is what makes a test suite that
+  exercises the interface cheap to run.
 
-### Sandbox Creation
+The package is BSD-3 licensed and no backend is privileged in it. Moving
+between them is a change of one string.
 
-| Operation | Code Sandboxes | E2B | Modal |
-|-----------|---------------|-----|-------|
-| Create sandbox | `Sandbox.create()` | `Sandbox()` | `Sandbox.create()` |
-| With timeout | `Sandbox.create(timeout=60)` | `Sandbox(timeout=60000)` | N/A |
-| With GPU | `Sandbox.create(gpu="T4")` | N/A | `Sandbox.create(gpu="T4")` |
-| From snapshot | `Sandbox.create(snapshot_name="...")` | `Sandbox(template="...")` | `Sandbox.from_id("...")` |
-| Reconnect | `Sandbox.from_id(id)` | `Sandbox.reconnect(id)` | `Sandbox.from_id(id)` |
-| List sandboxes | `Sandbox.list()` | N/A | `Sandbox.list()` |
-
-### Code Execution
-
-| Operation | Code Sandboxes | E2B | Modal |
-|-----------|---------------|-----|-------|
-| Run code | `sandbox.run_code(code)` | `sandbox.runCode(code)` | `sandbox.exec("python", "-c", code)` |
-| Streaming | `on_stdout=callback` | `onStdout=callback` | `for line in proc.stdout` |
-| Variables | `sandbox.get_variable(name)` | `sandbox.getVar(name)` | N/A |
-| Install packages | `sandbox.install_packages([...])` | `sandbox.installPackages([...])` | `sandbox.exec("pip", "install", ...)` |
-
-### Filesystem Operations
-
-| Operation | Code Sandboxes | E2B | Modal |
-|-----------|---------------|-----|-------|
-| Read file | `sandbox.files.read(path)` | `sandbox.files.read(path)` | `sandbox.read_file(path)` |
-| Write file | `sandbox.files.write(path, content)` | `sandbox.files.write(path, content)` | `sandbox.open(path, "w")` |
-| List directory | `sandbox.files.list(path)` | `sandbox.files.list(path)` | `sandbox.list_files(path)` |
-| Make directory | `sandbox.files.mkdir(path)` | `sandbox.files.makeDir(path)` | N/A |
-| Upload | `sandbox.files.upload(local, remote)` | `sandbox.files.upload(local, remote)` | N/A |
-| Download | `sandbox.files.download(remote, local)` | `sandbox.files.download(remote, local)` | N/A |
-
-### Command Execution
-
-| Operation | Code Sandboxes | E2B | Modal |
-|-----------|---------------|-----|-------|
-| Run command | `sandbox.commands.run(cmd)` | `sandbox.commands.run(cmd)` | `sandbox.exec(cmd)` |
-| Streaming exec | `sandbox.commands.exec(*args)` | N/A | `sandbox.exec(*args)` |
-| Background process | `sandbox.commands.spawn(cmd)` | `sandbox.process.start(cmd)` | N/A |
-| System packages | `sandbox.commands.install_system_packages([...])` | N/A | N/A |
-
-### Lifecycle Management
-
-| Operation | Code Sandboxes | E2B | Modal |
-|-----------|---------------|-----|-------|
-| Set timeout | `sandbox.set_timeout(seconds)` | `sandbox.setTimeout(ms)` | N/A |
-| Terminate | `sandbox.terminate()` | `sandbox.close()` | `sandbox.terminate()` |
-| Force kill | `sandbox.kill()` | `sandbox.kill()` | N/A |
-| Get info | `sandbox.get_info()` | N/A | N/A |
-
-### Snapshots
-
-| Operation | Code Sandboxes | E2B | Modal |
-|-----------|---------------|-----|-------|
-| Create snapshot | `sandbox.create_snapshot(name)` | `sandbox.pause()` | `sandbox.snapshot_filesystem()` |
-| List snapshots | `sandbox.list_snapshots()` | N/A | N/A |
-| Restore | `Sandbox.create(snapshot_name=...)` | `Sandbox(template=...)` | `Sandbox.from_id(...)` |
-
-## Architecture Comparison
-
-### E2B
-
-E2B focuses on cloud-based code interpretation, primarily designed for AI assistants. It uses microVMs for isolation and provides a JavaScript/TypeScript SDK.
-
-**Pros:**
-- Simple API
-- Good for AI chatbots
-- Fast cold starts
-
-**Cons:**
-- Cloud-only
-- No GPU support
-- JavaScript-first (Python SDK is secondary)
-
-### Modal
-
-Modal is a serverless platform for running Python code in the cloud. It's designed for ML workloads with strong GPU support.
-
-**Pros:**
-- Excellent GPU support
-- Powerful for ML workloads
-- Great parallelization
-
-**Cons:**
-- Cloud-only (no self-hosting)
-- Closed source
-- More complex API
-
-### Code Sandboxes
-
-Code Sandboxes provides a unified API across all supported variants (`eval`, `monty`, `docker`, `jupyter-server`, `kaggle`, `google-colab`, `modal`, `datalayer`), with native Jupyter kernel support.
-
-**Pros:**
-- Open source and self-hostable
-- Multiple execution variants through one API
-- Native Jupyter integration
-- GPU support via Datalayer runtime
-- Simple, consistent API
-
-**Cons:**
-- Newer project
-- Smaller community
-
-## Migration Guides
-
-### From E2B
+## The Same Program, On Any Backend
 
 ```python
-# E2B
-from e2b_code_interpreter import Sandbox
-sandbox = Sandbox(timeout=60000)
-result = sandbox.runCode("print('hello')")
-sandbox.close()
-
-# Code Sandboxes
 from code_sandboxes import Sandbox
-with Sandbox.create(timeout=60) as sandbox:
-    result = sandbox.run_code("print('hello')")
+
+for variant in ("eval", "e2b", "modal", "daytona", "coreweave"):
+    with Sandbox.create(variant=variant) as sandbox:
+        print(variant, sandbox.run_code("40 + 2").text)  # "42" on each
 ```
 
-### From Modal
+What the interface cannot do is give a backend a capability it does not have.
+That is the other half of the comparison, and it is the table below.
+
+## What Each Backend Brings
+
+| Backend | Runs code in | State between calls | Rich display data | GPU | Management verbs |
+| --- | --- | --- | --- | --- | --- |
+| [`cloudflare`](/sandboxes/cloudflare) | a container on the edge, through a bridge Worker | none — a process per snippet | no | not exposed here | create, get, delete |
+| [`coreweave`](/sandboxes/coreweave) | a container on CoreWeave | a session process, falling back to none | no | `gpu=` | create, list, get, delete |
+| [`datalayer`](/sandboxes/datalayer) | a Datalayer runtime | a kernel | yes | `gpu=` | create, list, get, update, delete |
+| [`daytona`](/sandboxes/daytona) | a Daytona sandbox | the code interpreter, one namespace per context | no | `gpu=`, spot capacity | create, list, get, update, delete |
+| [`e2b`](/sandboxes/e2b) | a Firecracker microVM | a Jupyter kernel per context | yes | not exposed here | create, list, get, delete |
+| [`modal`](/sandboxes/modal) | a Modal container | a session process, falling back to none | no | `gpu=` | create, list, get, update, delete |
+
+"Not exposed here" is about this package, not about the vendor: it means the
+variant has no `gpu=` to pass on, not that the platform has no hardware.
+
+The local backends answer the same interface with none of the accounts:
+[`docker`](/sandboxes/docker) runs a container on this machine,
+[`jupyter-server`](/sandboxes/jupyter-server) a kernel of a Jupyter Server,
+[`monty`](/sandboxes/monty) a restricted Python subset in this process, and
+[`eval`](/sandboxes/eval) plain `exec()` — which isolates nothing and is for
+development and tests.
+
+## What The Package Calls On Your Behalf
+
+The SDKs underneath are still there, and this is roughly what a variant does
+with them. The point of the table is not that one column is better: it is that
+the left column is the same sentence in every row, and the others are not.
+
+| Operation | Code Sandboxes | E2B SDK | Modal SDK |
+| --- | --- | --- | --- |
+| Create a sandbox | `Sandbox.create(variant=...)` | `Sandbox.create()` | `modal.Sandbox.create(app=app, image=image)` |
+| Run a snippet | `sandbox.run_code(code)` | `sandbox.run_code(code)` | `sandbox.exec("python", "-c", code)` |
+| Stream output | `on_stdout=callback` | `on_stdout=callback` | `for line in process.stdout` |
+| A value back from the code | `result.text`, `result.results` | `execution.results` | — read it off stdout yourself |
+| Shell command | `sandbox.commands.run(cmd)` | `sandbox.commands.run(cmd)` | `sandbox.exec(*args)` |
+| Write a file | `sandbox.files.write(path, content)` | `sandbox.files.write(path, content)` | `sandbox.open(path, "w")` |
+| Read a file | `sandbox.files.read(path)` | `sandbox.files.read(path)` | `sandbox.open(path)` |
+| Extend the life | `sandbox.set_timeout(seconds)` | `sandbox.set_timeout(seconds)` | — |
+| Terminate | `sandbox.terminate()` | `sandbox.kill()` | `sandbox.terminate()` |
+| List what is running | `get_manager(variant).list()` | `Sandbox.list()` | `modal.Sandbox.list()` |
+| A GPU | `Sandbox.create(variant="modal", gpu="T4")` | — | `modal.Sandbox.create(gpu="T4")` |
+
+Where a backend has nothing for a row, the variant either builds it —
+Cloudflare and CoreWeave run each snippet through a small program that reports
+the trailing expression and the traceback, because `exec` on its own reports
+neither — or refuses it, and its page says which.
+
+## Coming From The E2B SDK
+
+The sandbox is the same sandbox; what changes is the interface in front of it,
+and that a second backend costs one string.
 
 ```python
-# Modal
-import modal
-sb = modal.Sandbox.create(gpu="T4")
-process = sb.exec("python", "-c", "print('hello')")
-print(process.stdout.read())
-sb.terminate()
+# E2B, directly
+from e2b_code_interpreter import Sandbox
 
-# Code Sandboxes
+sandbox = Sandbox.create()
+execution = sandbox.run_code("print('hello')")
+sandbox.kill()
+
+# Through Code Sandboxes
 from code_sandboxes import Sandbox
-with Sandbox.create(variant="datalayer", gpu="T4") as sandbox:
+
+with Sandbox.create(variant="e2b") as sandbox:
     result = sandbox.run_code("print('hello')")
     print(result.stdout)
 ```
 
-## Choosing the Right Solution
+`E2B_API_KEY` is read the same way in both, and `E2B_DOMAIN` still points at a
+self-hosted cluster. What the variant adds is the shared result model, the
+management verbs, and the refusal where E2B's own model has no answer — see
+[E2B](/sandboxes/e2b).
 
-| Use Case | Recommended |
-|----------|-------------|
-| AI chatbot code execution | Code Sandboxes or E2B |
-| ML training with GPUs | Code Sandboxes or Modal |
-| development/testing | Code Sandboxes |
-| Self-hosted infrastructure | Code Sandboxes or E2B |
-| Jupyter notebook workflows | Code Sandboxes |
-| Serverless Python functions | Modal |
+## Coming From The Modal SDK
+
+```python
+# Modal, directly
+import modal
+
+app = modal.App.lookup("my-app", create_if_missing=True)
+sandbox = modal.Sandbox.create(app=app, gpu="T4")
+process = sandbox.exec("python", "-c", "print('hello')")
+print(process.stdout.read())
+sandbox.terminate()
+
+# Through Code Sandboxes
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="modal", gpu="T4") as sandbox:
+    result = sandbox.run_code("print('hello')")
+    print(result.stdout)
+```
+
+Credentials are Modal's own — `modal token new`, or `MODAL_TOKEN_ID` with
+`MODAL_TOKEN_SECRET`. See [Modal](/sandboxes/modal).
+
+## Choosing A Backend
+
+| Use case | Backend |
+|----------|---------|
+| Development and tests, no account, no isolation | `eval` |
+| LLM-generated snippets that must not touch the host | `monty` |
+| Notebook-shaped work with a kernel, locally | `jupyter-server`, `docker` |
+| An agent session that keeps its variables, in a cloud | `e2b`, `daytona`, `datalayer` |
+| Figures and HTML back from the code | `e2b`, `datalayer`, `jupyter-server` |
+| ML training on a GPU | `coreweave`, `modal`, `daytona`, `datalayer` |
+| The cheapest GPU capacity, preemption accepted | `daytona` with `spot=True` |
+| Short snippets close to the user, no state to keep | `cloudflare` |
+| Production runtimes with snapshots and quotas | `datalayer` |
+
+## What This Package Is Not
+
+It is not a compute platform. Capacity, regions, quotas, cold starts and the
+bill belong to the backend you chose, and no interface in front of them changes
+any of it. It adds no isolation either: an `eval` sandbox is `exec()` in this
+process however carefully the result is reported, and a sandbox is only as
+contained as the backend running it.
+
+What it does is make the choice reversible.

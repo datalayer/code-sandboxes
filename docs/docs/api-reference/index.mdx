@@ -28,7 +28,10 @@ def create(
     tags: dict[str, str] | None = None,
     name: str | None = None,
     snapshot_name: str | None = None,
+    network_policy: str | None = None,
+    allowed_hosts: list[str] | None = None,
     config: SandboxConfig | None = None,
+    **kwargs,
 ) -> Sandbox
 ```
 
@@ -36,7 +39,7 @@ def create(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter-server"`, `"monty"`, `"kaggle"`, `"google-colab"`, `"modal"`, or `"datalayer"`. Defaults to `"datalayer"`. |
+| `variant` | `str` | Sandbox type: `"cloudflare"`, `"coreweave"`, `"datalayer"`, `"daytona"`, `"docker"`, `"e2b"`, `"eval"`, `"google-colab"`, `"jupyter-server"`, `"kaggle"`, `"modal"`, or `"monty"`. Defaults to `"datalayer"`. |
 | `timeout` | `float` | Execution timeout in seconds |
 | `environment` | `str` | Runtime environment name |
 | `gpu` | `str` | GPU type (e.g., `"T4"`, `"A100"`, `"H100"`) |
@@ -46,7 +49,10 @@ def create(
 | `tags` | `dict` | Metadata tags |
 | `name` | `str` | Sandbox name |
 | `snapshot_name` | `str` | Snapshot to restore from |
+| `network_policy` | `str` | Network access policy: `"inherit"`, `"none"`, `"allowlist"`, `"all"` |
+| `allowed_hosts` | `list[str]` | Hosts reachable when the policy is `"allowlist"` |
 | `config` | `SandboxConfig` | Full configuration object |
+| `**kwargs` | `dict` | Variant-specific arguments handed to the sandbox constructor — `template=` (e2b), `container_image=` (coreweave), `api_url=` (cloudflare), and the rest documented on each [variant's page](/sandboxes) |
 
 #### `Sandbox.from_id()`
 
@@ -82,7 +88,7 @@ def list_environments(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter-server"`, `"monty"`, `"kaggle"`, `"google-colab"`, `"modal"`, or `"datalayer"` |
+| `variant` | `str` | Sandbox type: `"cloudflare"`, `"coreweave"`, `"datalayer"`, `"daytona"`, `"docker"`, `"e2b"`, `"eval"`, `"google-colab"`, `"jupyter-server"`, `"kaggle"`, `"modal"`, or `"monty"` |
 | `**kwargs` | `dict` | Variant-specific arguments (e.g., credentials, run URL) |
 
 Legacy `local-eval`, `local-docker`, and `local-jupyter` variant names are not supported.

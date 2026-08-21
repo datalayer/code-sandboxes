@@ -324,6 +324,18 @@ class Sandbox(ABC):
             from .daytona_sandbox import DaytonaSandbox
 
             sandbox = DaytonaSandbox(config=config, **kwargs)
+        elif variant_value == "e2b":
+            from .e2b_sandbox import E2BSandbox
+
+            sandbox = E2BSandbox(config=config, **kwargs)
+        elif variant_value == "coreweave":
+            from .coreweave_sandbox import CoreWeaveSandbox
+
+            sandbox = CoreWeaveSandbox(config=config, **kwargs)
+        elif variant_value == "cloudflare":
+            from .cloudflare_sandbox import CloudflareSandbox
+
+            sandbox = CloudflareSandbox(config=config, **kwargs)
         else:
             raise ValueError(
                 f"Unknown sandbox variant: {variant}. "
@@ -358,7 +370,7 @@ class Sandbox(ABC):
         return DatalayerSandbox.from_id(sandbox_id, **kwargs)
 
     @classmethod
-    def list_environments(
+    def list_environments(  # noqa: C901
         cls,
         variant: SandboxVariant | str = SandboxVariant.DATALAYER,
         **kwargs,
@@ -398,6 +410,18 @@ class Sandbox(ABC):
             from .daytona_sandbox import DaytonaSandbox
 
             return DaytonaSandbox.list_environments()
+        if variant_value == "e2b":
+            from .e2b_sandbox import E2BSandbox
+
+            return E2BSandbox.list_environments()
+        if variant_value == "coreweave":
+            from .coreweave_sandbox import CoreWeaveSandbox
+
+            return CoreWeaveSandbox.list_environments()
+        if variant_value == "cloudflare":
+            from .cloudflare_sandbox import CloudflareSandbox
+
+            return CloudflareSandbox.list_environments()
         if variant_value == "kaggle":
             from .kaggle_sandbox import KaggleSandbox
 

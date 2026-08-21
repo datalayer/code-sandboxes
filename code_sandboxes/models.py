@@ -65,9 +65,12 @@ class SandboxStatus(str, Enum):
 class SandboxVariant(str, Enum):
     """Supported sandbox variants."""
 
+    CLOUDFLARE = "cloudflare"
+    COREWEAVE = "coreweave"
     DATALAYER = "datalayer"
     DAYTONA = "daytona"
     DOCKER = "docker"
+    E2B = "e2b"
     EVAL = "eval"
     GOOGLE_COLAB = "google-colab"
     JUPYTER = "jupyter-server"
