@@ -4,6 +4,8 @@
 
 """Sandbox factory tests."""
 
+import warnings
+
 import pytest
 
 from code_sandboxes.base import Sandbox, SandboxVariant
@@ -70,7 +72,7 @@ class TestSandboxFactory:
             ("jupyter-server", JupyterServerSandbox),
             ("docker", DockerSandbox),
             ("datalayer", DatalayerSandbox),
-            ("google_colab", GoogleColabSandbox),
+            ("google-colab", GoogleColabSandbox),
             ("kaggle", KaggleSandbox),
             ("monty", MontySandbox),
             ("modal", ModalSandbox),
@@ -81,6 +83,56 @@ class TestSandboxFactory:
         sandbox = Sandbox.create(variant=variant)
         assert isinstance(sandbox, expected_type)
 
+    @pytest.mark.parametrize(
+        "variant",
+        ["jupyter-server", "jupyter_server", "JUPYTER-SERVER", " Jupyter-Server "],
+    )
+    def test_a_variant_is_read_in_any_spelling(self, variant):
+        """The factory was the strictest door into the package, and alone.
+
+        `get_manager` and `get_provider` have always taken the case and the
+        whitespace a configuration file leaves around a name; `create` took
+        one spelling and raised on the rest.
+        """
+        assert isinstance(Sandbox.create(variant=variant), JupyterServerSandbox)
+        assert Sandbox.list_environments(variant=variant)
+
+    @pytest.mark.parametrize("variant", list(SandboxVariant))
+    def test_every_variant_of_the_enum_can_be_created(self, variant):
+        """The enum and what the factory branches on cannot drift apart.
+
+        They did: `google_colab` was renamed to `google-colab` in the enum and
+        in the branch, while the normalizer between them still folded dashes
+        to underscores — so the one variant that had just been renamed was the
+        one that could no longer be created.
+        """
+        for spelling in (
+            variant,
+            variant.value,
+            variant.value.replace("-", "_"),
+            variant.value.upper(),
+            f"  {variant.value}  ",
+        ):
+            assert Sandbox.create(variant=spelling) is not None
+            with warnings.catch_warnings():
+                # Reaching the variant is what is under test. Some of them
+                # import a platform client on the way, which has deprecation
+                # notices of its own that are nothing to do with this.
+                warnings.simplefilter("ignore")
+                assert Sandbox.list_environments(variant=spelling) is not None
+
+    def test_a_name_that_is_not_a_variant_still_raises(self):
+        """Reading loosely is not guessing: `jupyter` names nothing."""
+        with pytest.raises(ValueError, match="Unknown sandbox variant"):
+            Sandbox.create(variant="jupyter")
+
+    def test_the_refusal_names_what_there_is(self):
+        with pytest.raises(ValueError) as raised:
+            Sandbox.list_environments(variant="nonesuch")
+        message = str(raised.value)
+        assert "jupyter-server" in message
+        assert "daytona" in message
+
     def test_create_default_variant_is_datalayer(self):
         """Test that omitting variant uses the datalayer sandbox by default."""
         sandbox = Sandbox.create()
@@ -89,7 +141,7 @@ class TestSandboxFactory:
     def test_create_colab_forwards_connection_kwargs(self):
         """Test that Colab-specific connection kwargs are propagated."""
         sandbox = Sandbox.create(
-            variant="google_colab",
+            variant="google-colab",
             server_url="https://colab-host.example",
             kernel_id="kernel-id",
             proxy_token="proxy-token",  # noqa: S106

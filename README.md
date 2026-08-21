@@ -16,10 +16,11 @@ Code Sandboxes (`code_sandboxes`) is a Python package for running code in isolat
 Canonical variant names:
 
 - `datalayer`
+- `daytona`
 - `docker`
 - `eval`
-- `google_colab`
-- `jupyter`
+- `google-colab`
+- `jupyter-server`
 - `kaggle`
 - `modal`
 - `monty`
@@ -48,18 +49,18 @@ pip install code-sandboxes
 
 For backend-specific extras and credentials, see [https://code-sandboxes.datalayer.tech/installation](https://code-sandboxes.datalayer.tech/installation) and [https://code-sandboxes.datalayer.tech/sandboxes](https://code-sandboxes.datalayer.tech/sandboxes).
 
-### Jupyter Sandbox
+### Jupyter Server Sandbox
 
 ```python
 from code_sandboxes import Sandbox
 
 # Option 1: manage a local Jupyter server automatically
-with Sandbox.create(variant="jupyter") as sandbox:
+with Sandbox.create(variant="jupyter-server") as sandbox:
   print(sandbox.run_code("1 + 1").text)  # 2
 
 # Option 2: connect to an existing Jupyter server
 with Sandbox.create(
-  variant="jupyter",
+  variant="jupyter-server",
   server_url="http://localhost:8888",
   token="MY_TOKEN",
 ) as sandbox:
@@ -89,7 +90,7 @@ pip install code-sandboxes[kaggle]
 export KAGGLE_API_KEY="<your-kaggle-api-key>"
 
 # Launch the REPL
-sandbox repl --variant kaggle
+code-sandboxes repl --variant kaggle
 ```
 
 For batch execution, configure Kaggle credentials and create the sandbox
@@ -141,7 +142,7 @@ directly to the sandbox:
 ```python
 from code_sandboxes import Sandbox
 
-with Sandbox.create(variant="google_colab", channels_url=channels_url) as sandbox:
+with Sandbox.create(variant="google-colab", channels_url=channels_url) as sandbox:
     print(sandbox.run_code("x = 1 + 1; print(x)").stdout)
 ```
 

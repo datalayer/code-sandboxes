@@ -20,12 +20,23 @@ from code_sandboxes.manage import (
 from code_sandboxes.models import SandboxInfo, SandboxStatus
 
 
+def test_every_variant_of_the_enum_has_a_manager_in_any_spelling():
+    """`manageable_variants` is the enum, and answers to how it is spelled."""
+    from code_sandboxes.models import SandboxVariant
+
+    for variant in SandboxVariant:
+        assert variant.value in manageable_variants()
+        for spelling in (variant.value, variant.value.replace("-", "_")):
+            assert get_manager(spelling).variant == variant.value
+
+
 def test_every_variant_has_a_manager():
     assert manageable_variants() == [
         "datalayer",
+        "daytona",
         "docker",
         "eval",
-        "google_colab",
+        "google-colab",
         "jupyter-server",
         "kaggle",
         "modal",
@@ -37,7 +48,7 @@ def test_every_variant_has_a_manager():
 
 def test_the_colab_spelling_with_a_dash_is_accepted(monkeypatch):
     monkeypatch.setenv("RUNTIME_URL", "https://colab.example/proxy")
-    assert get_manager("google-colab").variant == "google_colab"
+    assert get_manager("google-colab").variant == "google-colab"
 
 
 def test_an_unknown_variant_is_named_in_the_error():
@@ -232,9 +243,7 @@ def test_cli_update_parses_tags_and_renders_the_result(monkeypatch):
     assert received["sb-1"] == {"tags": {"team": "ai", "env": "dev"}}
     assert "sb-1" in result.output
 
-    result = runner.invoke(
-        sandbox_cli.app, ["update", "sb-1", "-v", "modal", "--tag", "notavalue"]
-    )
+    result = runner.invoke(sandbox_cli.app, ["update", "sb-1", "-v", "modal", "--tag", "notavalue"])
     assert result.exit_code == 1
     assert "Not a key=value tag" in result.output
 

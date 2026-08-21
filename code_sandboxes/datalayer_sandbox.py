@@ -40,7 +40,6 @@ from .models import (
 )
 
 
-
 def _urls_for_run(run_url: str):
     """Datalayer service URLs for a deployment served from one origin.
 
@@ -52,7 +51,27 @@ def _urls_for_run(run_url: str):
     from datalayer_core.utils.urls import DatalayerURLs
 
     base = (run_url or "").rstrip("/")
-    return DatalayerURLs.from_environment(**{name: base for name in ['iam_url', 'runtimes_url', 'spacer_url', 'library_url', 'manager_url', 'ai_agents_url', 'ai_inference_url', 'otel_url', 'growth_url', 'success_url', 'status_url', 'support_url', 'mcp_server_url', 'scheduler_url']})
+    return DatalayerURLs.from_environment(
+        **dict.fromkeys(
+            [
+                "iam_url",
+                "runtimes_url",
+                "spacer_url",
+                "library_url",
+                "manager_url",
+                "ai_agents_url",
+                "ai_inference_url",
+                "otel_url",
+                "growth_url",
+                "success_url",
+                "status_url",
+                "support_url",
+                "mcp_server_url",
+                "scheduler_url",
+            ],
+            base,
+        )
+    )
 
 
 class DatalayerSandbox(Sandbox):
@@ -168,8 +187,8 @@ class DatalayerSandbox(Sandbox):
             DatalayerSandbox instances.
         """
         try:
-            from agent_runtimes.client import AgentClient
             import datalayer_core.utils.urls  # noqa: F401 - availability check
+            from agent_runtimes.client import AgentClient
         except ImportError:
             return
 
@@ -210,8 +229,8 @@ class DatalayerSandbox(Sandbox):
         run_url: Optional[str] = None,
     ) -> list[SandboxEnvironment]:
         try:
-            from agent_runtimes.client import AgentClient
             import datalayer_core.utils.urls  # noqa: F401 - availability check
+            from agent_runtimes.client import AgentClient
         except ImportError:
             return []
 
@@ -250,9 +269,9 @@ class DatalayerSandbox(Sandbox):
 
         try:
             # Import here to avoid hard dependency
+            import datalayer_core.utils.urls  # noqa: F401 - availability check
             from agent_runtimes.client import AgentClient
             from agent_runtimes.client.agent_client import DEFAULT_TIME_RESERVATION
-            import datalayer_core.utils.urls  # noqa: F401 - availability check
         except ImportError as e:
             raise SandboxConfigurationError(
                 "agent-runtimes package is required for DatalayerSandbox. "
@@ -562,8 +581,7 @@ class DatalayerSandbox(Sandbox):
             execution_ok=True,
             code_error=code_error,
             exit_code=exit_code,
-            execution_count=getattr(response, "execution_count", None)
-            or self._execution_count,
+            execution_count=getattr(response, "execution_count", None) or self._execution_count,
             context_id=context.id if context else "default",
             started_at=started_at,
             completed_at=time.time(),

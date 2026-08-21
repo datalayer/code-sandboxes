@@ -9,13 +9,16 @@ from __future__ import annotations
 from typer.testing import CliRunner
 
 from code_sandboxes import cli as sandbox_cli
-from code_sandboxes.models import ExecutionResult, Logs, Result
+from code_sandboxes.models import ExecutionResult, Logs, Result, SandboxInfo
 
 
 class _FakeSandbox:
     def __init__(self):
         self.sandbox_id = "sandbox-123"
         self.exited = False
+        # The prompt names the sandbox it is about to run a line in, so a
+        # stand-in for one has to answer the same question a real one does.
+        self.info = SandboxInfo(id=self.sandbox_id, variant="fake", name="fake-sandbox")
 
     def __enter__(self):
         return self
@@ -43,7 +46,9 @@ def test_repl_jupyter_variant_uses_random_port(monkeypatch):
 
     monkeypatch.setattr(sandbox_cli.Sandbox, "create", staticmethod(_fake_create))
 
-    result = runner.invoke(sandbox_cli.app, ["repl", "--variant", "jupyter-server"], input=":exit\n")
+    result = runner.invoke(
+        sandbox_cli.app, ["repl", "--variant", "jupyter-server"], input=":exit\n"
+    )
 
     assert result.exit_code == 0
     assert captured["kwargs"]["variant"] == "jupyter-server"
@@ -70,7 +75,7 @@ def test_repl_colab_prompts_and_forwards_credentials(monkeypatch):
     )
 
     assert result.exit_code == 0
-    assert captured["kwargs"]["variant"] == "google_colab"
+    assert captured["kwargs"]["variant"] == "google-colab"
     assert captured["kwargs"]["server_url"] == "https://colab-host.example"
     assert captured["kwargs"]["kernel_id"] == "kernel-abc"
     assert captured["kwargs"]["proxy_token"] == "proxy-xyz"  # noqa: S105

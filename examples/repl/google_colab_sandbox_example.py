@@ -5,9 +5,7 @@
 
 import os
 
-from repl_common import run_repl
-
-from code_sandboxes import Sandbox
+from code_sandboxes import Sandbox, run_repl
 
 
 def _require(name: str) -> str:
@@ -24,7 +22,7 @@ def main() -> None:
         runtime_proxy_token = _require("RUNTIME_PROXY_TOKEN")
 
         with Sandbox.create(
-            variant="google_colab",
+            variant="google-colab",
             timeout=60,
             server_url=runtime_url,
             kernel_id=runtime_id,

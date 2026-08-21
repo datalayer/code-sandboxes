@@ -7,9 +7,7 @@ import argparse
 import os
 from pathlib import Path
 
-from repl_common import run_repl
-
-from code_sandboxes import Sandbox
+from code_sandboxes import Sandbox, run_repl
 
 
 def _has_modal_auth() -> bool:
@@ -49,7 +47,7 @@ def main() -> None:
             run_repl(sandbox)
     except Exception as exc:
         print("modal REPL failed:", exc)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

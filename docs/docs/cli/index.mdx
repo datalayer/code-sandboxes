@@ -1,74 +1,128 @@
 ---
-title: CLI REPL
+title: Running Code
 sidebar_position: 1
 ---
 
-# CLI REPL
+# Running Code
 
-Code Sandboxes provides a Typer-based CLI that launches an interactive REPL
-against a selected sandbox variant. The same CLI also
+Code Sandboxes ships a Typer CLI with two ways to run code in any variant:
+`exec` for one snippet, `repl` for a prompt. The same CLI also
 [creates, lists and deletes sandboxes](/cli/management) across variants.
+
+Both commands create a sandbox, use it, and terminate it. Nothing is left
+running behind you — to keep one, see
+[`code-sandboxes create`](/cli/management).
 
 For canonical variant setup details (requirements, credentials, and parameters),
 see [Sandboxes](/sandboxes). For package installation and extras, see
 [Installation](/installation).
 
 ```bash
-sandbox repl --variant jupyter
+code-sandboxes exec --variant eval 'print(40 + 2)'
+code-sandboxes repl --variant jupyter-server
 ```
 
-`code-sandboxes` remains available as an alias.
+`code-sandbox` is available as an alias for the same command.
+
+## `exec` — one snippet
+
+The code comes from an argument, from `--file`, or from standard input:
+
+```bash
+code-sandboxes exec -v eval 'x = 40; x + 2'
+code-sandboxes exec -v eval --file analysis.py
+echo 'print("hello")' | code-sandboxes exec -v eval
+```
+
+The exit status is the code's own — `0` when it ran cleanly, `1` when it
+raised or the sandbox could not run it — so this composes in a shell. With
+`--quiet` nothing is printed but what the code produced:
+
+```bash
+if code-sandboxes exec -v eval -q 'import numpy' ; then
+  echo "numpy is there"
+fi
+```
+
+## `repl` — a prompt
+
+```bash
+# Explicit variant
+code-sandboxes repl --variant monty
+
+# Or omit it and choose interactively
+code-sandboxes repl
+
+# Datalayer with overrides
+code-sandboxes repl --variant datalayer --token "$DATALAYER_API_KEY" \
+  --run-url "https://prod1.datalayer.run"
+```
+
+State is kept between lines, and the value of an expression is shown as a
+REPL shows it. The prompt names the sandbox the line will run in, which
+matters as soon as two are open side by side:
+
+```
+sandbox(daytona:tan-law-5384)>>> x = 40
+sandbox(daytona:tan-law-5384)>>> x + 2
+42
+```
+
+Use any of `:exit`, `:quit`, `exit`, `quit` or `Ctrl+D` to leave, and `:help`
+for a reminder. On exit, the sandbox is terminated.
 
 ## Variant Selection
 
-You can either pass `--variant` directly or omit it and choose interactively.
-
 Supported variants:
 
-- `jupyter-server`
+- `datalayer`
+- `daytona`
 - `docker`
 - `eval`
-- `monty`
-- `kaggle`
 - `google-colab`
+- `jupyter-server`
+- `kaggle`
 - `modal`
-- `datalayer`
+- `monty`
+
+`exec` and `repl` take the same options: `--variant`, `--timeout`,
+`--environment`, `--gpu`, `--spot`, and the connection settings a variant
+needs.
 
 ## Variant-specific Behavior
 
+- `daytona`: starts a Daytona sandbox; `--gpu` takes Daytona's own flavors
+  (`H100`, `H200`, `RTX-4090`, ...), several of them comma-separated to fall
+  back along, and `--spot` runs on preemptible capacity.
+- `google-colab`: prompts for runtime URL, kernel ID, and proxy token.
 - `jupyter-server`: starts a managed local Jupyter server on a random port.
 - `kaggle`: supports either interactive runtime settings or credential-based batch execution.
-- `monty`: starts a Monty REPL-backed sandbox.
 - `modal`: starts a Modal sandbox container.
-- `google-colab`: prompts for runtime URL, kernel ID, and proxy token.
+- `monty`: starts a Monty REPL-backed sandbox.
 
-## Usage
+## The Same Machinery, From Python
 
-```bash
-# Interactive variant prompt
-sandbox repl
+The CLI has nothing of its own: `exec` and `repl` are `show_and_run` and
+`run_repl`, which the package exports and every example uses.
 
-# Explicit variant
-sandbox repl --variant monty
+```python
+from code_sandboxes import Sandbox, run_repl, show_and_run
 
-# Datalayer with overrides
-sandbox repl --variant datalayer --token "$DATALAYER_API_KEY" --run-url "https://prod1.datalayer.run"
+with Sandbox.create(variant="eval") as sandbox:
+    show_and_run(sandbox, "x = 40")
+    result = show_and_run(sandbox, "x + 2")   # prints the code, then "42"
+    assert result.text == "42"
+
+with Sandbox.create(variant="eval") as sandbox:
+    run_repl(sandbox)                          # the prompt, on your own sandbox
 ```
 
-## Exiting and Cleanup
-
-Use any of the following to exit:
-
-- `:exit`
-- `:quit`
-- `exit`
-- `quit`
-- `Ctrl+D`
-
-On exit, the created sandbox resource is terminated automatically.
+`show_code`, `show_result` and `repl_prompt` are exported too, for a program
+that wants the pieces rather than the whole.
 
 ## Related Docs
 
+- [Managing Sandboxes](/cli/management)
 - [Sandboxes](/sandboxes)
 - [Installation](/installation)
 - [API Reference](/api-reference)

@@ -10,9 +10,7 @@ Note: This requires Docker support and the `datalayer/code-sandboxes:latest` ima
 Build it with: make -C .. build-docker
 """
 
-from exec_common import show_and_run
-
-from code_sandboxes import Sandbox
+from code_sandboxes import Sandbox, show_and_run
 
 
 def main() -> None:
@@ -22,7 +20,7 @@ def main() -> None:
             timeout=30,
             image="code-sandboxes-jupyter:latest",
         ) as sandbox:
-            result = show_and_run(sandbox, "print('hello from docker')")
+            show_and_run(sandbox, "print('hello from docker')")
             error_result = show_and_run(sandbox, "raise RuntimeError('boom')")
             if error_result.code_error:
                 print(

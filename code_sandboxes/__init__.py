@@ -20,6 +20,7 @@ Remote sandboxes (out-of-process execution via Jupyter kernel protocol):
 
 Cloud container sandboxes:
     - ModalSandbox: Modal cloud containers, per-snippet process execution
+    - DaytonaSandbox: Daytona cloud sandboxes, stateful Python interpreter
 
 Features:
 - Code execution with streaming support
@@ -60,7 +61,16 @@ Style usage:
 from .base import Sandbox
 from .client import CodeExecutionOutcome, CodeSandboxClient, execution_result_to_reply
 from .commands import CommandResult, ProcessHandle, SandboxCommands
+from .console import (
+    EXIT_COMMANDS,
+    repl_prompt,
+    run_repl,
+    show_and_run,
+    show_code,
+    show_result,
+)
 from .datalayer_sandbox import DatalayerSandbox
+from .daytona_sandbox import DaytonaSandbox
 from .docker_sandbox import DockerSandbox
 from .eval_sandbox import EvalSandbox
 from .exceptions import (
@@ -121,6 +131,7 @@ from .models import (
     SnapshotInfo,
     TunnelInfo,
 )
+from .monty_sandbox import MontySandbox
 from .providers import (
     PROVIDERS,
     ProviderRequirement,
@@ -128,17 +139,13 @@ from .providers import (
     available_providers,
     get_provider,
 )
-from .monty_sandbox import MontySandbox
 
+#: Everything this package exports, in one sorted list — the groups it
+#: used to be split into stopped matching what they sat above.
 __all__ = [
+    "EXIT_COMMANDS",
     "KAGGLE_API_TOKEN_ENV",
-    # Providers
     "PROVIDERS",
-    "ProviderRequirement",
-    "SandboxProvider",
-    "available_providers",
-    "get_provider",
-    # Models
     "CodeError",
     "CodeExecutionOutcome",
     "CodeSandboxClient",
@@ -146,8 +153,8 @@ __all__ = [
     "Context",
     "ContextNotFoundError",
     "DatalayerSandbox",
+    "DaytonaSandbox",
     "DockerSandbox",
-    # Sandbox implementations
     "EvalSandbox",
     "ExecutionResult",
     "FileInfo",
@@ -170,28 +177,25 @@ __all__ = [
     "OutputHandler",
     "OutputMessage",
     "ProcessHandle",
+    "ProviderRequirement",
     "ResourceConfig",
     "Result",
-    # Main sandbox class
     "Sandbox",
     "SandboxAuthenticationError",
-    # Commands
     "SandboxCommands",
     "SandboxConfig",
     "SandboxConfigurationError",
     "SandboxConnectionError",
     "SandboxEnvironment",
-    # Exceptions
     "SandboxError",
     "SandboxExecutionError",
     "SandboxFileHandle",
-    # Filesystem
     "SandboxFilesystem",
     "SandboxInfo",
-    # Management (CRUD)
     "SandboxManagementError",
     "SandboxManager",
     "SandboxNotStartedError",
+    "SandboxProvider",
     "SandboxQuotaExceededError",
     "SandboxResourceError",
     "SandboxSnapshotError",
@@ -201,9 +205,16 @@ __all__ = [
     "SnapshotInfo",
     "TunnelInfo",
     "VariableNotFoundError",
+    "available_providers",
     "execution_result_to_reply",
     "get_manager",
+    "get_provider",
     "manageable_variants",
     "parse_google_colab_channels_url",
     "parse_kaggle_channels_url",
+    "repl_prompt",
+    "run_repl",
+    "show_and_run",
+    "show_code",
+    "show_result",
 ]

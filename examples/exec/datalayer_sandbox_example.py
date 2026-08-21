@@ -9,9 +9,7 @@ Run with:
 This requires Datalayer runtime credentials/config.
 """
 
-from exec_common import show_and_run
-
-from code_sandboxes import Sandbox
+from code_sandboxes import Sandbox, show_and_run
 
 
 def main() -> None:
@@ -30,7 +28,7 @@ def main() -> None:
             timeout=60,
             environment=first_env.name,
         ) as sandbox:
-            result = show_and_run(sandbox, "print('hello from datalayer runtime')")
+            show_and_run(sandbox, "print('hello from datalayer runtime')")
     except Exception as exc:
         print("datalayer example failed:", exc)
         print("Exception type:", type(exc))

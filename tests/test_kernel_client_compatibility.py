@@ -37,9 +37,7 @@ from code_sandboxes.interfaces import ISandboxClient  # noqa: E402
 def _protocol_members(protocol: type) -> list[str]:
     """The names a protocol demands, read from its own annotations/methods."""
     return sorted(
-        name
-        for name in getattr(protocol, "__protocol_attrs__", [])
-        if not name.startswith("_")
+        name for name in getattr(protocol, "__protocol_attrs__", []) if not name.startswith("_")
     )
 
 
@@ -71,9 +69,7 @@ class TestTheRealClientSatisfiesTheSandboxContract:
         to have today.
         """
         public = set(_protocol_members(IJupyterKernelClient))
-        overreach = [
-            name for name in _protocol_members(ISandboxClient) if name not in public
-        ]
+        overreach = [name for name in _protocol_members(ISandboxClient) if name not in public]
         assert overreach == [], (
             "The sandbox contract asks the client for members outside its "
             f"public protocol: {overreach}"
@@ -123,12 +119,8 @@ class TestTheCallsTheSandboxesMakeBind:
         _binds(JupyterKernelClient.interrupt, None)
 
     def test_identity_and_info_are_readable(self):
-        assert isinstance(
-            inspect.getattr_static(JupyterKernelClient, "id"), property
-        )
-        assert isinstance(
-            inspect.getattr_static(JupyterKernelClient, "kernel_info"), property
-        )
+        assert isinstance(inspect.getattr_static(JupyterKernelClient, "id"), property)
+        assert isinstance(inspect.getattr_static(JupyterKernelClient, "kernel_info"), property)
 
 
 class TestTheSandboxesExposeTheClient:
@@ -137,9 +129,7 @@ class TestTheSandboxesExposeTheClient:
     def test_the_base_declares_the_accessor(self):
         from code_sandboxes import Sandbox
 
-        assert isinstance(
-            inspect.getattr_static(Sandbox, "kernel_client"), property
-        )
+        assert isinstance(inspect.getattr_static(Sandbox, "kernel_client"), property)
 
     def test_every_kernel_backed_variant_overrides_it(self):
         # From the package root, as any consumer would: the compatibility
@@ -170,5 +160,7 @@ class TestTheSandboxesExposeTheClient:
         _binds(KaggleLiveSession.stop, None, shutdown_kernel=False)
         _binds(KaggleLiveSession.get_variable, None, "x")
 
-        session = KaggleLiveSession(executor=object())
+        # Its own `api`, so the shapes can be checked without the `kaggle`
+        # distribution: the constructor imports it only to default this.
+        session = KaggleLiveSession(executor=object(), api=object())
         assert isinstance(session.id, str) and session.id

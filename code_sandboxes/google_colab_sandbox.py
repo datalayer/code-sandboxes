@@ -79,13 +79,13 @@ class GoogleColabSandbox(Sandbox):
     def list_environments(cls) -> list[SandboxEnvironment]:
         return [
             SandboxEnvironment(
-                name="google_colab",
+                name="google-colab",
                 title="Google Colab",
                 language="python",
                 owner="google",
                 visibility="cloud",
                 burning_rate=0.0,
-                metadata={"variant": "google_colab"},
+                metadata={"variant": "google-colab"},
             )
         ]
 
@@ -122,7 +122,7 @@ class GoogleColabSandbox(Sandbox):
         self._default_context = self.create_context("default")
         self._info = SandboxInfo(
             id=self._sandbox_id,
-            variant="google_colab",
+            variant="google-colab",
             status=SandboxStatus.RUNNING,
             created_at=time.time(),
             name=self.config.name,

@@ -135,11 +135,7 @@ class KaggleSandbox(Sandbox):
         # Live mode: a batch job runs an agent holding a real ipykernel, and
         # the code travels over the account's own datasets — one persistent
         # kernel, no replay, no external service. See `kaggle_live`.
-        if (
-            self._extra_kwargs.get("live")
-            and not self._server_url
-            and not self._channels_url
-        ):
+        if self._extra_kwargs.get("live") and not self._server_url and not self._channels_url:
             from .kaggle_live import KaggleLiveSession
 
             executor = KaggleKernelExecutor(
@@ -525,6 +521,7 @@ class KaggleSandbox(Sandbox):
             reply = self._cut_replayed_outputs(reply, session_marker)
             submitted.kernel_reply = reply
 
+        raised = False
         if isinstance(reply, dict):
             for output in reply.get("outputs", []):
                 output_type = output.get("output_type")
@@ -544,21 +541,27 @@ class KaggleSandbox(Sandbox):
                         extra=output.get("metadata", {}),
                     )
                 elif output_type == "error":
+                    raised = True
                     yield CodeError(
                         name=output.get("ename", "Error"),
                         value=output.get("evalue", ""),
                         traceback="\n".join(output.get("traceback", [])),
                     )
 
+        was_interrupted = self._interrupt_requested.is_set()
         if status != "COMPLETE":
             yield CodeError(
                 name="KaggleExecutionError",
                 value=failure_message or f"Kaggle execution failed with status: {status}",
                 traceback=getattr(submitted, "log", "") or "",
             )
-        else:
-            # Only a snippet that completed joins the session — see the batch
-            # path, which records under the same condition.
+        elif not raised and not was_interrupted:
+            # Only a snippet that ran WITHOUT ERROR joins the session, as in
+            # the batch path: the replay re-runs it ahead of every turn after
+            # this one, so recording a failing snippet fails every one of
+            # them. The status is not the test — a job whose cell raised still
+            # completes, because the JOB ran; what the outputs say is whether
+            # the CODE did.
             self._record_session(code)
 
         self._executing_event.clear()

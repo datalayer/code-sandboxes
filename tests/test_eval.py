@@ -447,7 +447,7 @@ class TestInterruptAndExecutionState:
 
         def run_in_thread():
             # Execute code that waits for the proceed event
-            sandbox.run_code("import time\n" "started.set()\n" "proceed.wait(5)\n")
+            sandbox.run_code("import time\nstarted.set()\nproceed.wait(5)\n")
 
         with EvalSandbox() as sandbox:
             sandbox.set_variable("started", started)
@@ -482,7 +482,7 @@ class TestInterruptAndExecutionState:
 
         def run_in_thread():
             return sandbox.run_code(
-                "import time\n" "started.set()\n" "while True:\n" "    time.sleep(0.01)\n"
+                "import time\nstarted.set()\nwhile True:\n    time.sleep(0.01)\n"
             )
 
         with EvalSandbox() as sandbox:
@@ -492,7 +492,7 @@ class TestInterruptAndExecutionState:
 
             def run_and_capture():
                 results[0] = sandbox.run_code(
-                    "import time\n" "started.set()\n" "while True:\n" "    time.sleep(0.01)\n"
+                    "import time\nstarted.set()\nwhile True:\n    time.sleep(0.01)\n"
                 )
 
             thread = threading.Thread(target=run_and_capture)

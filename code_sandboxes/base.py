@@ -27,6 +27,7 @@ from .models import (
     SandboxInfo,
     SandboxStatus,
     SandboxVariant,
+    normalize_variant,
 )
 
 
@@ -286,12 +287,7 @@ class Sandbox(ABC):
 
         from .eval_sandbox import EvalSandbox
 
-        # In one normal form, as every dispatcher here reads it: the value of
-        # a variant may carry a dash — `jupyter-server` — and callers type
-        # either spelling.
-        variant_value = (
-            variant.value if isinstance(variant, SandboxVariant) else variant
-        ).replace("-", "_")
+        variant_value = normalize_variant(variant)
 
         if variant_value == "eval":
             sandbox = EvalSandbox(config=config, **kwargs)
@@ -300,7 +296,7 @@ class Sandbox(ABC):
             from .docker_sandbox import DockerSandbox
 
             sandbox = DockerSandbox(config=config, **kwargs)
-        elif variant_value == "jupyter_server":
+        elif variant_value == "jupyter-server":
             from .jupyter_server_sandbox import JupyterServerSandbox
 
             sandbox = JupyterServerSandbox(config=config, **kwargs)
@@ -308,7 +304,7 @@ class Sandbox(ABC):
             from .datalayer_sandbox import DatalayerSandbox
 
             sandbox = DatalayerSandbox(config=config, **kwargs)
-        elif variant_value == "google_colab":
+        elif variant_value == "google-colab":
             from .google_colab_sandbox import GoogleColabSandbox
 
             sandbox = GoogleColabSandbox(config=config, **kwargs)
@@ -324,11 +320,14 @@ class Sandbox(ABC):
             from .modal_sandbox import ModalSandbox
 
             sandbox = ModalSandbox(config=config, **kwargs)
+        elif variant_value == "daytona":
+            from .daytona_sandbox import DaytonaSandbox
+
+            sandbox = DaytonaSandbox(config=config, **kwargs)
         else:
             raise ValueError(
                 f"Unknown sandbox variant: {variant}. "
-                "Supported variants: "
-                + ", ".join(sorted(v.value for v in SandboxVariant))
+                "Supported variants: " + ", ".join(sorted(v.value for v in SandboxVariant))
             )
 
         # Set tags if provided
@@ -373,8 +372,7 @@ class Sandbox(ABC):
         Returns:
             List of SandboxEnvironment entries.
         """
-        variant_value = variant.value if isinstance(variant, SandboxVariant) else variant
-        variant_value = variant_value.replace("-", "_")
+        variant_value = normalize_variant(variant)
 
         if variant_value == "eval":
             from .eval_sandbox import EvalSandbox
@@ -384,7 +382,7 @@ class Sandbox(ABC):
             from .docker_sandbox import DockerSandbox
 
             return DockerSandbox.list_environments()
-        if variant_value == "jupyter_server":
+        if variant_value == "jupyter-server":
             from .jupyter_server_sandbox import JupyterServerSandbox
 
             return JupyterServerSandbox.list_environments()
@@ -396,11 +394,15 @@ class Sandbox(ABC):
             from .modal_sandbox import ModalSandbox
 
             return ModalSandbox.list_environments()
+        if variant_value == "daytona":
+            from .daytona_sandbox import DaytonaSandbox
+
+            return DaytonaSandbox.list_environments()
         if variant_value == "kaggle":
             from .kaggle_sandbox import KaggleSandbox
 
             return KaggleSandbox.list_environments()
-        if variant_value == "google_colab":
+        if variant_value == "google-colab":
             from .google_colab_sandbox import GoogleColabSandbox
 
             return GoogleColabSandbox.list_environments()
@@ -410,8 +412,7 @@ class Sandbox(ABC):
             return DatalayerSandbox.list_environments(**kwargs)
         raise ValueError(
             f"Unknown sandbox variant: {variant}. "
-            "Supported variants: eval, docker, jupyter-server, monty, modal, "
-            "kaggle, google_colab, datalayer"
+            "Supported variants: " + ", ".join(sorted(v.value for v in SandboxVariant))
         )
 
     @classmethod

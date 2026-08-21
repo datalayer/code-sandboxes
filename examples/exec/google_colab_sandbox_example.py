@@ -10,9 +10,7 @@ Run with:
 
 import os
 
-from exec_common import show_and_run
-
-from code_sandboxes import Sandbox
+from code_sandboxes import Sandbox, show_and_run
 
 
 def _require(name: str) -> str:
@@ -29,16 +27,16 @@ def main() -> None:
         runtime_proxy_token = _require("RUNTIME_PROXY_TOKEN")
 
         with Sandbox.create(
-            variant="google_colab",
+            variant="google-colab",
             timeout=60,
             server_url=runtime_url,
             kernel_id=runtime_id,
             proxy_token=runtime_proxy_token,
         ) as sandbox:
             show_and_run(sandbox, "x = 40")
-            result = show_and_run(sandbox, "x + 2")
+            show_and_run(sandbox, "x + 2")
 
-            result = show_and_run(sandbox, "print('hello from colab')")
+            show_and_run(sandbox, "print('hello from colab')")
     except Exception as exc:
         print("colab example failed:", exc)
         print(

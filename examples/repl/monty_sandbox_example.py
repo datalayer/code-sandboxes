@@ -3,9 +3,7 @@
 
 """REPL example: monty sandbox (secure in-process interpreter)."""
 
-from repl_common import run_repl
-
-from code_sandboxes import Sandbox
+from code_sandboxes import Sandbox, run_repl
 
 
 def main() -> None:

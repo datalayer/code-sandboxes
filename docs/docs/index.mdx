@@ -63,14 +63,15 @@ Code Sandboxes supports these execution variants:
 
 | Variant | Isolation Level | Best For |
 |---------|-----------------|----------|
-| `eval` | None (Python exec) | Development, testing |
-| `monty` | In-process secure interpreter | Safe, fast LLM snippets |
+| `datalayer` | Managed VM/runtime | Production and GPU workloads |
+| `daytona` | Managed cloud sandbox | Stateful agent sessions |
 | `docker` | Container | Isolated execution |
+| `eval` | None (Python exec) | Development, testing |
+| `google-colab` | Managed notebook runtime | Interactive Colab-connected runs |
 | `jupyter-server` | Process (Jupyter kernel) | Persistent notebook-style state |
 | `kaggle` | Managed notebook runtime | Interactive and batch runs |
-| `google-colab` | Managed notebook runtime | Interactive Colab-connected runs |
 | `modal` | Managed container runtime | Ephemeral compute tasks |
-| `datalayer` | Managed VM/runtime | Production and GPU workloads |
+| `monty` | In-process secure interpreter | Safe, fast LLM snippets |
 
 ## Quick Start
 

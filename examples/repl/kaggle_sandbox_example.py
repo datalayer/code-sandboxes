@@ -15,9 +15,7 @@ Point it at a live kaggle.com notebook session (``RUNTIME_URL`` or
 
 import os
 
-from repl_common import run_repl
-
-from code_sandboxes import Sandbox
+from code_sandboxes import Sandbox, run_repl
 
 
 def main() -> None:
@@ -49,9 +47,7 @@ def main() -> None:
             if gpu:
                 # `1`/`true` ask for "a GPU" — the T4 is the everyday one —
                 # anything else names the accelerator (t4, p100, l4, …).
-                kwargs["gpu"] = (
-                    "t4" if gpu.strip().lower() in ("1", "true", "yes") else gpu
-                )
+                kwargs["gpu"] = "t4" if gpu.strip().lower() in ("1", "true", "yes") else gpu
                 print()
                 print(f"accelerator: {kwargs['gpu']} — a GPU job queues")
                 print("longer than a CPU one before it boots.")
@@ -64,9 +60,7 @@ def main() -> None:
             kwargs = {"timeout": 600}
             gpu = os.environ.get("KAGGLE_GPU")
             if gpu:
-                kwargs["gpu"] = (
-                    "t4" if gpu.strip().lower() in ("1", "true", "yes") else gpu
-                )
+                kwargs["gpu"] = "t4" if gpu.strip().lower() in ("1", "true", "yes") else gpu
                 print()
                 print(f"accelerator: {kwargs['gpu']} — every batch job runs")
                 print("with it, and queues longer than a CPU one.")
@@ -81,7 +75,7 @@ def main() -> None:
             "stateful REPL, start a notebook session on kaggle.com and set "
             "RUNTIME_URL (its proxy URL) or RUNTIME_CHANNELS_URL."
         )
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":
