@@ -49,8 +49,8 @@ from .exceptions import (
     SandboxConnectionError,
     SandboxExecutionError,
     SandboxNotStartedError,
-    VariableNotFoundError,
 )
+from .filesystem import SandboxFilesystem
 from .models import (
     CodeError,
     Context,
@@ -154,6 +154,27 @@ def _sse_events(lines: Iterator[str]) -> Iterator[tuple[str, str]]:
         yield event, "\n".join(data)
 
 
+class _CloudflareFilesystem(SandboxFilesystem):
+    """The filesystem of a Cloudflare sandbox, read through the bridge.
+
+    The base class reads a text file by running a snippet that binds the
+    contents to a name and then reading that name back in a SECOND execution.
+    That works wherever a namespace outlives a snippet, and here nothing does
+    — so text reads and writes are served by the bridge's own file endpoints
+    instead, which is one round trip rather than two and needs no session at
+    all. The binary forms already went this way: they call `_read_file` and
+    `_write_file`, which this variant overrides.
+    """
+
+    def read(self, path: str) -> str:
+        return self._sandbox._read_file(path).decode("utf-8")
+
+    def write(self, path: str, content: str, make_dirs: bool = True) -> None:
+        # `make_dirs` is not honoured by the bridge's PUT, which creates the
+        # parents it needs; the argument is kept for the shared interface.
+        self._sandbox._write_file(path, content.encode("utf-8"))
+
+
 class CloudflareSandbox(Sandbox):
     """Sandbox backed by a Cloudflare container, through the sandbox bridge.
 
@@ -225,6 +246,18 @@ class CloudflareSandbox(Sandbox):
                 "Cloudflare sandboxes have no GPU, so gpu=" + repr(self.config.gpu) + " "
                 "cannot be honoured. Use the daytona, coreweave or modal "
                 "variant for a GPU."
+            )
+
+        # The bridge exposes no networking controls at all — no egress rules,
+        # no allowlist, no switch — so a policy asked for here could only be
+        # accepted and then not applied. A sandbox believed to be cut off from
+        # the network while it is not is the failure that matters.
+        if self.config.network_policy in ("none", "allowlist") or self.config.allowed_hosts:
+            raise SandboxConfigurationError(
+                f"Cloudflare sandboxes cannot restrict the network, so "
+                f"network_policy={self.config.network_policy!r} cannot be "
+                "honoured. Use the e2b variant to cut a sandbox off, or the "
+                "daytona or coreweave variant for an allowlist."
             )
 
         self._client = self.build_client()
@@ -349,7 +382,12 @@ class CloudflareSandbox(Sandbox):
         started_at = time.time()
         self._execution_count += 1
         seconds = timeout if timeout is not None else self.config.timeout
-        request = json.dumps({"code": _with_envs(code, envs)})
+        # The environment of the CONFIGURATION as well as the one asked for
+        # here. The bridge takes no environment when it creates a sandbox — it
+        # has nowhere to put one — so `env_vars` would otherwise be accepted
+        # and then silently dropped from every snippet. Per-call values win.
+        environment = {**(self.config.env_vars or {}), **(envs or {})}
+        request = json.dumps({"code": _with_envs(code, environment)})
 
         try:
             stdout, stderr, exit_code = self._exec(
@@ -495,31 +533,34 @@ class CloudflareSandbox(Sandbox):
         """The bridge takes no interrupt; a timeout is the only stop."""
         return False
 
-    def _get_internal_variable(self, name: str, context: Context | None = None) -> Any:
-        """The value of a variable, carried back as JSON.
+    @property
+    def files(self) -> SandboxFilesystem:
+        """The bridge-backed filesystem, rather than the base's code-driven one."""
+        if self._files is None:
+            self._files = _CloudflareFilesystem(self)
+        return self._files
 
-        Each snippet runs in a process of its own here, so this can only read
-        a variable of the snippet it is part of — which is what the base class
-        asks it for. There is no session to read from between calls.
+    def get_variable(self, name: str, context: Context | None = None) -> Any:
+        """Refused: reading a variable takes a session, and there is none.
+
+        The base class reads a variable in TWO executions — it binds the value
+        to a name of its own, then reads that name back — which every other
+        variant serves because its namespace outlives a snippet. Here the
+        first execution's process is gone before the second starts, so the
+        read would fail as "no such variable": true of the name, and entirely
+        misleading about the reason.
         """
-        if not self._started:
-            raise SandboxNotStartedError()
-        execution = self.run_code(
-            "import json as _code_sandboxes_json\n"
-            f"print(_code_sandboxes_json.dumps({name}, default=repr))\n"
-            "del _code_sandboxes_json\n",
-            context=context,
+        raise SandboxConfigurationError(
+            f"A Cloudflare sandbox runs each snippet in a process of its own, "
+            f"so there is no session to read {name!r} from. Have the snippet "
+            "print what you need and read it from the execution, or keep it "
+            "in a file — the filesystem of the sandbox does persist."
         )
-        if not execution.execution_ok:
-            raise SandboxExecutionError(
-                "SandboxError", execution.execution_error or "Sandbox execution failed"
-            )
-        if execution.code_error is not None:
-            raise VariableNotFoundError(name)
-        printed = "\n".join(message.line for message in execution.logs.stdout).strip()
-        if not printed:
-            raise VariableNotFoundError(name)
-        return json.loads(printed)
+
+    def _get_internal_variable(self, name: str, context: Context | None = None) -> Any:
+        """The base class reaches this only through `get_variable`, which is
+        refused above; it is implemented so the abstraction stays satisfied."""
+        return self.get_variable(name, context)
 
     def _set_internal_variable(self, name: str, value: Any, context: Context | None = None) -> None:
         if not self._started:

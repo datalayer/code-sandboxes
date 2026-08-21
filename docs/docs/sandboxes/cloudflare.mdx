@@ -134,6 +134,20 @@ with one JSON line, so:
   is **not** returned. `result.results` only ever holds the text value.
 - There is no interrupt: `sandbox.interrupt()` answers `False`, and a runaway
   execution is stopped by its timeout.
-- Reading a variable (`get_variable`, and `sandbox.commands.run` which is built
-  on it) can only see the snippet it is part of. There is no session to read
-  from between calls.
+- Reading a variable is **refused**, with the reason: `get_variable` binds the
+  value in one execution and reads it back in a second, and this backend's
+  first process is gone before the second starts. `sandbox.commands.run`, which
+  is built on it, is refused the same way. Have the snippet print what you
+  need, or keep it in a file.
+- `sandbox.files.read` and `.write` **do** work: they go through the bridge's
+  own file endpoints rather than through a variable, which is one round trip
+  and needs no session. So do `upload_file` and `download_file`.
+- The network cannot be restricted. The bridge exposes no egress rules, no
+  allowlist and no switch, so `network_policy="none"` or `"allowlist"` is
+  refused at `start()` rather than accepted and left unapplied — believing a
+  sandbox is cut off while it is not is the failure that matters. Use the
+  `e2b` variant to cut one off, or `daytona` / `coreweave` for an allowlist.
+- There is no GPU, and `gpu=` is refused for the same reason.
+- `SandboxConfig.env_vars` is honoured: the bridge takes no environment when it
+  creates a sandbox, so the configured variables are set at the top of every
+  snippet instead. Anything passed to `run_code(envs=...)` wins over them.

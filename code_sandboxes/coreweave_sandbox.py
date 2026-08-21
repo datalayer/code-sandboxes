@@ -424,13 +424,24 @@ class CoreWeaveSandbox(Sandbox):
             self._driver.stdin.writeline(json.dumps({"seq": self._driver_seq, "code": code}))
         except Exception:
             logger.warning("The CoreWeave session driver went away; restarting stateless.")
-            self._driver = None
+            self._discard_driver()
             return None
         deadline = time.monotonic() + timeout
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError(f"No reply from the CoreWeave session within {timeout:.0f}s.")
+                # Giving up on the ANSWER is not giving up on the work: the
+                # session process is still running that snippet, and would go
+                # on mutating the namespace long after this call reported a
+                # timeout. So the process is cancelled and dropped. The next
+                # call starts a fresh session, which costs the state — the
+                # honest price of a snippet that would not stop.
+                self._discard_driver()
+                raise TimeoutError(
+                    f"No reply from the CoreWeave session within {timeout:.0f}s. "
+                    "The session was stopped, so the next execution starts a "
+                    "new one and nothing defined before it is still there."
+                )
             try:
                 line = self._driver_replies.get(timeout=remaining)
             except queue.Empty:
@@ -445,6 +456,22 @@ class CoreWeaveSandbox(Sandbox):
                 continue
             if reply.get("seq") == self._driver_seq:
                 return reply
+
+    def _discard_driver(self) -> None:
+        """Stop the session process and forget it.
+
+        Called when it cannot be trusted any more — it never answered, or it
+        went away. `cancel` is what CoreWeave offers to end a running process;
+        closing stdin alone would leave a snippet that ignores EOF running.
+        """
+        driver, self._driver, self._driver_replies = self._driver, None, None
+        if driver is None:
+            return
+        for stop in (lambda: driver.cancel(), lambda: driver.stdin.close()):
+            try:
+                stop()
+            except Exception:
+                logger.debug("Ignoring error while stopping the session", exc_info=True)
 
     def _stateless_request(self, code: str, timeout: float) -> dict:
         """One snippet in a process of its own, for when there is no driver."""
@@ -600,10 +627,40 @@ class CoreWeaveSandbox(Sandbox):
         """The session process takes no interrupt; a timeout is the only stop."""
         return False
 
+    def _needs_a_session(self, what: str) -> None:
+        """Refuse a read or a write that only a session process can serve.
+
+        Without one, every snippet runs in a process of its own: an assignment
+        made by one is gone before the next starts. Reporting success for a
+        variable that will not be there is worse than refusing it, so the two
+        variable APIs ask this first. `stateful=False` chooses this, and a
+        session that died falls into it.
+        """
+        if self._driver is None:
+            raise SandboxConfigurationError(
+                f"This CoreWeave sandbox has no session process, so {what} "
+                "cannot be kept: each snippet runs in a process of its own. "
+                "Start the sandbox with stateful=True (the default), or keep "
+                "the value in a file — the filesystem does persist."
+            )
+
+    def get_variable(self, name: str, context: Context | None = None) -> Any:
+        """The value of a variable — which takes a session to be worth asking.
+
+        Guarded HERE rather than in `_get_internal_variable`: the base class
+        binds the name to one of its own in a first execution and reads it
+        back in a second, so without a session the first snippet's process is
+        gone and the read fails as "no such variable" — true of the name, and
+        entirely misleading about the reason.
+        """
+        self._needs_a_session(f"{name!r}")
+        return super().get_variable(name, context)
+
     def _get_internal_variable(self, name: str, context: Context | None = None) -> Any:
         """The value of a variable, carried back as JSON."""
         if not self._started or self._sandbox is None:
             raise SandboxNotStartedError()
+        self._needs_a_session(f"{name!r}")
         execution = self.run_code(
             "import json as _code_sandboxes_json\n"
             f"print(_code_sandboxes_json.dumps({name}, default=repr))\n"
@@ -624,6 +681,7 @@ class CoreWeaveSandbox(Sandbox):
     def _set_internal_variable(self, name: str, value: Any, context: Context | None = None) -> None:
         if not self._started or self._sandbox is None:
             raise SandboxNotStartedError()
+        self._needs_a_session(f"{name!r}")
         try:
             payload = json.dumps(value)
         except TypeError as error:

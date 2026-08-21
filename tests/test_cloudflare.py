@@ -292,6 +292,58 @@ def test_stopping_destroys_the_container():
     assert not sandbox.is_started
 
 
+def test_the_configured_environment_reaches_every_snippet():
+    """`env_vars` has nowhere to go at creation, so it rides with each call."""
+    sandbox = _started(config=SandboxConfig(env_vars={"TOKEN": "from-config"}))
+
+    execution = sandbox.run_code("import os\nprint(os.environ['TOKEN'])")
+
+    assert [message.line for message in execution.logs.stdout] == ["from-config"]
+
+
+def test_a_per_call_environment_wins_over_the_configured_one():
+    sandbox = _started(config=SandboxConfig(env_vars={"TOKEN": "from-config", "KEEP": "yes"}))
+
+    execution = sandbox.run_code(
+        "import os\nprint(os.environ['TOKEN'], os.environ['KEEP'])",
+        envs={"TOKEN": "from-call"},
+    )
+
+    assert [message.line for message in execution.logs.stdout] == ["from-call yes"]
+
+
+def test_a_network_policy_that_cannot_be_honoured_is_refused_not_ignored():
+    """Believing a sandbox is cut off while it is not is the failure here."""
+    for policy in ("none", "allowlist"):
+        sandbox = CloudflareSandbox(
+            SandboxConfig(network_policy=policy, allowed_hosts=["pypi.org"]),
+            api_url=BRIDGE_URL,
+            api_key="cf_key",
+        )
+        with pytest.raises(SandboxConfigurationError, match="cannot restrict the network"):
+            sandbox.start()
+
+
+def test_reading_a_variable_says_there_is_no_session_rather_than_no_variable():
+    """The base class reads in two executions; the first process is gone."""
+    sandbox = _started()
+
+    with pytest.raises(SandboxConfigurationError, match="no session to read"):
+        sandbox.get_variable("x")
+
+
+def test_text_files_go_through_the_bridge_so_they_need_no_session():
+    sandbox = _started()
+
+    sandbox.files.write("/workspace/notes.txt", "hello")
+
+    assert sandbox.files.read("/workspace/notes.txt") == "hello"
+    # One round trip each, straight at the file endpoints.
+    assert ("PUT", f"/v1/sandbox/{sandbox._sandbox_id}/file/workspace/notes.txt") in (
+        sandbox.bridge.requests
+    )
+
+
 def test_a_variable_cannot_be_set_for_a_later_snippet_and_says_why():
     """Refused rather than silently lost between two processes."""
     sandbox = _started()
@@ -328,6 +380,25 @@ def test_the_bridge_is_read_from_the_environment_when_it_is_not_given(monkeypatc
     # The trailing slash is dropped: the paths this variant builds start with one.
     assert sandbox._api_url == BRIDGE_URL
     assert sandbox._api_key == "from-env"
+
+
+def test_the_client_sends_the_key_it_was_given_as_a_bearer_token():
+    """Every authenticated call rides on this header; a placeholder here would
+    make the bridge refuse all of them."""
+    client = CloudflareSandbox(api_url=BRIDGE_URL, api_key="cf_secret_value").build_client()
+
+    try:
+        assert client.headers["authorization"] == "Bearer cf_secret_value"
+    finally:
+        client.close()
+
+    # And no header at all when there is no key: a bridge run locally for
+    # development has none, and `Bearer ` alone would be a wrong answer.
+    anonymous = CloudflareSandbox(api_url=BRIDGE_URL, api_key="").build_client()
+    try:
+        assert "authorization" not in anonymous.headers
+    finally:
+        anonymous.close()
 
 
 def test_a_refused_call_names_the_bridge_and_the_key():

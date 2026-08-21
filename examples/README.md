@@ -93,8 +93,7 @@ make monty
 Notes by variant:
 
 - `cloudflare`: requires `code-sandboxes[cloudflare]` and a deployed sandbox
-  bridge Worker — `npm create cloudflare -- sandbox-bridge
-  --template=cloudflare/sandbox-sdk/bridge/worker` — named by
+  bridge Worker — `npm create cloudflare -- sandbox-bridge --template=cloudflare/sandbox-sdk/bridge/worker` — named by
   `CLOUDFLARE_SANDBOX_API_URL` with the `CLOUDFLARE_SANDBOX_API_KEY` it
   generated. Each snippet runs in a process of its own, so nothing crosses
   between them.

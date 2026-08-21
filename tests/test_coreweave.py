@@ -334,6 +334,34 @@ def test_a_value_that_cannot_be_encoded_is_refused_where_it_is_set():
         _started().set_variable("payload", object())
 
 
+def test_without_a_session_a_variable_is_refused_rather_than_lost():
+    """A set that reports success and then vanishes is the worse answer."""
+    sandbox = _started(stateful=False)
+
+    with pytest.raises(SandboxConfigurationError, match="no session process"):
+        sandbox.set_variable("payload", {"a": 1})
+    with pytest.raises(SandboxConfigurationError, match="no session process"):
+        sandbox.get_variable("payload")
+
+
+def test_a_timed_out_snippet_has_its_session_stopped():
+    """Giving up on the answer is not giving up on the work: it must be cut."""
+    sandbox = _started()
+    driver = sandbox._driver
+    cancelled: list[bool] = []
+    driver.cancel = lambda: cancelled.append(True)
+    # A session that takes the request and never answers.
+    driver.stdin.writeline = lambda text: None
+
+    execution = sandbox.run_code("1 + 1", timeout=0.05)
+
+    assert not execution.execution_ok
+    assert "stopped" in (execution.execution_error or "")
+    assert cancelled == [True]
+    # Dropped, so the next execution starts a session of its own.
+    assert sandbox._driver is None
+
+
 def test_files_go_through_the_filesystem_api_not_through_the_code():
     sandbox = _started()
 

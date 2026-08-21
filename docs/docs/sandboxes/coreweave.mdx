@@ -160,8 +160,11 @@ else, so:
   above.
 - Rich display data — a figure, an HTML repr, a PNG — has no channel at all and
   is **not** returned. `result.results` only ever holds the text value.
-- There is no interrupt: `sandbox.interrupt()` answers `False`, and a runaway
-  execution is stopped by its timeout.
+- There is no interrupt: `sandbox.interrupt()` answers `False`. A snippet that
+  runs past its timeout has the SESSION stopped — not just the wait for its
+  answer — because a snippet nobody is waiting for would otherwise go on
+  changing the namespace. The next execution starts a new session, so nothing
+  defined before the timeout is still there; the timeout message says so.
 - Contexts do not isolate: there is one session process and therefore one
   namespace. `create_context()` gives a context back, but two of them see each
   other's variables.
@@ -170,6 +173,12 @@ Variables cross as JSON (`get_variable`, `set_variable`, and everything built
 on them such as `sandbox.commands.run`), so a value that cannot be encoded
 comes back as its `repr` rather than as the object itself, and one that cannot
 be *sent* is refused with a reason.
+
+They need the session process, and say so when there is none — under
+`stateful=False`, or after a session was stopped. Without it each snippet runs
+in a process of its own, so a variable set by one would be gone before the next
+could read it; refusing is the honest answer, and reporting a successful set
+would not be.
 
 Binary files go straight to CoreWeave's filesystem API rather than through a
 program that decodes them:

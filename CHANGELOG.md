@@ -37,6 +37,20 @@
   gets and deletes; it cannot list, because the bridge has no endpoint that
   enumerates sandboxes, and says so rather than answering with an empty list.
 
+- Hardened the three new variants against silently doing something other than
+  what was asked. `cloudflare` now carries `SandboxConfig.env_vars` into every
+  snippet — the bridge takes no environment when it creates a sandbox, so they
+  had been accepted and dropped — refuses a `network_policy` it cannot apply
+  rather than leaving a sandbox believed to be cut off connected, refuses
+  `get_variable` with the reason instead of answering the misleading "no such
+  variable", and serves `files.read`/`files.write` through the bridge's own
+  file endpoints so they need no session at all. `coreweave` refuses the
+  variable APIs when there is no session process — under `stateful=False`, or
+  after one was lost — rather than reporting a successful set that vanishes
+  with the process, and a snippet that runs past its timeout now has its
+  session STOPPED rather than left running and changing the namespace behind a
+  call that already returned.
+
 - A GPU asked of a variant that has none is now REFUSED rather than dropped.
   `--gpu` reaches `coreweave`, `datalayer`, `daytona`, `kaggle` and `modal`,
   and `code-sandboxes exec -v e2b --gpu H100` says which variants can give one
