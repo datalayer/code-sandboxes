@@ -70,7 +70,7 @@ class TestSandboxFactory:
             ("jupyter-server", JupyterServerSandbox),
             ("docker", DockerSandbox),
             ("datalayer", DatalayerSandbox),
-            ("google_colab", GoogleColabSandbox),
+            ("google-colab", GoogleColabSandbox),
             ("kaggle", KaggleSandbox),
             ("monty", MontySandbox),
             ("modal", ModalSandbox),
@@ -115,7 +115,7 @@ class TestSandboxFactory:
     def test_create_colab_forwards_connection_kwargs(self):
         """Test that Colab-specific connection kwargs are propagated."""
         sandbox = Sandbox.create(
-            variant="google_colab",
+            variant="google-colab",
             server_url="https://colab-host.example",
             kernel_id="kernel-id",
             proxy_token="proxy-token",  # noqa: S106

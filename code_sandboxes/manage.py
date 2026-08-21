@@ -334,7 +334,7 @@ class GoogleColabSandboxManager(JupyterServerSandboxManager):
     ``RUNTIME_PROXY_TOKEN`` when not passed explicitly.
     """
 
-    variant = "google_colab"
+    variant = "google-colab"
 
     def __init__(
         self,
@@ -832,7 +832,7 @@ _MANAGERS: dict[str, type[SandboxManager]] = {
     "monty": MontySandboxManager,
     "docker": DockerSandboxManager,
     "jupyter-server": JupyterServerSandboxManager,
-    "google_colab": GoogleColabSandboxManager,
+    "google-colab": GoogleColabSandboxManager,
     "kaggle": KaggleSandboxManager,
     "modal": ModalSandboxManager,
     "daytona": DaytonaSandboxManager,

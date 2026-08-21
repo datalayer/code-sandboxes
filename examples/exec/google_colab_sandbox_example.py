@@ -27,7 +27,7 @@ def main() -> None:
         runtime_proxy_token = _require("RUNTIME_PROXY_TOKEN")
 
         with Sandbox.create(
-            variant="google_colab",
+            variant="google-colab",
             timeout=60,
             server_url=runtime_url,
             kernel_id=runtime_id,

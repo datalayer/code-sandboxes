@@ -142,7 +142,7 @@ directly to the sandbox:
 ```python
 from code_sandboxes import Sandbox
 
-with Sandbox.create(variant="google_colab", channels_url=channels_url) as sandbox:
+with Sandbox.create(variant="google-colab", channels_url=channels_url) as sandbox:
     print(sandbox.run_code("x = 1 + 1; print(x)").stdout)
 ```
 

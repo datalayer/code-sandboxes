@@ -36,7 +36,7 @@ def create(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter-server"`, `"monty"`, `"kaggle"`, `"google_colab"`, `"modal"`, or `"datalayer"`. Defaults to `"datalayer"`. |
+| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter-server"`, `"monty"`, `"kaggle"`, `"google-colab"`, `"modal"`, or `"datalayer"`. Defaults to `"datalayer"`. |
 | `timeout` | `float` | Execution timeout in seconds |
 | `environment` | `str` | Runtime environment name |
 | `gpu` | `str` | GPU type (e.g., `"T4"`, `"A100"`, `"H100"`) |
@@ -82,7 +82,7 @@ def list_environments(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter-server"`, `"monty"`, `"kaggle"`, `"google_colab"`, `"modal"`, or `"datalayer"` |
+| `variant` | `str` | Sandbox type: `"eval"`, `"docker"`, `"jupyter-server"`, `"monty"`, `"kaggle"`, `"google-colab"`, `"modal"`, or `"datalayer"` |
 | `**kwargs` | `dict` | Variant-specific arguments (e.g., credentials, run URL) |
 
 Legacy `local-eval`, `local-docker`, and `local-jupyter` variant names are not supported.

@@ -41,14 +41,14 @@ class TestModels:
 
     def test_sandbox_variant_enum(self):
         """Test SandboxVariant enum values."""
-        assert SandboxVariantEnum.EVAL.value == "eval"
-        assert SandboxVariantEnum.DOCKER.value == "docker"
-        assert SandboxVariantEnum.JUPYTER.value == "jupyter-server"
         assert SandboxVariantEnum.DATALAYER.value == "datalayer"
-        assert SandboxVariantEnum.GOOGLE_COLAB.value == "google_colab"
+        assert SandboxVariantEnum.DOCKER.value == "docker"
+        assert SandboxVariantEnum.EVAL.value == "eval"
+        assert SandboxVariantEnum.GOOGLE_COLAB.value == "google-colab"
+        assert SandboxVariantEnum.JUPYTER.value == "jupyter-server"
         assert SandboxVariantEnum.KAGGLE.value == "kaggle"
-        assert SandboxVariantEnum.MONTY.value == "monty"
         assert SandboxVariantEnum.MODAL.value == "modal"
+        assert SandboxVariantEnum.MONTY.value == "monty"
 
     def test_gpu_type_enum(self):
         """Test GPUType enum values."""

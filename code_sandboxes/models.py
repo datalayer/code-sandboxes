@@ -53,27 +53,27 @@ class MIMEType(str, Enum):
 class SandboxStatus(str, Enum):
     """Status of a sandbox."""
 
-    PENDING = "pending"
-    STARTING = "starting"
-    RUNNING = "running"
-    STOPPING = "stopping"
-    STOPPED = "stopped"
     ERROR = "error"
+    PENDING = "pending"
+    RUNNING = "running"
+    STARTING = "starting"
+    STOPPED = "stopped"
+    STOPPING = "stopping"
     TERMINATED = "terminated"
 
 
 class SandboxVariant(str, Enum):
     """Supported sandbox variants."""
 
-    EVAL = "eval"
-    DOCKER = "docker"
-    JUPYTER = "jupyter-server"
     DATALAYER = "datalayer"
     DAYTONA = "daytona"
-    GOOGLE_COLAB = "google_colab"
+    DOCKER = "docker"
+    EVAL = "eval"
+    GOOGLE_COLAB = "google-colab"
+    JUPYTER = "jupyter-server"
     KAGGLE = "kaggle"
-    MONTY = "monty"
     MODAL = "modal"
+    MONTY = "monty"
 
 
 class GPUType(str, Enum):

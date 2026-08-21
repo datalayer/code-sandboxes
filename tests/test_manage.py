@@ -26,7 +26,7 @@ def test_every_variant_has_a_manager():
         "daytona",
         "docker",
         "eval",
-        "google_colab",
+        "google-colab",
         "jupyter-server",
         "kaggle",
         "modal",
@@ -38,7 +38,7 @@ def test_every_variant_has_a_manager():
 
 def test_the_colab_spelling_with_a_dash_is_accepted(monkeypatch):
     monkeypatch.setenv("RUNTIME_URL", "https://colab.example/proxy")
-    assert get_manager("google-colab").variant == "google_colab"
+    assert get_manager("google-colab").variant == "google-colab"
 
 
 def test_an_unknown_variant_is_named_in_the_error():

@@ -25,7 +25,7 @@ after the runtime is reassigned or reconnected.
 from code_sandboxes import Sandbox
 
 with Sandbox.create(
-    variant="google_colab",
+    variant="google-colab",
     server_url="https://8080-m-s-kkb-...-d.us-east1-0.prod.colab.dev",
     kernel_id="c9bba548-3995-4f26-8e1a-7b8fbb10c578",
     proxy_token="eyJhbGci....",
@@ -39,7 +39,7 @@ Or pass a channels URL directly:
 
 ```python
 with Sandbox.create(
-    variant="google_colab",
+    variant="google-colab",
     channels_url=(
         "wss://<host>/api/kernels/<kernel_id>/channels"
         "?session_id=<...>&colab-runtime-proxy-token=<proxy_token>&colab-client-agent=web"

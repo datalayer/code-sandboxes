@@ -75,7 +75,7 @@ def test_repl_colab_prompts_and_forwards_credentials(monkeypatch):
     )
 
     assert result.exit_code == 0
-    assert captured["kwargs"]["variant"] == "google_colab"
+    assert captured["kwargs"]["variant"] == "google-colab"
     assert captured["kwargs"]["server_url"] == "https://colab-host.example"
     assert captured["kwargs"]["kernel_id"] == "kernel-abc"
     assert captured["kwargs"]["proxy_token"] == "proxy-xyz"  # noqa: S105

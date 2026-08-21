@@ -317,7 +317,7 @@ class Sandbox(ABC):
             from .datalayer_sandbox import DatalayerSandbox
 
             sandbox = DatalayerSandbox(config=config, **kwargs)
-        elif variant_value == "google_colab":
+        elif variant_value == "google-colab":
             from .google_colab_sandbox import GoogleColabSandbox
 
             sandbox = GoogleColabSandbox(config=config, **kwargs)
@@ -415,7 +415,7 @@ class Sandbox(ABC):
             from .kaggle_sandbox import KaggleSandbox
 
             return KaggleSandbox.list_environments()
-        if variant_value == "google_colab":
+        if variant_value == "google-colab":
             from .google_colab_sandbox import GoogleColabSandbox
 
             return GoogleColabSandbox.list_environments()

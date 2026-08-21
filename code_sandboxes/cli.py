@@ -30,7 +30,7 @@ _SUPPORTED_REPL_VARIANTS = {
     "docker",
     "eval",
     "monty",
-    "google_colab",
+    "google-colab",
     "google-colab",
     "kaggle",
     "modal",
@@ -63,7 +63,7 @@ def _resolve_variant(variant: str | None) -> str:
             + ", ".join(sorted(_SUPPORTED_REPL_VARIANTS))
         )
     if selected == "google-colab":
-        return "google_colab"
+        return "google-colab"
     return selected
 
 
@@ -82,7 +82,7 @@ def _resolve_variant_kwargs(
         # Match `jupyter console` behavior by launching local Jupyter on random port.
         kwargs["port"] = 0
 
-    if variant == "google_colab":
+    if variant == "google-colab":
         kwargs["server_url"] = server_url or typer.prompt("Colab runtime URL (RUNTIME_URL)")
         kwargs["kernel_id"] = kernel_id or typer.prompt("Colab kernel id (RUNTIME_ID)")
         kwargs["proxy_token"] = proxy_token or typer.prompt(
