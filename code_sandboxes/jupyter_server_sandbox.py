@@ -21,6 +21,7 @@ import tempfile
 import threading
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse, urlunparse
 
@@ -46,6 +47,10 @@ from .models import (
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 0
 DEFAULT_STARTUP_TIMEOUT = 30.0
+
+#: How many of the server's last lines are kept, to quote when it will not
+#: start. Enough for a traceback, not enough to hold a log in memory.
+SERVER_OUTPUT_LINES = 50
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +116,8 @@ class JupyterServerSandbox(Sandbox):
         self._server_app = None
         self._server_thread: threading.Thread | None = None
         self._server_process: subprocess.Popen | None = None
+        #: The last lines the server wrote, to quote when it fails to start.
+        self._server_output: deque[str] = deque(maxlen=SERVER_OUTPUT_LINES)
         self._client: ISandboxClient | None = None
         self._sandbox_id = str(uuid.uuid4())
         self._workdir: str | None = None
@@ -241,15 +248,45 @@ class JupyterServerSandbox(Sandbox):
             workdir,
         )
 
+        # Kept, not discarded.
+        #
+        # This was `DEVNULL` on both streams, so a server that failed to start
+        # — a missing package, a port already taken, a bad argument — said why
+        # into nothing, and the only thing anyone ever saw was "Timed out
+        # waiting for Jupyter Server" thirty seconds later. Read on a thread so
+        # the pipe cannot fill and block the server that IS starting.
         self._server_process = subprocess.Popen(  # noqa: S603 — argv built above, no shell
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
             # Start in its own process group so we can kill the tree.
             preexec_fn=os.setsid if hasattr(os, "setsid") else None,
         )
+        self._server_output: deque[str] = deque(maxlen=SERVER_OUTPUT_LINES)
+        threading.Thread(
+            target=self._drain_server_output,
+            name=f"jupyter-server-{port}",
+            daemon=True,
+        ).start()
 
         self._server_url = f"http://{self._host}:{port}"
+
+    def _drain_server_output(self) -> None:
+        """Keep what the server says, so a failure can be quoted."""
+        stream = getattr(self._server_process, "stdout", None)
+        if stream is None:
+            return
+        with contextlib.suppress(Exception):
+            for line in stream:
+                text = line.rstrip()
+                if text:
+                    self._server_output.append(text)
+                    logger.debug("[jupyter-server] %s", text)
+
+    def _server_said(self) -> str:
+        """The last of the server's own output, for an error message."""
+        return "\n".join(getattr(self, "_server_output", ()))
 
     def _start_local_server_inprocess(self, workdir: str, port: int) -> None:
         """Start the Jupyter server in a daemon thread (legacy mode).
@@ -301,6 +338,16 @@ class JupyterServerSandbox(Sandbox):
             raise SandboxConfigurationError("Server URL not available")
         deadline = time.time() + timeout
         while time.time() < deadline:
+            # A server that has already exited is not going to answer, and
+            # waiting out the timeout to say so turns a plain error — the
+            # module is not installed, the port is taken — into a mystery.
+            process = self._server_process
+            if process is not None and process.poll() is not None:
+                said = self._server_said()
+                raise SandboxConfigurationError(
+                    f"The Jupyter Server exited with code {process.returncode} "
+                    f"before it was ready" + (f": {said}" if said else " and said nothing")
+                )
             try:
                 response = requests.get(
                     f"{self._server_url}/api/status",
@@ -312,7 +359,11 @@ class JupyterServerSandbox(Sandbox):
                     return
             except Exception:
                 time.sleep(0.5)
-        raise SandboxConfigurationError("Timed out waiting for Jupyter Server")
+        said = self._server_said()
+        raise SandboxConfigurationError(
+            f"Timed out waiting for Jupyter Server after {timeout:.0f}s"
+            + (f": {said}" if said else "")
+        )
 
     def _find_existing_kernel(self) -> str | None:
         """Find an existing pre-warmed kernel to reuse.
