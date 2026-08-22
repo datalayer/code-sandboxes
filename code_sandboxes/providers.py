@@ -81,6 +81,12 @@ class SandboxProvider:
     variant: SandboxVariant
     title: str
     description: str
+    #: The mark this provider is drawn with, as a slug of the Datalayer icon
+    #: set — `daytona` for `DaytonaIcon`. Named here rather than by whoever
+    #: draws it, so the CLI, the operator and the web all show one provider as
+    #: one thing. None where the set has no mark for it yet; a reader then
+    #: falls back to whatever it uses for the unknown.
+    icon: str | None = None
     #: Any one of these satisfies the provider; empty means nothing is needed.
     requirements: tuple[ProviderRequirement, ...] = ()
     #: Extra packages needed, as the extra of this distribution.
@@ -194,6 +200,7 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
     ),
     SandboxProvider(
         variant=SandboxVariant.KAGGLE,
+        icon="kaggle",
         title="Kaggle",
         description=(
             "Kaggle notebook sessions, interactively against a running kernel or as a batch job."
@@ -221,6 +228,7 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
     ),
     SandboxProvider(
         variant=SandboxVariant.MODAL,
+        icon="modal",
         title="Modal",
         description="Containers on Modal, with or without a GPU attached.",
         extra="modal",
@@ -238,6 +246,7 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
     ),
     SandboxProvider(
         variant=SandboxVariant.DAYTONA,
+        icon="daytona",
         title="Daytona",
         description=(
             "Sandboxes on Daytona, with a stateful Python interpreter and an optional GPU."
@@ -257,6 +266,7 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
     ),
     SandboxProvider(
         variant=SandboxVariant.E2B,
+        icon="e2b",
         title="E2B",
         description=(
             "Sandboxes on E2B, in Firecracker microVMs that start in about 150 ms, "
@@ -366,6 +376,7 @@ def provider_catalog(
                 "name": provider.name,
                 "title": provider.title,
                 "description": provider.description,
+                "icon": provider.icon,
                 "enabled": enabled,
                 "needs_credentials": provider.needs_credentials,
                 "requirements": [
@@ -377,10 +388,25 @@ def provider_catalog(
                     for requirement in provider.requirements
                 ],
                 "environments": [
+                    # What the environment runs on travels with it: a service
+                    # listing environments is asked which has a GPU and which
+                    # card it is, and that cannot be answered from a name.
+                    # Keys the provider did not declare are left out rather
+                    # than sent as null, so "did not say" stays tellable from
+                    # "has none".
                     {
-                        "name": environment.name,
-                        "title": environment.title,
-                        "language": environment.language,
+                        key: value
+                        for key, value in {
+                            "name": environment.name,
+                            "title": environment.title,
+                            "language": environment.language,
+                            "cpu": environment.cpu,
+                            "memory": environment.memory,
+                            "gpu": environment.gpu,
+                            "gpu_count": environment.gpu_count,
+                            "gpu_memory": environment.gpu_memory,
+                        }.items()
+                        if value is not None
                     }
                     for environment in (provider.environments(secrets) if enabled else [])
                 ],

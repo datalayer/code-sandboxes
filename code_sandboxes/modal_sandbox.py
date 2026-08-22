@@ -39,6 +39,7 @@ from .models import (
     SandboxEnvironment,
     SandboxInfo,
     SandboxStatus,
+    gpu_memory,
 )
 
 logger = logging.getLogger(__name__)
@@ -193,6 +194,9 @@ class ModalSandbox(Sandbox):
                 owner="modal",
                 visibility="cloud",
                 burning_rate=0.0,
+                gpu="T4",
+                gpu_count=1,
+                gpu_memory=gpu_memory("T4"),
                 metadata={"variant": "modal", "gpu": "T4"},
             ),
         ]

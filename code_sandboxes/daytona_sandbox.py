@@ -50,6 +50,7 @@ from .models import (
     SandboxEnvironment,
     SandboxInfo,
     SandboxStatus,
+    gpu_memory,
 )
 
 logger = logging.getLogger(__name__)
@@ -331,6 +332,9 @@ class DaytonaSandbox(Sandbox):
                 owner="daytona",
                 visibility="cloud",
                 burning_rate=0.0,
+                gpu="H100",
+                gpu_count=1,
+                gpu_memory=gpu_memory("H100"),
                 metadata={"variant": "daytona", "gpu": "H100", "spot": False},
             ),
             SandboxEnvironment(
@@ -340,6 +344,9 @@ class DaytonaSandbox(Sandbox):
                 owner="daytona",
                 visibility="cloud",
                 burning_rate=0.0,
+                gpu="H100",
+                gpu_count=1,
+                gpu_memory=gpu_memory("H100"),
                 metadata={"variant": "daytona", "gpu": "H100", "spot": True},
             ),
         ]
