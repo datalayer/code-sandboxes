@@ -86,13 +86,13 @@ def main() -> None:
     print(f"  {os.environ['CLOUDFLARE_SANDBOX_API_URL']}")
 
     try:
-        with Sandbox.create(variant="cloudflare", timeout=60) as sandbox:
+        with Sandbox.create(variant="cloudflare", timeout=60, examples=_examples()) as sandbox:
             print(f"Sandbox: {sandbox.sandbox_id}")
             # Said before the prompt opens rather than discovered at the first
             # NameError: nothing defined on one line reaches the next.
             print("Each line runs in its own process — definitions do NOT persist.")
             print("Use one line for what shares state, or a file: `open('/workspace/x', 'w')`.")
-            run_repl(sandbox, examples=_examples())
+            run_repl(sandbox)
     except Exception as exc:
         print("cloudflare REPL failed:", exc)
         raise SystemExit(1) from exc

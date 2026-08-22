@@ -8,6 +8,17 @@
 
 ## Unreleased
 
+- Numbered the prompt's examples, and made one runnable by its number:
+  `:examples` lists them `1.`, `2.`, … and `:examples:2` prints the second and
+  then executes it, for a reader who wants the answer rather than the paste.
+  They are now declared where the sandbox is made —
+  `Sandbox.create(..., examples=[...])`, carried on `SandboxConfig` — so
+  `run_repl(sandbox)` finds them without being told twice; passing them to
+  `run_repl` still overrides for one prompt. Snippets are printed with Rich's
+  markup off, since `[...]` was being read as a style tag and a snippet
+  holding `list[str]` printed as `list = []`, wrong exactly where someone was
+  about to copy it.
+
 - Added `:examples` to the sandbox prompt. `run_repl(sandbox, examples=[...])`
   takes title-and-code pairs and prints them on request, for a reader to copy
   into the prompt; every REPL example under `examples/repl` ships its own, and

@@ -48,8 +48,8 @@ def _examples() -> list[tuple[str, str]]:
 
 def main() -> None:
     try:
-        with Sandbox.create(variant="jupyter-server", timeout=30) as sandbox:
-            run_repl(sandbox, examples=_examples())
+        with Sandbox.create(variant="jupyter-server", timeout=30, examples=_examples()) as sandbox:
+            run_repl(sandbox)
     except ModuleNotFoundError as exc:
         print("jupyter sandbox is not available:", exc)
     except Exception as exc:

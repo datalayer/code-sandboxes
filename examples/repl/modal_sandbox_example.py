@@ -128,8 +128,9 @@ def main() -> None:
             variant="modal",
             timeout=60,
             gpu=args.gpu,
+            examples=_examples(args.gpu),
         ) as sandbox:
-            run_repl(sandbox, examples=_examples(args.gpu))
+            run_repl(sandbox)
     except Exception as exc:
         print("modal REPL failed:", exc)
         raise SystemExit(1) from exc

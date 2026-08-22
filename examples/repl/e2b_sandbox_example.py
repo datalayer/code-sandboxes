@@ -105,12 +105,14 @@ def main() -> None:
     print(f"Launching e2b sandbox REPL from template: {args.template or 'code-interpreter-v1'}")
 
     try:
-        with Sandbox.create(variant="e2b", timeout=60, template=args.template) as sandbox:
+        with Sandbox.create(
+            variant="e2b", timeout=60, template=args.template, examples=_examples()
+        ) as sandbox:
             print(f"Sandbox: {sandbox.sandbox_id}")
             # A REPL is read at human speed, and the default life of a sandbox
             # is shorter than a session usually is.
             sandbox.set_timeout(args.minutes * 60)
-            run_repl(sandbox, examples=_examples())
+            run_repl(sandbox)
     except Exception as exc:
         print("e2b REPL failed:", exc)
         raise SystemExit(1) from exc

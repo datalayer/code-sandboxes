@@ -465,6 +465,15 @@ class SandboxConfig(BaseModel):
     idle_timeout: Optional[float] = None
     max_lifetime: float = 86400.0  # 24 hours default like Modal
 
+    #: Snippets worth running in THIS sandbox, as (title, code) pairs.
+    #:
+    #: They belong to the sandbox rather than to the prompt because what is
+    #: worth trying depends on what was created: a sandbox with an H100 in it
+    #: wants device discovery and a matmul, one that runs in this very process
+    #: wants neither. `run_repl` reads them from here, so a caller passes them
+    #: once, at creation, and the prompt needs no arrangement of its own.
+    examples: list[tuple[str, str]] = Field(default_factory=list)
+
 
 class SandboxInfo(BaseModel):
     """Information about a running sandbox.

@@ -73,18 +73,66 @@ sandbox(daytona:tan-law-5384)>>> x + 2
 Use any of `:exit`, `:quit`, `exit`, `quit` or `Ctrl+D` to leave, and `:help`
 for a reminder. On exit, the sandbox is terminated.
 
-A prompt opened by one of the [examples](/examples) also answers `:examples`,
-which prints snippets to copy into it — and they are tailored to the sandbox
-you opened, so a GPU one offers device discovery and a timed matmul while a
-plain one offers state, packages and files. `run_repl` takes them as an
-argument, since what is worth trying belongs to whoever started the sandbox:
+#### Examples At The Prompt
+
+A sandbox can carry snippets worth running in it, and the prompt offers them:
+
+```text
+sandbox(daytona:tan-law-5384)>>> :examples
+
+# 1. What the GPU is, straight from the driver
+import subprocess
+print(subprocess.run(["nvidia-smi"], capture_output=True, text=True).stdout)
+
+# 2. A workload that actually uses it: a matmul, timed on the device
+import time, torch
+...
+
+:examples:N runs one of them — 1 to 5.
+```
+
+Two ways to use one. Copy it into the prompt, or ask for it by number and let
+the prompt run it — `:examples:2` prints the snippet and then executes it, so
+the answer arrives with its cause above it:
+
+```text
+sandbox(daytona:tan-law-5384)>>> :examples:2
+>>> code:
+    import time, torch
+    ...
+'312.4 TFLOP/s'
+```
+
+They are declared once, where the sandbox is made, because what is worth
+running depends on what was created — a sandbox with an H100 in it wants
+device discovery, one that runs in this very process wants neither:
 
 ```python
 from code_sandboxes import Sandbox, run_repl
 
-with Sandbox.create(variant="daytona", gpu="H100") as sandbox:
-    run_repl(sandbox, examples=[("What the GPU is", "import torch\ntorch.cuda.get_device_name(0)")])
+examples = [
+    ("What the GPU is", "import torch\ntorch.cuda.get_device_name(0)"),
+    ("How much memory it has", "import torch\ntorch.cuda.mem_get_info()"),
+]
+
+with Sandbox.create(variant="daytona", gpu="H100", examples=examples) as sandbox:
+    run_repl(sandbox)          # reads them off the sandbox
 ```
+
+`run_repl(sandbox, examples=[...])` still overrides them for one prompt, and
+`:help` lists both forms whenever a sandbox has any.
+
+:::note
+
+A snippet asked for by number runs as ONE execution, so it may contain a
+`for` or a `def`. A snippet meant to be PASTED cannot: the prompt reads a line
+at a time, and a block would arrive without its body. The examples that ship
+with this package are written to be safe either way.
+
+:::
+
+Every REPL example under `examples/repl` ships its own set; see
+[Examples](/examples).
 
 ### Variant Selection
 

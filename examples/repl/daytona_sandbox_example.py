@@ -166,9 +166,10 @@ def main() -> None:
             gpu=args.gpu,
             spot=args.spot,
             delete_on_stop=not args.keep,
+            examples=_examples(args.gpu),
         ) as sandbox:
             print(f"Sandbox: {sandbox.sandbox_id}")
-            run_repl(sandbox, examples=_examples(args.gpu))
+            run_repl(sandbox)
             if args.keep:
                 print(
                     "Kept: the sandbox is stopped, not deleted — "

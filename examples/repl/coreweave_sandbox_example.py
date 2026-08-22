@@ -142,6 +142,7 @@ def main() -> None:
             timeout=60,
             gpu=args.gpu,
             container_image=args.image,
+            examples=_examples(args.gpu),
         ) as sandbox:
             print(f"Sandbox: {sandbox.sandbox_id}")
             info = sandbox.info
@@ -149,7 +150,7 @@ def main() -> None:
                 print("Definitions persist between lines: one session process holds them.")
             else:
                 print("No session process: each line runs on its own, and nothing crosses.")
-            run_repl(sandbox, examples=_examples(args.gpu))
+            run_repl(sandbox)
     except Exception as exc:
         print("coreweave REPL failed:", exc)
         raise SystemExit(1) from exc

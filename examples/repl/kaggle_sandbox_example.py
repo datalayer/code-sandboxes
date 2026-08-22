@@ -102,8 +102,8 @@ def main() -> None:
                 print(f"accelerator: {kwargs['gpu']} — every batch job runs")
                 print("with it, and queues longer than a CPU one.")
 
-        with Sandbox.create(variant="kaggle", **kwargs) as sandbox:
-            run_repl(sandbox, examples=_examples())
+        with Sandbox.create(variant="kaggle", **kwargs, examples=_examples()) as sandbox:
+            run_repl(sandbox)
     except Exception as exc:
         print("kaggle REPL failed:", exc)
         print(

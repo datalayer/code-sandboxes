@@ -55,8 +55,9 @@ def main() -> None:
             variant="datalayer",
             timeout=60,
             environment=first_env.name,
+            examples=_examples(),
         ) as sandbox:
-            run_repl(sandbox, examples=_examples())
+            run_repl(sandbox)
     except Exception as exc:
         print("datalayer REPL failed:", exc)
 

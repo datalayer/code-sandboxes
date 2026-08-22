@@ -63,8 +63,9 @@ def main() -> None:
             server_url=runtime_url,
             kernel_id=runtime_id,
             proxy_token=runtime_proxy_token,
+            examples=_examples(),
         ) as sandbox:
-            run_repl(sandbox, examples=_examples())
+            run_repl(sandbox)
     except Exception as exc:
         print("colab REPL failed:", exc)
         print(

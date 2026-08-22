@@ -35,8 +35,8 @@ def _examples() -> list[tuple[str, str]]:
 
 
 def main() -> None:
-    with Sandbox.create(variant="eval", timeout=30) as sandbox:
-        run_repl(sandbox, examples=_examples())
+    with Sandbox.create(variant="eval", timeout=30, examples=_examples()) as sandbox:
+        run_repl(sandbox)
 
 
 if __name__ == "__main__":

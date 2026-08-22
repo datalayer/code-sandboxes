@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "EXIT_COMMANDS",
+    "example_code",
     "repl_prompt",
     "run_repl",
     "show_and_run",
@@ -158,30 +159,49 @@ def _show_help(console: Console, has_examples: bool = False) -> None:
         style="dim",
     )
     if has_examples:
-        console.print(":examples — snippets for this sandbox, to copy and paste.", style="dim")
+        console.print(":examples — the snippets for this sandbox, numbered.", style="dim")
+        console.print(":examples:2 — run the second one, without pasting it.", style="dim")
     console.print(":help — this.", style="dim")
+
+
+def example_code(examples: Sequence[tuple[str, str]], number: int) -> str | None:
+    """The code of example `number`, counted from one, or None if there is no
+    such example."""
+    if 1 <= number <= len(examples):
+        return dedent(examples[number - 1][1]).strip("\n")
+    return None
 
 
 def show_examples(
     examples: Sequence[tuple[str, str]],
     console: Console | None = None,
 ) -> None:
-    """Print snippets to be copied into the prompt, each under what it does.
+    """Print the snippets, numbered, each under what it does.
 
-    Written for a person with a cursor, so the code is printed plainly rather
-    than boxed or line-numbered: anything drawn around it would be selected
-    along with it and have to be picked back out.
+    Numbered so they can be asked for by number — `:examples:2` runs the
+    second — and printed plainly rather than boxed, because a reader who wants
+    to paste one instead selects it with the cursor and anything drawn around
+    it would come along.
+
+    `markup=False` throughout: Rich reads `[...]` as a style tag, so a snippet
+    holding `list[str]` or `data[1:3]` would print with the brackets eaten and
+    be wrong in exactly the place someone was about to copy.
     """
     out = _out(console)
     if not examples:
         out.print("This sandbox ships no examples.", style="dim")
         return
     out.print("")
-    for title, code in examples:
-        out.print(f"# {title}", style="cyan")
+    for number, (title, code) in enumerate(examples, start=1):
+        out.print(f"# {number}. {title}", style="cyan", markup=False, highlight=False)
         for line in dedent(code).strip("\n").splitlines():
-            out.print(line, style="white", highlight=False)
+            out.print(line, style="white", markup=False, highlight=False)
         out.print("")
+    out.print(
+        f":examples:N runs one of them — 1 to {len(examples)}.",
+        style="dim",
+        markup=False,
+    )
 
 
 def run_repl(  # noqa: C901
@@ -197,13 +217,20 @@ def run_repl(  # noqa: C901
     when it goes, which for every caller here is the `with` block around this.
 
     Args:
-        examples: Title-and-code pairs `:examples` prints, for the caller to
-            copy into the prompt. They belong to the CALLER rather than to
-            this function: what is worth trying in a sandbox with an H100 is
-            not what is worth trying in one that runs in this very process.
+        examples: Title-and-code pairs, overriding whatever the sandbox was
+            created with. Normally left out: they are declared once at
+            `Sandbox.create(examples=...)` and read from there, so a caller
+            holding a sandbox already has them and a prompt opened on it
+            offers the right ones without being told twice.
     """
     out = _out(console)
     prompt = repl_prompt(sandbox)
+    # The sandbox's own, unless this call brought its own list.
+    if examples is None:
+        # Reached through two `getattr`s on purpose: `run_repl` takes anything
+        # that runs code, and a stand-in without a `config` should open a
+        # prompt with no examples rather than fail to open one at all.
+        examples = list(getattr(getattr(sandbox, "config", None), "examples", None) or [])
     if banner:
         out.print("Sandbox REPL ready. Type Python and press Enter.", style="green")
         hint = ":exit or Ctrl-D to leave, :help for help."
@@ -233,6 +260,21 @@ def run_repl(  # noqa: C901
         if code == ":examples":
             show_examples(examples or [], console=out)
             continue
+        if code.startswith(":examples:"):
+            asked = code[len(":examples:") :].strip()
+            wanted = int(asked) if asked.isdigit() else 0
+            chosen = example_code(examples or [], wanted)
+            if chosen is None:
+                out.print(
+                    f"There is no example {asked!r}. :examples lists them.",
+                    style="yellow",
+                    markup=False,
+                )
+                continue
+            # Shown before it runs: an example that executed invisibly would
+            # leave the reader with an answer and no idea what produced it.
+            show_code(chosen, console=out)
+            code = chosen
 
         try:
             result = sandbox.run_code(code)

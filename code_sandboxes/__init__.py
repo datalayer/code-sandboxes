@@ -67,6 +67,7 @@ from .cloudflare_sandbox import CloudflareSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .console import (
     EXIT_COMMANDS,
+    example_code,
     repl_prompt,
     run_repl,
     show_and_run,
@@ -217,6 +218,7 @@ __all__ = [
     "TunnelInfo",
     "VariableNotFoundError",
     "available_providers",
+    "example_code",
     "execution_result_to_reply",
     "get_manager",
     "get_provider",

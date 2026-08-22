@@ -56,8 +56,9 @@ def main() -> None:
             variant="docker",
             timeout=30,
             image="code-sandboxes-jupyter:latest",
+            examples=_examples(),
         ) as sandbox:
-            run_repl(sandbox, examples=_examples())
+            run_repl(sandbox)
     except ModuleNotFoundError as exc:
         print("docker sandbox is not available:", exc)
     except Exception as exc:

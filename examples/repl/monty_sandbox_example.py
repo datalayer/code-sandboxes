@@ -36,8 +36,10 @@ def _examples() -> list[tuple[str, str]]:
 
 def main() -> None:
     try:
-        with Sandbox.create(variant="monty", timeout=30, name="monty1") as sandbox:
-            run_repl(sandbox, examples=_examples())
+        with Sandbox.create(
+            variant="monty", timeout=30, name="monty1", examples=_examples()
+        ) as sandbox:
+            run_repl(sandbox)
     except ModuleNotFoundError as exc:
         print("monty sandbox is not available:", exc)
     except Exception as exc:

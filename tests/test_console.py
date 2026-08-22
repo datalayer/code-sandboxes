@@ -13,6 +13,7 @@ is shown, whether stderr is told apart, and what ends a session.
 from __future__ import annotations
 
 import builtins
+from types import SimpleNamespace
 
 import pytest
 from rich.console import Console
@@ -217,10 +218,69 @@ def test_examples_prints_the_snippets_and_runs_none_of_them(monkeypatch):
     )
 
     rendered = _rendered(console)
-    assert "# Discover the GPU" in rendered
+    assert "# 1. Discover the GPU" in rendered
     assert "torch.cuda.get_device_name(0)" in rendered
     # Shown, never executed: the sandbox was not asked to run a thing.
     assert sandbox.ran == []
+
+
+def test_examples_come_from_the_sandbox_they_were_created_with(monkeypatch):
+    """Declared once at creation; the prompt needs no arrangement of its own."""
+    console, _ = _console()
+    sandbox = _FakeSandbox()
+    sandbox.config = SimpleNamespace(examples=[("From the config", "1 + 1")])
+    _typing(monkeypatch, ":examples", ":exit")
+
+    run_repl(sandbox, console=console, banner=False)
+
+    assert "# 1. From the config" in _rendered(console)
+
+
+def test_an_example_can_be_run_by_its_number(monkeypatch):
+    """`:examples:2` is for a reader who wants the answer, not the paste."""
+    console, _ = _console()
+    sandbox = _FakeSandbox({"second()": _result(text="ok")})
+    _typing(monkeypatch, ":examples:2", ":exit")
+
+    run_repl(
+        sandbox,
+        console=console,
+        banner=False,
+        examples=[("First", "first()"), ("Second", "second()")],
+    )
+
+    # Run, and shown before it ran: an answer with no visible cause is worse.
+    assert sandbox.ran == ["second()"]
+    assert "    second()" in _rendered(console)
+
+
+def test_a_number_that_is_not_an_example_is_refused_without_running_anything(monkeypatch):
+    console, _ = _console()
+    sandbox = _FakeSandbox()
+    _typing(monkeypatch, ":examples:9", ":examples:x", ":exit")
+
+    run_repl(sandbox, console=console, banner=False, examples=[("Only one", "1")])
+
+    assert sandbox.ran == []
+    assert sum("no example" in line for line in _rendered(console)) == 2
+
+
+def test_brackets_in_a_snippet_survive_being_printed(monkeypatch):
+    """Rich reads `[...]` as a style tag, so a type hint would print mangled —
+    and be wrong exactly where someone was about to copy it."""
+    console, _ = _console()
+    _typing(monkeypatch, ":examples", ":exit")
+
+    run_repl(
+        _FakeSandbox(),
+        console=console,
+        banner=False,
+        examples=[("Types", "items: list[str] = []\nitems[0:1]")],
+    )
+
+    rendered = _rendered(console)
+    assert "items: list[str] = []" in rendered
+    assert "items[0:1]" in rendered
 
 
 def test_a_prompt_with_no_examples_says_so_rather_than_printing_nothing(monkeypatch):
