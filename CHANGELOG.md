@@ -8,6 +8,14 @@
 
 ## Unreleased
 
+- Added `:examples` to the sandbox prompt. `run_repl(sandbox, examples=[...])`
+  takes title-and-code pairs and prints them on request, for a reader to copy
+  into the prompt; every REPL example under `examples/repl` ships its own, and
+  the ones that can take a GPU offer device discovery and a timed matmul
+  instead of their general set when `--gpu` was asked for. The snippets avoid
+  blocks on purpose: the prompt reads one line at a time, so a pasted `for` or
+  `def` would arrive without its body.
+
 - Fixed a `daytona` GPU sandbox failing to be created at all unless it was
   also asking for preemptible capacity. Daytona requires every GPU sandbox to
   be ephemeral — *"GPU sandboxes must be ephemeral; set autoDeleteInterval to

@@ -73,6 +73,19 @@ sandbox(daytona:tan-law-5384)>>> x + 2
 Use any of `:exit`, `:quit`, `exit`, `quit` or `Ctrl+D` to leave, and `:help`
 for a reminder. On exit, the sandbox is terminated.
 
+A prompt opened by one of the [examples](/examples) also answers `:examples`,
+which prints snippets to copy into it — and they are tailored to the sandbox
+you opened, so a GPU one offers device discovery and a timed matmul while a
+plain one offers state, packages and files. `run_repl` takes them as an
+argument, since what is worth trying belongs to whoever started the sandbox:
+
+```python
+from code_sandboxes import Sandbox, run_repl
+
+with Sandbox.create(variant="daytona", gpu="H100") as sandbox:
+    run_repl(sandbox, examples=[("What the GPU is", "import torch\ntorch.cuda.get_device_name(0)")])
+```
+
 ### Variant Selection
 
 Supported variants:
