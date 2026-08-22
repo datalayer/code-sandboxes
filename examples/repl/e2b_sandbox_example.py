@@ -47,6 +47,54 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _examples() -> list[tuple[str, str]]:
+    """Snippets worth pasting into this sandbox, for `:examples`."""
+    return [
+        (
+            "State is kept between lines",
+            """
+            totals = [1, 2, 3]
+            totals.append(4)
+            sum(totals)
+            """,
+        ),
+        (
+            "The one backend that answers with rich outputs: this is an image",
+            """
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots()
+            ax.plot([1, 4, 9, 16], marker="o")
+            ax.set_title("returned as a PNG, not as text")
+            fig
+            """,
+        ),
+        (
+            "And an HTML repr comes back as HTML",
+            """
+            import pandas as pd
+            pd.DataFrame({"variant": ["e2b", "daytona"], "state": [True, True]})
+            """,
+        ),
+        (
+            "Where this is running",
+            """
+            import platform, sys
+            platform.node(), platform.platform(), sys.version.split()[0]
+            """,
+        ),
+        (
+            "The filesystem is the sandbox's own",
+            """
+            from pathlib import Path
+            Path("/tmp/notes.txt").write_text("written inside the sandbox")
+            Path("/tmp/notes.txt").read_text()
+            """,
+        ),
+    ]
+
+
 def main() -> None:
     args = _parse_args()
     if not os.environ.get("E2B_API_KEY"):
@@ -57,7 +105,9 @@ def main() -> None:
     print(f"Launching e2b sandbox REPL from template: {args.template or 'code-interpreter-v1'}")
 
     try:
-        with Sandbox.create(variant="e2b", timeout=60, template=args.template) as sandbox:
+        with Sandbox.create(
+            variant="e2b", timeout=60, template=args.template, examples=_examples()
+        ) as sandbox:
             print(f"Sandbox: {sandbox.sandbox_id}")
             # A REPL is read at human speed, and the default life of a sandbox
             # is shorter than a session usually is.

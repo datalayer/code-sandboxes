@@ -8,6 +8,32 @@
 
 ## Unreleased
 
+- Numbered the prompt's examples, and made one runnable by its number:
+  `:examples` lists them `1.`, `2.`, … and `:examples:2` prints the second and
+  then executes it, for a reader who wants the answer rather than the paste.
+  They are now declared where the sandbox is made —
+  `Sandbox.create(..., examples=[...])`, carried on `SandboxConfig` — so
+  `run_repl(sandbox)` finds them without being told twice; passing them to
+  `run_repl` still overrides for one prompt. Snippets are printed with Rich's
+  markup off, since `[...]` was being read as a style tag and a snippet
+  holding `list[str]` printed as `list = []`, wrong exactly where someone was
+  about to copy it.
+
+- Added `:examples` to the sandbox prompt. `run_repl(sandbox, examples=[...])`
+  takes title-and-code pairs and prints them on request, for a reader to copy
+  into the prompt; every REPL example under `examples/repl` ships its own, and
+  the ones that can take a GPU offer device discovery and a timed matmul
+  instead of their general set when `--gpu` was asked for. The snippets avoid
+  blocks on purpose: the prompt reads one line at a time, so a pasted `for` or
+  `def` would arrive without its body.
+
+- Fixed a `daytona` GPU sandbox failing to be created at all unless it was
+  also asking for preemptible capacity. Daytona requires every GPU sandbox to
+  be ephemeral — *"GPU sandboxes must be ephemeral; set autoDeleteInterval to
+  0"* — and `auto_delete_interval=0` was being set only on the `spot=True`
+  path, so a plain `gpu="H100"` was refused by the API. It now follows the GPU
+  itself, which is what Daytona ties it to.
+
 - Added three cloud variants: `e2b`, `coreweave` and `cloudflare`.
 
   `e2b` runs in a Firecracker microVM through E2B's code interpreter SDK, so it

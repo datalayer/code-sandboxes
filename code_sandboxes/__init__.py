@@ -67,10 +67,12 @@ from .cloudflare_sandbox import CloudflareSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .console import (
     EXIT_COMMANDS,
+    example_code,
     repl_prompt,
     run_repl,
     show_and_run,
     show_code,
+    show_examples,
     show_result,
 )
 from .coreweave_sandbox import CoreWeaveSandbox
@@ -216,6 +218,7 @@ __all__ = [
     "TunnelInfo",
     "VariableNotFoundError",
     "available_providers",
+    "example_code",
     "execution_result_to_reply",
     "get_manager",
     "get_provider",
@@ -227,5 +230,6 @@ __all__ = [
     "run_repl",
     "show_and_run",
     "show_code",
+    "show_examples",
     "show_result",
 ]

@@ -50,6 +50,7 @@ from .models import (
     SandboxEnvironment,
     SandboxInfo,
     SandboxStatus,
+    gpu_memory,
 )
 
 logger = logging.getLogger(__name__)
@@ -216,6 +217,15 @@ def _gpu_types(flavors: str, daytona: Any) -> list[Any]:
     return wanted
 
 
+def _asks_for_a_gpu(resources: Any | None) -> bool:
+    """Whether this specification carries a GPU.
+
+    `Resources` sets `gpu` to a count, so "no GPU" arrives as either no
+    specification at all or a count of zero.
+    """
+    return resources is not None and getattr(resources, "gpu", None) not in (None, 0)
+
+
 def _import_daytona() -> Any:
     try:
         import daytona
@@ -322,6 +332,9 @@ class DaytonaSandbox(Sandbox):
                 owner="daytona",
                 visibility="cloud",
                 burning_rate=0.0,
+                gpu="H100",
+                gpu_count=1,
+                gpu_memory=gpu_memory("H100"),
                 metadata={"variant": "daytona", "gpu": "H100", "spot": False},
             ),
             SandboxEnvironment(
@@ -331,6 +344,9 @@ class DaytonaSandbox(Sandbox):
                 owner="daytona",
                 visibility="cloud",
                 burning_rate=0.0,
+                gpu="H100",
+                gpu_count=1,
+                gpu_memory=gpu_memory("H100"),
                 metadata={"variant": "daytona", "gpu": "H100", "spot": True},
             ),
         ]
@@ -395,6 +411,13 @@ class DaytonaSandbox(Sandbox):
         common.update(self._network_params())
 
         resources = self._resources(daytona)
+        if _asks_for_a_gpu(resources):
+            # Daytona will not create a GPU sandbox that outlives its stop:
+            # "GPU sandboxes must be ephemeral; set autoDeleteInterval to 0".
+            # It is a property of asking for a GPU at all, not of asking for
+            # preemptible capacity — which is where this used to live, so an
+            # on-demand `gpu=` was refused by the API on creation.
+            common["auto_delete_interval"] = 0
         if self._spot:
             common.update(self._spot_params(resources))
         if self._image is not None or resources is not None:
@@ -412,11 +435,13 @@ class DaytonaSandbox(Sandbox):
         """What asking for preemptible capacity commits the sandbox to.
 
         Spot is GPU-only — Daytona refuses it for a sandbox that asks for no
-        GPU — and it is built from an IMAGE with `auto_delete_interval=0`, so
-        a reclaimed sandbox does not linger. Both are said here rather than
-        left to come back as an API error a caller cannot act on.
+        GPU — and it is built from an IMAGE rather than from a snapshot. Both
+        are said here rather than left to come back as an API error a caller
+        cannot act on. Being ephemeral is asked for alongside the GPU itself,
+        in `_create_params`, since Daytona requires it of every GPU sandbox
+        and not only of the preemptible ones.
         """
-        if resources is None or getattr(resources, "gpu", None) in (None, 0):
+        if not _asks_for_a_gpu(resources):
             raise SandboxConfigurationError(
                 "spot=True asks for preemptible GPU capacity, so it needs a "
                 "GPU: pass gpu=... (for example gpu='H100', or "
@@ -429,7 +454,7 @@ class DaytonaSandbox(Sandbox):
                 "machine specification; snapshot= cannot be used with it. "
                 "Pass image=, or leave both out for a Debian image."
             )
-        return {"spot": True, "auto_delete_interval": 0}
+        return {"spot": True}
 
     def _labels(self) -> dict[str, str]:
         """The metadata the sandbox carries in Daytona.

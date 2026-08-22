@@ -19,6 +19,8 @@ reading: it shows how to use a sandbox rather than how to print things.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
@@ -29,10 +31,12 @@ if TYPE_CHECKING:
 
 __all__ = [
     "EXIT_COMMANDS",
+    "example_code",
     "repl_prompt",
     "run_repl",
     "show_and_run",
     "show_code",
+    "show_examples",
     "show_result",
 ]
 
@@ -144,7 +148,7 @@ def repl_prompt(sandbox: Sandbox) -> str:
     return f"sandbox({info.variant or 'unknown'}:{name})>>> "
 
 
-def _show_help(console: Console) -> None:
+def _show_help(console: Console, has_examples: bool = False) -> None:
     console.print("Type Python statements or expressions.", style="dim")
     console.print(
         "State is kept between lines, and the value of an expression is shown.",
@@ -154,25 +158,85 @@ def _show_help(console: Console) -> None:
         f"{', '.join(sorted(EXIT_COMMANDS))} — leave, terminating the sandbox.",
         style="dim",
     )
+    if has_examples:
+        console.print(":examples — the snippets for this sandbox, numbered.", style="dim")
+        console.print(":examples:2 — run the second one, without pasting it.", style="dim")
     console.print(":help — this.", style="dim")
 
 
-def run_repl(
+def example_code(examples: Sequence[tuple[str, str]], number: int) -> str | None:
+    """The code of example `number`, counted from one, or None if there is no
+    such example."""
+    if 1 <= number <= len(examples):
+        return dedent(examples[number - 1][1]).strip("\n")
+    return None
+
+
+def show_examples(
+    examples: Sequence[tuple[str, str]],
+    console: Console | None = None,
+) -> None:
+    """Print the snippets, numbered, each under what it does.
+
+    Numbered so they can be asked for by number — `:examples:2` runs the
+    second — and printed plainly rather than boxed, because a reader who wants
+    to paste one instead selects it with the cursor and anything drawn around
+    it would come along.
+
+    `markup=False` throughout: Rich reads `[...]` as a style tag, so a snippet
+    holding `list[str]` or `data[1:3]` would print with the brackets eaten and
+    be wrong in exactly the place someone was about to copy.
+    """
+    out = _out(console)
+    if not examples:
+        out.print("This sandbox ships no examples.", style="dim")
+        return
+    out.print("")
+    for number, (title, code) in enumerate(examples, start=1):
+        out.print(f"# {number}. {title}", style="cyan", markup=False, highlight=False)
+        for line in dedent(code).strip("\n").splitlines():
+            out.print(line, style="white", markup=False, highlight=False)
+        out.print("")
+    out.print(
+        f":examples:N runs one of them — 1 to {len(examples)}.",
+        style="dim",
+        markup=False,
+    )
+
+
+def run_repl(  # noqa: C901
     sandbox: Sandbox,
     *,
     console: Console | None = None,
     banner: bool = True,
+    examples: Sequence[tuple[str, str]] | None = None,
 ) -> None:
     """Hold a prompt open against a sandbox that is already started.
 
     Leaving the loop does NOT stop the sandbox: whoever started it decides
     when it goes, which for every caller here is the `with` block around this.
+
+    Args:
+        examples: Title-and-code pairs, overriding whatever the sandbox was
+            created with. Normally left out: they are declared once at
+            `Sandbox.create(examples=...)` and read from there, so a caller
+            holding a sandbox already has them and a prompt opened on it
+            offers the right ones without being told twice.
     """
     out = _out(console)
     prompt = repl_prompt(sandbox)
+    # The sandbox's own, unless this call brought its own list.
+    if examples is None:
+        # Reached through two `getattr`s on purpose: `run_repl` takes anything
+        # that runs code, and a stand-in without a `config` should open a
+        # prompt with no examples rather than fail to open one at all.
+        examples = list(getattr(getattr(sandbox, "config", None), "examples", None) or [])
     if banner:
         out.print("Sandbox REPL ready. Type Python and press Enter.", style="green")
-        out.print(":exit or Ctrl-D to leave, :help for help.", style="dim")
+        hint = ":exit or Ctrl-D to leave, :help for help."
+        if examples:
+            hint = ":examples for snippets to paste, :exit to leave, :help for help."
+        out.print(hint, style="dim")
 
     while True:
         try:
@@ -191,8 +255,26 @@ def run_repl(
         if code in EXIT_COMMANDS:
             break
         if code == ":help":
-            _show_help(out)
+            _show_help(out, has_examples=bool(examples))
             continue
+        if code == ":examples":
+            show_examples(examples or [], console=out)
+            continue
+        if code.startswith(":examples:"):
+            asked = code[len(":examples:") :].strip()
+            wanted = int(asked) if asked.isdigit() else 0
+            chosen = example_code(examples or [], wanted)
+            if chosen is None:
+                out.print(
+                    f"There is no example {asked!r}. :examples lists them.",
+                    style="yellow",
+                    markup=False,
+                )
+                continue
+            # Shown before it runs: an example that executed invisibly would
+            # leave the reader with an answer and no idea what produced it.
+            show_code(chosen, console=out)
+            code = chosen
 
         try:
             result = sandbox.run_code(code)

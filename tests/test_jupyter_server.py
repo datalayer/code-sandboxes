@@ -6,12 +6,14 @@
 
 import os
 import sys
+import time
 import types
 import uuid
 from pathlib import Path
 
 import pytest
 
+from code_sandboxes.exceptions import SandboxConfigurationError
 from code_sandboxes.jupyter_server_sandbox import JupyterServerSandbox
 from code_sandboxes.models import SandboxConfig
 
@@ -270,3 +272,46 @@ def test_owned_server_still_generates_a_token():
     sandbox = JupyterServerSandbox()
 
     assert sandbox._token
+
+
+class TestAServerThatWillNotStart:
+    """What the user is told when the Jupyter Server never comes up.
+
+    Both streams went to `DEVNULL`, so a server that died on the way up —
+    a module not installed, a port already taken — explained itself into
+    nothing, and the caller waited out the whole timeout to be told
+    "Timed out waiting for Jupyter Server". The reason was there all along.
+    """
+
+    def _sandbox(self, returncode, said):
+        from collections import deque
+
+        sandbox = JupyterServerSandbox.__new__(JupyterServerSandbox)
+        sandbox._server_url = "http://127.0.0.1:1"
+        sandbox._token = "not-a-secret"  # noqa: S105 - a stand-in, not a credential
+        sandbox._headers = {}
+        sandbox._server_output = deque(said)
+        sandbox._server_process = type(
+            "P", (), {"poll": lambda self: returncode, "returncode": returncode}
+        )()
+        return sandbox
+
+    def test_a_dead_server_is_reported_at_once_with_what_it_said(self):
+        sandbox = self._sandbox(1, ["ModuleNotFoundError: No module named 'jupyter_server'"])
+
+        started = time.time()
+        with pytest.raises(SandboxConfigurationError) as raised:
+            sandbox._wait_for_server(timeout=30)
+
+        assert time.time() - started < 5, "it waited out the timeout"
+        assert "exited with code 1" in str(raised.value)
+        assert "No module named 'jupyter_server'" in str(raised.value)
+
+    def test_a_server_still_running_is_waited_for_and_then_quoted(self):
+        sandbox = self._sandbox(None, ["[W] something looked wrong"])
+
+        with pytest.raises(SandboxConfigurationError) as raised:
+            sandbox._wait_for_server(timeout=1)
+
+        assert "Timed out" in str(raised.value)
+        assert "something looked wrong" in str(raised.value)

@@ -129,3 +129,21 @@ def test_availability_is_read_from_the_secrets_given_not_from_the_process():
     # available anywhere, and the credentialed ones are not.
     assert "eval" in names
     assert "kaggle" not in names
+
+
+def test_a_provider_carries_the_mark_it_is_drawn_with():
+    """The icon travels with the provider, so every surface draws one thing.
+
+    The operator copies it onto the environments it serves and the web looks
+    the component up by it; naming it here is what keeps a Daytona sandbox
+    looking like Daytona in the CLI, the listing and the table alike.
+    """
+    catalog = {entry["name"]: entry for entry in provider_catalog({})}
+
+    assert catalog["daytona"]["icon"] == "daytona"
+    assert catalog["e2b"]["icon"] == "e2b"
+    assert catalog["kaggle"]["icon"] == "kaggle"
+    assert catalog["modal"]["icon"] == "modal"
+    # No mark for it in the set yet, which is said as nothing rather than as
+    # a slug that resolves to whatever the reader keeps for the unknown.
+    assert catalog["cloudflare"]["icon"] is None
