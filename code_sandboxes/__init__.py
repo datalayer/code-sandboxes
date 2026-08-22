@@ -71,6 +71,7 @@ from .console import (
     run_repl,
     show_and_run,
     show_code,
+    show_examples,
     show_result,
 )
 from .coreweave_sandbox import CoreWeaveSandbox
@@ -227,5 +228,6 @@ __all__ = [
     "run_repl",
     "show_and_run",
     "show_code",
+    "show_examples",
     "show_result",
 ]

@@ -38,6 +38,91 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _examples(gpu: str | None) -> list[tuple[str, str]]:
+    """Snippets worth pasting into this sandbox, for `:examples`.
+
+    A sandbox with a card in it is worth different lines from one without, so
+    the GPU set replaces the general one rather than being appended to it.
+    """
+    if gpu:
+        return [
+            (
+                "What the GPU is, straight from the driver",
+                """
+            import subprocess
+            print(subprocess.run(["nvidia-smi"], capture_output=True, text=True).stdout)
+            """,
+            ),
+            (
+                "The same from Python, once torch is there",
+                """
+            import torch
+            torch.cuda.is_available(), torch.cuda.device_count(), torch.cuda.get_device_name(0)
+            """,
+            ),
+            (
+                "Install torch if the image has none (a minute or two)",
+                """
+            import subprocess, sys
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "torch"], check=True)
+            """,
+            ),
+            (
+                "A workload that actually uses it: a matmul, timed on the device",
+                """
+            import time, torch
+            a = torch.randn(8192, 8192, device="cuda", dtype=torch.float16)
+            b = torch.randn(8192, 8192, device="cuda", dtype=torch.float16)
+            torch.cuda.synchronize(); start = time.perf_counter()
+            [a @ b for _ in range(10)] and torch.cuda.synchronize()
+            seconds = (time.perf_counter() - start) / 10
+            f"{2 * 8192 ** 3 / seconds / 1e12:.1f} TFLOP/s"
+            """,
+            ),
+            (
+                "How much memory the card has, and how much this used",
+                """
+            import torch
+            free, total = torch.cuda.mem_get_info()
+            f"{(total - free) / 1e9:.1f} GB used of {total / 1e9:.1f} GB"
+            """,
+            ),
+        ]
+    return [
+        (
+            "State is kept between lines",
+            """
+            totals = [1, 2, 3]
+            totals.append(4)
+            sum(totals)
+            """,
+        ),
+        (
+            "Where this is running",
+            """
+            import platform, sys
+            platform.node(), platform.platform(), sys.version.split()[0]
+            """,
+        ),
+        (
+            "The filesystem is the sandbox's own",
+            """
+            from pathlib import Path
+            Path("/tmp/notes.txt").write_text("written inside the sandbox")
+            Path("/tmp/notes.txt").read_text()
+            """,
+        ),
+        (
+            "Install a package into the sandbox",
+            """
+            import subprocess, sys
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "httpx"], check=True)
+            import httpx; httpx.__version__
+            """,
+        ),
+    ]
+
+
 def main() -> None:
     args = _parse_args()
     if not os.environ.get("CWSANDBOX_API_KEY"):
@@ -64,7 +149,7 @@ def main() -> None:
                 print("Definitions persist between lines: one session process holds them.")
             else:
                 print("No session process: each line runs on its own, and nothing crosses.")
-            run_repl(sandbox)
+            run_repl(sandbox, examples=_examples(args.gpu))
     except Exception as exc:
         print("coreweave REPL failed:", exc)
         raise SystemExit(1) from exc

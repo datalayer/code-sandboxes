@@ -19,6 +19,8 @@ reading: it shows how to use a sandbox rather than how to print things.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
@@ -33,6 +35,7 @@ __all__ = [
     "run_repl",
     "show_and_run",
     "show_code",
+    "show_examples",
     "show_result",
 ]
 
@@ -144,7 +147,7 @@ def repl_prompt(sandbox: Sandbox) -> str:
     return f"sandbox({info.variant or 'unknown'}:{name})>>> "
 
 
-def _show_help(console: Console) -> None:
+def _show_help(console: Console, has_examples: bool = False) -> None:
     console.print("Type Python statements or expressions.", style="dim")
     console.print(
         "State is kept between lines, and the value of an expression is shown.",
@@ -154,25 +157,59 @@ def _show_help(console: Console) -> None:
         f"{', '.join(sorted(EXIT_COMMANDS))} — leave, terminating the sandbox.",
         style="dim",
     )
+    if has_examples:
+        console.print(":examples — snippets for this sandbox, to copy and paste.", style="dim")
     console.print(":help — this.", style="dim")
 
 
-def run_repl(
+def show_examples(
+    examples: Sequence[tuple[str, str]],
+    console: Console | None = None,
+) -> None:
+    """Print snippets to be copied into the prompt, each under what it does.
+
+    Written for a person with a cursor, so the code is printed plainly rather
+    than boxed or line-numbered: anything drawn around it would be selected
+    along with it and have to be picked back out.
+    """
+    out = _out(console)
+    if not examples:
+        out.print("This sandbox ships no examples.", style="dim")
+        return
+    out.print("")
+    for title, code in examples:
+        out.print(f"# {title}", style="cyan")
+        for line in dedent(code).strip("\n").splitlines():
+            out.print(line, style="white", highlight=False)
+        out.print("")
+
+
+def run_repl(  # noqa: C901
     sandbox: Sandbox,
     *,
     console: Console | None = None,
     banner: bool = True,
+    examples: Sequence[tuple[str, str]] | None = None,
 ) -> None:
     """Hold a prompt open against a sandbox that is already started.
 
     Leaving the loop does NOT stop the sandbox: whoever started it decides
     when it goes, which for every caller here is the `with` block around this.
+
+    Args:
+        examples: Title-and-code pairs `:examples` prints, for the caller to
+            copy into the prompt. They belong to the CALLER rather than to
+            this function: what is worth trying in a sandbox with an H100 is
+            not what is worth trying in one that runs in this very process.
     """
     out = _out(console)
     prompt = repl_prompt(sandbox)
     if banner:
         out.print("Sandbox REPL ready. Type Python and press Enter.", style="green")
-        out.print(":exit or Ctrl-D to leave, :help for help.", style="dim")
+        hint = ":exit or Ctrl-D to leave, :help for help."
+        if examples:
+            hint = ":examples for snippets to paste, :exit to leave, :help for help."
+        out.print(hint, style="dim")
 
     while True:
         try:
@@ -191,7 +228,10 @@ def run_repl(
         if code in EXIT_COMMANDS:
             break
         if code == ":help":
-            _show_help(out)
+            _show_help(out, has_examples=bool(examples))
+            continue
+        if code == ":examples":
+            show_examples(examples or [], console=out)
             continue
 
         try:

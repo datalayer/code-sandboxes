@@ -8,6 +8,13 @@
 
 ## Unreleased
 
+- Fixed a `daytona` GPU sandbox failing to be created at all unless it was
+  also asking for preemptible capacity. Daytona requires every GPU sandbox to
+  be ephemeral — *"GPU sandboxes must be ephemeral; set autoDeleteInterval to
+  0"* — and `auto_delete_interval=0` was being set only on the `spot=True`
+  path, so a plain `gpu="H100"` was refused by the API. It now follows the GPU
+  itself, which is what Daytona ties it to.
+
 - Added three cloud variants: `e2b`, `coreweave` and `cloudflare`.
 
   `e2b` runs in a Firecracker microVM through E2B's code interpreter SDK, so it

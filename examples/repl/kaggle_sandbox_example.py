@@ -18,6 +18,43 @@ import os
 from code_sandboxes import Sandbox, run_repl
 
 
+def _examples() -> list[tuple[str, str]]:
+    """Snippets worth pasting into this sandbox, for `:examples`."""
+    return [
+        (
+            "State is kept between lines",
+            """
+            totals = [1, 2, 3]
+            totals.append(4)
+            sum(totals)
+            """,
+        ),
+        (
+            "Where this is running",
+            """
+            import platform, sys
+            platform.node(), platform.platform(), sys.version.split()[0]
+            """,
+        ),
+        (
+            "Which accelerator the session got, if KAGGLE_GPU asked for one",
+            """
+            import subprocess
+            smi = subprocess.run(["nvidia-smi"], capture_output=True, text=True)
+            print(smi.stdout or "CPU session")
+            """,
+        ),
+        (
+            "The datasets a Kaggle session mounts",
+            """
+            from pathlib import Path
+            mounted = Path("/kaggle/input")
+            [p.name for p in mounted.iterdir()] if mounted.exists() else []
+            """,
+        ),
+    ]
+
+
 def main() -> None:
     channels_url = os.environ.get("RUNTIME_CHANNELS_URL")
     runtime_url = os.environ.get("RUNTIME_URL")
@@ -66,7 +103,7 @@ def main() -> None:
                 print("with it, and queues longer than a CPU one.")
 
         with Sandbox.create(variant="kaggle", **kwargs) as sandbox:
-            run_repl(sandbox)
+            run_repl(sandbox, examples=_examples())
     except Exception as exc:
         print("kaggle REPL failed:", exc)
         print(

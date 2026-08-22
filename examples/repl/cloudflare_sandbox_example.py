@@ -31,6 +31,46 @@ BRIDGE_DEPLOY_COMMAND = (
 )
 
 
+def _examples() -> list[tuple[str, str]]:
+    """Snippets worth pasting into this sandbox, for `:examples`."""
+    return [
+        (
+            "This backend is STATELESS — the second line cannot see the first",
+            """
+            x = 21
+            """,
+        ),
+        (
+            "…so it fails. Send what shares state as ONE snippet instead",
+            """
+            x = 21
+            x * 2
+            """,
+        ),
+        (
+            "Or keep it in a file: the filesystem DOES persist between snippets",
+            """
+            from pathlib import Path
+            Path("/workspace/total.txt").write_text("42")
+            """,
+        ),
+        (
+            "…and the next snippet reads it back",
+            """
+            from pathlib import Path
+            int(Path("/workspace/total.txt").read_text())
+            """,
+        ),
+        (
+            "Where this is running",
+            """
+            import platform, sys
+            platform.node(), platform.platform(), sys.version.split()[0]
+            """,
+        ),
+    ]
+
+
 def main() -> None:
     if not os.environ.get("CLOUDFLARE_SANDBOX_API_URL") or not os.environ.get(
         "CLOUDFLARE_SANDBOX_API_KEY"
@@ -52,7 +92,7 @@ def main() -> None:
             # NameError: nothing defined on one line reaches the next.
             print("Each line runs in its own process — definitions do NOT persist.")
             print("Use one line for what shares state, or a file: `open('/workspace/x', 'w')`.")
-            run_repl(sandbox)
+            run_repl(sandbox, examples=_examples())
     except Exception as exc:
         print("cloudflare REPL failed:", exc)
         raise SystemExit(1) from exc

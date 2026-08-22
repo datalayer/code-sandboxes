@@ -47,6 +47,54 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _examples() -> list[tuple[str, str]]:
+    """Snippets worth pasting into this sandbox, for `:examples`."""
+    return [
+        (
+            "State is kept between lines",
+            """
+            totals = [1, 2, 3]
+            totals.append(4)
+            sum(totals)
+            """,
+        ),
+        (
+            "The one backend that answers with rich outputs: this is an image",
+            """
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots()
+            ax.plot([1, 4, 9, 16], marker="o")
+            ax.set_title("returned as a PNG, not as text")
+            fig
+            """,
+        ),
+        (
+            "And an HTML repr comes back as HTML",
+            """
+            import pandas as pd
+            pd.DataFrame({"variant": ["e2b", "daytona"], "state": [True, True]})
+            """,
+        ),
+        (
+            "Where this is running",
+            """
+            import platform, sys
+            platform.node(), platform.platform(), sys.version.split()[0]
+            """,
+        ),
+        (
+            "The filesystem is the sandbox's own",
+            """
+            from pathlib import Path
+            Path("/tmp/notes.txt").write_text("written inside the sandbox")
+            Path("/tmp/notes.txt").read_text()
+            """,
+        ),
+    ]
+
+
 def main() -> None:
     args = _parse_args()
     if not os.environ.get("E2B_API_KEY"):
@@ -62,7 +110,7 @@ def main() -> None:
             # A REPL is read at human speed, and the default life of a sandbox
             # is shorter than a session usually is.
             sandbox.set_timeout(args.minutes * 60)
-            run_repl(sandbox)
+            run_repl(sandbox, examples=_examples())
     except Exception as exc:
         print("e2b REPL failed:", exc)
         raise SystemExit(1) from exc
