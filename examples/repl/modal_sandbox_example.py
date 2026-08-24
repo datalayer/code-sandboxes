@@ -7,7 +7,7 @@ import argparse
 import os
 from pathlib import Path
 
-from code_sandboxes import Sandbox, run_repl
+from code_sandboxes import Sandbox, provider_ingress_execution, run_repl
 
 
 def _has_modal_auth() -> bool:
@@ -22,6 +22,11 @@ def _parse_args() -> argparse.Namespace:
         "--gpu",
         default=os.environ.get("MODAL_GPU"),
         help="Optional GPU flavor (for example: T4, A10G, A100, H100).",
+    )
+    parser.add_argument(
+        "--direct",
+        action="store_true",
+        help="Execute directly through the Modal process adapter.",
     )
     return parser.parse_args()
 
@@ -129,6 +134,8 @@ def main() -> None:
             timeout=60,
             gpu=args.gpu,
             examples=_examples(args.gpu),
+        ) as provider, provider_ingress_execution(
+            provider, direct=args.direct
         ) as sandbox:
             run_repl(sandbox)
     except Exception as exc:

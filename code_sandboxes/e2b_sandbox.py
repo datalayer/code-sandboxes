@@ -35,10 +35,13 @@ from .exceptions import (
     SandboxNotStartedError,
     VariableNotFoundError,
 )
+from .jupyter_ingress import preparation_command, resolved_options, websocket_url
 from .models import (
     CodeError,
     Context,
     ExecutionResult,
+    JupyterServerEndpoint,
+    JupyterServerOptions,
     Logs,
     MIMEType,
     OutputHandler,
@@ -173,7 +176,40 @@ class E2BSandbox(Sandbox):
         #: namespace and never need a second.
         self._contexts: dict[str, Any] = {}
         self._execution_count = 0
+        self._jupyter_endpoint: JupyterServerEndpoint | None = None
         self._extra_kwargs = kwargs
+
+    def prepare_jupyter_server(
+        self, options: JupyterServerOptions | None = None
+    ) -> JupyterServerEndpoint:
+        """Prepare Jupyter and expose it through E2B's per-port ingress."""
+        if not self._started or self._sandbox is None:
+            raise SandboxNotStartedError()
+        if self._jupyter_endpoint is not None:
+            return self._jupyter_endpoint
+
+        value = resolved_options(options)
+        response = self._sandbox.commands.run(
+            preparation_command(value), timeout=value.install_timeout
+        )
+        if getattr(response, "exit_code", 0) not in (0, None):
+            raise SandboxConfigurationError(
+                "Could not install and start Jupyter Server in the E2B sandbox: "
+                + str(getattr(response, "stderr", "unknown error"))
+            )
+        url = f"https://{self._sandbox.get_host(value.port)}"
+        traffic_token = getattr(self._sandbox, "traffic_access_token", None)
+        headers = (
+            {"E2B-Traffic-Access-Token": traffic_token} if traffic_token else {}
+        )
+        self._jupyter_endpoint = JupyterServerEndpoint(
+            port=value.port,
+            http_url=url,
+            websocket_url=websocket_url(url),
+            headers=headers,
+            query={"token": value.token or ""},
+        )
+        return self._jupyter_endpoint
 
     @classmethod
     def list_environments(cls) -> list[SandboxEnvironment]:
@@ -314,6 +350,7 @@ class E2BSandbox(Sandbox):
                 logger.debug("Ignoring error while killing the E2B sandbox", exc_info=True)
             self._sandbox = None
         self._contexts.clear()
+        self._jupyter_endpoint = None
         self._started = False
         if self._info:
             self._info.status = SandboxStatus.STOPPED

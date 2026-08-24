@@ -37,10 +37,13 @@ from .exceptions import (
     SandboxNotStartedError,
     VariableNotFoundError,
 )
+from .jupyter_ingress import preparation_command, resolved_options, websocket_url
 from .models import (
     CodeError,
     Context,
     ExecutionResult,
+    JupyterServerEndpoint,
+    JupyterServerOptions,
     Logs,
     OutputHandler,
     OutputMessage,
@@ -301,7 +304,36 @@ class DaytonaSandbox(Sandbox):
         #: default namespace and never need a second.
         self._contexts: dict[str, Any] = {}
         self._execution_count = 0
+        self._jupyter_endpoint: JupyterServerEndpoint | None = None
         self._extra_kwargs = kwargs
+
+    def prepare_jupyter_server(
+        self, options: JupyterServerOptions | None = None
+    ) -> JupyterServerEndpoint:
+        """Prepare Jupyter and expose it through Daytona's preview ingress."""
+        if not self._started or self._sandbox is None:
+            raise SandboxNotStartedError()
+        if self._jupyter_endpoint is not None:
+            return self._jupyter_endpoint
+
+        value = resolved_options(options)
+        response = self._sandbox.process.exec(
+            preparation_command(value), timeout=max(1, math.ceil(value.install_timeout))
+        )
+        if getattr(response, "exit_code", 0) not in (0, None):
+            raise SandboxConfigurationError(
+                "Could not install and start Jupyter Server in the Daytona sandbox: "
+                + str(getattr(response, "result", "unknown error"))
+            )
+        preview = self._sandbox.get_preview_link(value.port)
+        self._jupyter_endpoint = JupyterServerEndpoint(
+            port=value.port,
+            http_url=preview.url.rstrip("/"),
+            websocket_url=websocket_url(preview.url.rstrip("/")),
+            headers={"X-Daytona-Preview-Token": preview.token},
+            query={"token": value.token or ""},
+        )
+        return self._jupyter_endpoint
 
     @classmethod
     def list_environments(cls) -> list[SandboxEnvironment]:
@@ -521,6 +553,7 @@ class DaytonaSandbox(Sandbox):
                 logger.debug("Ignoring error while stopping the Daytona sandbox", exc_info=True)
             self._sandbox = None
         self._daytona = None
+        self._jupyter_endpoint = None
         self._contexts.clear()
         self._started = False
         if self._info:

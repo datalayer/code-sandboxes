@@ -21,13 +21,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from rich.console import Console
 
 if TYPE_CHECKING:
     from .base import Sandbox
-    from .models import ExecutionResult
+    from .models import CodeError, ExecutionResult, OutputMessage, Result
 
 __all__ = [
     "EXIT_COMMANDS",
@@ -127,10 +127,75 @@ def show_and_run(
     console: Console | None = None,
     **kwargs: Any,
 ) -> ExecutionResult:
-    """Print the code, run it, print what came back, and return the result."""
+    """Print the code and each output as it arrives, then return the result."""
     show_code(code, console=console)
+    return _run_and_show(sandbox, code, console=console, labelled=True, **kwargs)
+
+
+def _chain(first: Callable | None, second: Callable) -> Callable:
+    """Preserve a caller's callback while adding the console renderer."""
+
+    def chained(value: Any) -> None:
+        if first is not None:
+            first(value)
+        second(value)
+
+    return chained
+
+
+def _run_and_show(
+    sandbox: Sandbox,
+    code: str,
+    *,
+    console: Console | None,
+    labelled: bool,
+    **kwargs: Any,
+) -> ExecutionResult:
+    """Run once, rendering callback output immediately without replaying it."""
+    out = _out(console)
+    emitted = False
+    stream_started: set[str] = set()
+
+    def stream(message: OutputMessage, name: str) -> None:
+        nonlocal emitted
+        emitted = True
+        if labelled and name not in stream_started:
+            out.print(f"<<< {name}:", style="yellow" if name == "stderr" else "cyan")
+            stream_started.add(name)
+        _write(
+            out,
+            message.line,
+            style="yellow" if name == "stderr" else None,
+            indent=labelled,
+        )
+
+    def value(result: Result) -> None:
+        nonlocal emitted
+        emitted = True
+        text = result.text
+        if text is not None:
+            _write(out, f"<<< result: {text}" if labelled else text)
+
+    def error(code_error: CodeError) -> None:
+        nonlocal emitted
+        emitted = True
+        text = f"{code_error.name}: {code_error.value}"
+        _write(out, f"<<< error: {text}" if labelled else text, style="red")
+
+    kwargs["on_stdout"] = _chain(kwargs.get("on_stdout"), lambda msg: stream(msg, "stdout"))
+    kwargs["on_stderr"] = _chain(kwargs.get("on_stderr"), lambda msg: stream(msg, "stderr"))
+    kwargs["on_result"] = _chain(kwargs.get("on_result"), value)
+    kwargs["on_error"] = _chain(kwargs.get("on_error"), error)
     result = sandbox.run_code(code, **kwargs)
-    show_result(result, console=console)
+
+    # Adapters without callback support still get the traditional complete
+    # rendering. Streaming adapters have already shown every event and must
+    # not replay the accumulated result a second time.
+    if not emitted:
+        show_result(result, console=out, labelled=labelled)
+    elif not result.execution_ok:
+        failed = result.execution_error or "the sandbox could not run this"
+        _write(out, f"<<< execution error: {failed}" if labelled else failed, style="red")
     return result
 
 
@@ -277,7 +342,7 @@ def run_repl(  # noqa: C901
             code = chosen
 
         try:
-            result = sandbox.run_code(code)
+            result = _run_and_show(sandbox, code, console=out, labelled=False)
         except KeyboardInterrupt:
             out.print("\nExecution interrupted.", style="yellow")
             continue
@@ -286,7 +351,5 @@ def run_repl(  # noqa: C901
             # reported, and the next line still gets to run.
             _write(out, f"Execution failed: {exc}", style="red")
             continue
-
-        show_result(result, console=out, labelled=False)
 
     out.print("REPL closed.", style="green")

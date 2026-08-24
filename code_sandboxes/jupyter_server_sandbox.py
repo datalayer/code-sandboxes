@@ -580,8 +580,74 @@ class JupyterServerSandbox(Sandbox):
             env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
             code = f"{env_code}\n{code}"
 
+        stdout_messages: list[OutputMessage] = []
+        stderr_messages: list[OutputMessage] = []
+        results: list[Result] = []
+        code_error: CodeError | None = None
+        exit_code: int | None = None
+
+        def consume(message: dict) -> None:
+            """Normalize one IOPub message while it is still arriving."""
+            nonlocal code_error, exit_code
+
+            header = message.get("header", {})
+            output_type = header.get("msg_type") or message.get("msg_type")
+            content = message.get("content", {})
+            current_time = time.time()
+
+            if output_type == "stream":
+                name = content.get("name")
+                text = content.get("text", "")
+                for line in text.splitlines():
+                    msg = OutputMessage(
+                        line=line,
+                        timestamp=current_time,
+                        error=name == "stderr",
+                    )
+                    if name == "stderr":
+                        stderr_messages.append(msg)
+                        if on_stderr:
+                            on_stderr(msg)
+                    else:
+                        stdout_messages.append(msg)
+                        if on_stdout:
+                            on_stdout(msg)
+            elif output_type in ("execute_result", "display_data"):
+                result = Result(
+                    data=content.get("data", {}),
+                    is_main_result=output_type == "execute_result",
+                    extra=content.get("metadata", {}),
+                )
+                results.append(result)
+                if on_result:
+                    on_result(result)
+            elif output_type == "error":
+                ename = content.get("ename", "Error")
+                evalue = content.get("evalue", "")
+                if ename == "SystemExit":
+                    try:
+                        exit_code = int(evalue) if evalue else 0
+                    except (ValueError, TypeError):
+                        exit_code = 1 if evalue else 0
+                else:
+                    code_error = CodeError(
+                        name=ename,
+                        value=evalue,
+                        traceback="\n".join(content.get("traceback", [])),
+                    )
+                    if on_error:
+                        on_error(code_error)
+            elif output_type == "clear_output" and not content.get("wait", False):
+                stdout_messages.clear()
+                stderr_messages.clear()
+                results.clear()
+
         try:
-            reply = self._client.execute(code, timeout=timeout or self.config.timeout)
+            reply = self._client.execute_interactive(
+                code,
+                timeout=timeout or self.config.timeout,
+                output_hook=consume,
+            )
         except Exception as e:
             # Infrastructure failure or interruption
             self._executing_event.clear()
@@ -603,56 +669,6 @@ class JupyterServerSandbox(Sandbox):
                 else None,
             )
 
-        stdout_messages: list[OutputMessage] = []
-        stderr_messages: list[OutputMessage] = []
-        results: list[Result] = []
-        code_error: CodeError | None = None
-        exit_code: int | None = None
-
-        current_time = time.time()
-        for output in reply.get("outputs", []):
-            output_type = output.get("output_type")
-            if output_type == "stream":
-                name = output.get("name")
-                text = output.get("text", "")
-                for line in text.splitlines():
-                    msg = OutputMessage(line=line, timestamp=current_time, error=name == "stderr")
-                    if name == "stderr":
-                        stderr_messages.append(msg)
-                        if on_stderr:
-                            on_stderr(msg)
-                    else:
-                        stdout_messages.append(msg)
-                        if on_stdout:
-                            on_stdout(msg)
-            elif output_type in ("execute_result", "display_data"):
-                result = Result(
-                    data=output.get("data", {}),
-                    is_main_result=output_type == "execute_result",
-                    extra=output.get("metadata", {}),
-                )
-                results.append(result)
-                if on_result:
-                    on_result(result)
-            elif output_type == "error":
-                ename = output.get("ename", "Error")
-                evalue = output.get("evalue", "")
-
-                # Handle SystemExit specially - extract exit code
-                if ename == "SystemExit":
-                    try:
-                        exit_code = int(evalue) if evalue else 0
-                    except (ValueError, TypeError):
-                        exit_code = 1 if evalue else 0
-                else:
-                    code_error = CodeError(
-                        name=ename,
-                        value=evalue,
-                        traceback="\n".join(output.get("traceback", [])),
-                    )
-                    if on_error:
-                        on_error(code_error)
-
         # Clear execution tracking
         self._executing_event.clear()
         was_interrupted = self._interrupt_requested.is_set()
@@ -664,7 +680,7 @@ class JupyterServerSandbox(Sandbox):
             execution_ok=True,
             code_error=code_error,
             exit_code=exit_code,
-            execution_count=reply.get("execution_count", 0),
+            execution_count=reply.get("content", {}).get("execution_count", 0),
             context_id=context.id if context else "default",
             started_at=started_at,
             completed_at=time.time(),

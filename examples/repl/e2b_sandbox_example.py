@@ -19,7 +19,7 @@ with its value.
 import argparse
 import os
 
-from code_sandboxes import Sandbox, run_repl
+from code_sandboxes import Sandbox, provider_ingress_execution, run_repl
 
 
 def _parse_args() -> argparse.Namespace:
@@ -43,6 +43,11 @@ def _parse_args() -> argparse.Namespace:
             "timeout runs out, whatever it is doing — including a prompt "
             "somebody is still typing at."
         ),
+    )
+    parser.add_argument(
+        "--direct",
+        action="store_true",
+        help="Execute directly through the E2B code-interpreter adapter.",
     )
     return parser.parse_args()
 
@@ -107,11 +112,13 @@ def main() -> None:
     try:
         with Sandbox.create(
             variant="e2b", timeout=60, template=args.template, examples=_examples()
+        ) as provider, provider_ingress_execution(
+            provider, direct=args.direct
         ) as sandbox:
-            print(f"Sandbox: {sandbox.sandbox_id}")
+            print(f"Sandbox: {provider.sandbox_id}")
             # A REPL is read at human speed, and the default life of a sandbox
             # is shorter than a session usually is.
-            sandbox.set_timeout(args.minutes * 60)
+            provider.set_timeout(args.minutes * 60)
             run_repl(sandbox)
     except Exception as exc:
         print("e2b REPL failed:", exc)

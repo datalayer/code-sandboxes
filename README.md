@@ -71,6 +71,34 @@ with Sandbox.create(
   print(sandbox.run_code("x + 2").text)  # 42
 ```
 
+### Jupyter over provider ingress
+
+Daytona, E2B, and Modal sandboxes can prepare a real Jupyter Server and
+return the provider HTTPS/WebSocket ingress needed to reach it:
+
+```python
+from code_sandboxes import JupyterServerOptions, Sandbox
+
+sandbox = Sandbox.create(variant="daytona")  # also: e2b, modal
+sandbox.start()
+endpoint = sandbox.prepare_jupyter_server(
+    JupyterServerOptions(port=8888, install_if_missing=True)
+)
+```
+
+Preparation first checks for `jupyter-server` and `ipykernel`, installs them
+only when absent, launches Jupyter in the background, and waits for its port
+to accept connections. Calling the method again on the same sandbox returns
+the cached endpoint. Provider-ingress credentials are in `endpoint.headers`;
+the separate Jupyter token is in `endpoint.query`. Do not send either to the
+browser: a server-side gateway should apply them while proxying HTTP and
+WebSocket traffic.
+
+`install_if_missing=False` makes a prebuilt template or snapshot mandatory.
+Templates and snapshots are the intended cold-start optimization; the
+conditional installation is the preliminary path for ordinary provider base
+images.
+
 ## Kaggle Sandbox
 
 Kaggle supports both batch execution and interactive connections through the

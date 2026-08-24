@@ -17,7 +17,7 @@ line that is an expression answers with its value.
 import argparse
 import os
 
-from code_sandboxes import Sandbox, run_repl
+from code_sandboxes import Sandbox, provider_ingress_execution, run_repl
 
 
 def _has_daytona_auth() -> bool:
@@ -53,6 +53,11 @@ def _parse_args() -> argparse.Namespace:
             "Leave the sandbox in the organization when the REPL closes, "
             "stopped rather than deleted, so it can be started again."
         ),
+    )
+    parser.add_argument(
+        "--direct",
+        action="store_true",
+        help="Execute directly through the Daytona SDK adapter.",
     )
     return parser.parse_args()
 
@@ -167,8 +172,10 @@ def main() -> None:
             spot=args.spot,
             delete_on_stop=not args.keep,
             examples=_examples(args.gpu),
+        ) as provider, provider_ingress_execution(
+            provider, direct=args.direct
         ) as sandbox:
-            print(f"Sandbox: {sandbox.sandbox_id}")
+            print(f"Sandbox: {provider.sandbox_id}")
             run_repl(sandbox)
             if args.keep:
                 print(

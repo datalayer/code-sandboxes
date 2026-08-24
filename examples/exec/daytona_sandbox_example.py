@@ -26,7 +26,7 @@ image rather than from the default snapshot, and takes longer to come up.
 import argparse
 import os
 
-from code_sandboxes import Sandbox, show_and_run
+from code_sandboxes import Sandbox, provider_ingress_execution, show_and_run
 
 
 def _has_daytona_auth() -> bool:
@@ -55,6 +55,11 @@ def _parse_args() -> argparse.Namespace:
             "quota, and reclaimed without warning. Needs --gpu."
         ),
     )
+    parser.add_argument(
+        "--direct",
+        action="store_true",
+        help="Execute directly through the Daytona SDK adapter.",
+    )
     return parser.parse_args()
 
 
@@ -78,7 +83,7 @@ if smi:
 """
 
 
-def _verify_gpu(sandbox, gpu: str, *, spot: bool) -> None:
+def _verify_gpu(sandbox, provider, gpu: str, *, spot: bool) -> None:
     """Prove the GPU is there, and say whether spot capacity still holds it."""
     probe = show_and_run(sandbox, _gpu_probe_code()).stdout.strip()
     # A GPU run must PROVE the GPU: the driver present, and at least one
@@ -91,7 +96,7 @@ def _verify_gpu(sandbox, gpu: str, *, spot: bool) -> None:
     if spot:
         # No warning is given before spot capacity is taken back, so the only
         # way to know is to ask.
-        print("spot: reclaimed at", sandbox.preempted_at() or "not yet")
+        print("spot: reclaimed at", provider.preempted_at() or "not yet")
 
 
 def main() -> None:
@@ -112,8 +117,12 @@ def main() -> None:
         print("Launching daytona sandbox without GPU.")
 
     try:
-        with Sandbox.create(variant="daytona", timeout=60, gpu=args.gpu, spot=args.spot) as sandbox:
-            print(f"Sandbox: {sandbox.sandbox_id}")
+        with Sandbox.create(
+            variant="daytona", timeout=60, gpu=args.gpu, spot=args.spot
+        ) as provider, provider_ingress_execution(
+            provider, direct=args.direct
+        ) as sandbox:
+            print(f"Sandbox: {provider.sandbox_id}")
 
             # What tells this variant apart from a per-snippet runner: the
             # interpreter holds one namespace, so the second snippet sees what
@@ -127,13 +136,19 @@ def main() -> None:
                 )
             print("state verified: the namespace is shared between snippets.")
 
+            print("-- streaming: one number should appear every second --")
+            show_and_run(
+                sandbox,
+                "import time\nfor i in range(1, 10):\n    print(i)\n    time.sleep(1)",
+            )
+
             # Bytes take the filesystem of the sandbox, not a program that
             # decodes them.
-            sandbox.files.write_bytes("/tmp/hello.bin", b"from daytona")
-            print("file round trip:", sandbox.files.read_bytes("/tmp/hello.bin"))
+            provider.files.write_bytes("/tmp/hello.bin", b"from daytona")
+            print("file round trip:", provider.files.read_bytes("/tmp/hello.bin"))
 
             if args.gpu:
-                _verify_gpu(sandbox, args.gpu, spot=args.spot)
+                _verify_gpu(sandbox, provider, args.gpu, spot=args.spot)
 
             # The error path, demonstrated ON PURPOSE: the run must not die,
             # the failure must come back as a `code_error` on the result. Said

@@ -19,6 +19,8 @@ from .models import (
     CodeError,
     Context,
     ExecutionResult,
+    JupyterServerEndpoint,
+    JupyterServerOptions,
     OutputHandler,
     OutputMessage,
     Result,
@@ -137,6 +139,20 @@ class Sandbox(ABC):
     def kernel_client(self) -> ISandboxClient | None:
         """Expose an optional kernel client interface for kernel-backed variants."""
         return None
+
+    def prepare_jupyter_server(
+        self, options: JupyterServerOptions | None = None
+    ) -> JupyterServerEndpoint:
+        """Install, start and expose a real Jupyter Server in this sandbox.
+
+        Cloud-container providers override this method.  It is intentionally
+        separate from :meth:`start`: callers using the lightweight code API
+        should not pay the Jupyter installation and startup cost.
+        """
+        del options
+        raise NotImplementedError(
+            f"{type(self).__name__} does not expose Jupyter over provider ingress"
+        )
 
     def interrupt(self) -> bool:
         """Request interruption of the currently running code.

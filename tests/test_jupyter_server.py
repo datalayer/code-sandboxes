@@ -6,6 +6,7 @@
 
 import os
 import sys
+import threading
 import time
 import types
 import uuid
@@ -175,6 +176,43 @@ class TestJupyterServerSandbox:
             assert "8" in execution.results[0].data.get("text/plain", "")
         finally:
             sandbox.stop()
+
+    def test_iopub_outputs_are_forwarded_while_execution_is_running(self):
+        events: list[str] = []
+
+        class StreamingClient:
+            def execute_interactive(self, code, timeout, output_hook):
+                assert code == "print('first'); print('second')"
+                output_hook(
+                    {
+                        "header": {"msg_type": "stream"},
+                        "content": {"name": "stdout", "text": "first\n"},
+                    }
+                )
+                assert events == ["first"]
+                output_hook(
+                    {
+                        "header": {"msg_type": "stream"},
+                        "content": {"name": "stdout", "text": "second\n"},
+                    }
+                )
+                return {"content": {"status": "ok", "execution_count": 7}}
+
+        sandbox = JupyterServerSandbox.__new__(JupyterServerSandbox)
+        sandbox._started = True
+        sandbox._client = StreamingClient()
+        sandbox._interrupt_requested = threading.Event()
+        sandbox._executing_event = threading.Event()
+        sandbox.config = SandboxConfig(timeout=60)
+
+        result = sandbox.run_code(
+            "print('first'); print('second')",
+            on_stdout=lambda message: events.append(message.line),
+        )
+
+        assert events == ["first", "second"]
+        assert result.stdout == "first\nsecond"
+        assert result.execution_count == 7
 
 
 def _kernel_client_stub(captured: dict):

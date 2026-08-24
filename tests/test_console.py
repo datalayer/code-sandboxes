@@ -168,6 +168,25 @@ def test_show_and_run_prints_the_code_then_the_answer():
     assert "    1 + 1" in rendered
 
 
+def test_show_and_run_prints_callback_output_before_execution_returns():
+    console, _ = _console()
+
+    class StreamingSandbox(_FakeSandbox):
+        def run_code(self, code: str, **kwargs) -> ExecutionResult:
+            kwargs["on_stdout"](OutputMessage(line="first"))
+            # The first event is visible while execution is still in progress.
+            assert "first" in console.export_text(clear=False)
+            kwargs["on_stdout"](OutputMessage(line="second"))
+            return _result(stdout="first\nsecond")
+
+    result = show_and_run(StreamingSandbox(), "stream()", console=console)
+
+    assert result.stdout == "first\nsecond"
+    rendered = _rendered(console)
+    assert rendered.count("    first") == 1
+    assert rendered.count("    second") == 1
+
+
 # --- The prompt -----------------------------------------------------------
 
 

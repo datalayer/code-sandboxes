@@ -125,6 +125,8 @@ from .models import (
     Context,
     ExecutionResult,
     GPUType,
+    JupyterServerEndpoint,
+    JupyterServerOptions,
     Logs,
     MIMEType,
     OutputHandler,
@@ -148,6 +150,7 @@ from .providers import (
     available_providers,
     get_provider,
 )
+from .provider_ingress import provider_ingress_execution
 
 #: Everything this package exports, in one sorted list — the groups it
 #: used to be split into stopped matching what they sat above.
@@ -178,6 +181,8 @@ __all__ = [
     "GoogleColabSandbox",
     "ISandboxClient",
     "JupyterServerSandbox",
+    "JupyterServerEndpoint",
+    "JupyterServerOptions",
     "KaggleExecutionResult",
     "KaggleKernelClient",
     "KaggleKernelExecutor",
@@ -226,6 +231,7 @@ __all__ = [
     "normalize_variant",
     "parse_google_colab_channels_url",
     "parse_kaggle_channels_url",
+    "provider_ingress_execution",
     "repl_prompt",
     "run_repl",
     "show_and_run",

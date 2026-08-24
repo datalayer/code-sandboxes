@@ -618,3 +618,32 @@ class TunnelInfo(BaseModel):
 
     def __repr__(self) -> str:
         return f"TunnelInfo(port={self.port}, url={self.url!r})"
+
+
+class JupyterServerEndpoint(BaseModel):
+    """A provider ingress endpoint for a Jupyter Server in a sandbox.
+
+    ``headers`` authenticate the provider ingress and ``query`` authenticates
+    Jupyter itself.  They are deliberately separate: Modal, for example,
+    consumes the HTTP Authorization header before the request reaches
+    Jupyter.  The values are secrets and are therefore omitted from reprs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    port: int
+    http_url: str
+    websocket_url: str
+    headers: dict[str, str] = Field(default_factory=dict, repr=False)
+    query: dict[str, str] = Field(default_factory=dict, repr=False)
+
+
+class JupyterServerOptions(BaseModel):
+    """Options for preparing a real Jupyter Server inside a sandbox."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    port: int = 8888
+    token: Optional[str] = Field(default=None, repr=False)
+    install_if_missing: bool = True
+    install_timeout: float = 180.0

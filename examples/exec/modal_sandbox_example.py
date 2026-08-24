@@ -19,7 +19,7 @@ import argparse
 import os
 from pathlib import Path
 
-from code_sandboxes import Sandbox, show_and_run
+from code_sandboxes import Sandbox, provider_ingress_execution, show_and_run
 
 
 def _has_modal_auth() -> bool:
@@ -34,6 +34,11 @@ def _parse_args() -> argparse.Namespace:
         "--gpu",
         default=os.environ.get("MODAL_GPU"),
         help="Optional GPU flavor (for example: T4, A10G, A100, H100).",
+    )
+    parser.add_argument(
+        "--direct",
+        action="store_true",
+        help="Execute directly through the Modal process adapter.",
     )
     return parser.parse_args()
 
@@ -87,8 +92,16 @@ def main() -> None:
             timeout=60,
             gpu=gpu,
             pip_packages=["numpy"],
+        ) as provider, provider_ingress_execution(
+            provider, direct=args.direct
         ) as sandbox:
             show_and_run(sandbox, "import numpy as np; print(int(np.arange(5).sum()))")
+
+            print("-- streaming: one number should appear every second --")
+            show_and_run(
+                sandbox,
+                "import time\nfor i in range(1, 10):\n    print(i)\n    time.sleep(1)",
+            )
 
             if gpu:
                 gpu_result = show_and_run(sandbox, _gpu_probe_code())
