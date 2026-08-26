@@ -32,13 +32,16 @@ def test_every_service_the_sdk_knows_about_points_at_the_one_origin():
     stale when `mcp_server_url` was renamed, and every execution died on the
     unexpected keyword — a failure with no visible connection to the rename.
     """
-    from datalayer_core.utils.urls import DatalayerURLs
+    # The SDK arrives with the `datalayer` extra, which an install without it
+    # does not have. With no signature to read there is nothing here to check,
+    # so this is a skip and not a failure.
+    sdk_urls = pytest.importorskip("datalayer_core.utils.urls")
 
     urls = _urls_for_run("https://prod1.datalayer.run/")
 
     services = [
         name
-        for name in inspect.signature(DatalayerURLs.from_environment).parameters
+        for name in inspect.signature(sdk_urls.DatalayerURLs.from_environment).parameters
         if name.endswith("_url")
     ]
     assert services, "the SDK declares no service URLs; this test is testing nothing"
@@ -55,6 +58,16 @@ def test_a_backend_that_cannot_be_imported_says_what_actually_failed(monkeypatch
     already there.
     """
     import builtins
+    import sys
+    import types
+
+    # `start()` reaches for the SDK before it reaches for the backend, so in an
+    # install without the `datalayer` extra the SDK is what fails first and the
+    # failure under test never happens. Stand in for the SDK: its absence is a
+    # different fault with its own message, and not the one pinned here.
+    for name in ("datalayer_core", "datalayer_core.utils", "datalayer_core.utils.urls"):
+        if name not in sys.modules:
+            monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
 
     real_import = builtins.__import__
 
