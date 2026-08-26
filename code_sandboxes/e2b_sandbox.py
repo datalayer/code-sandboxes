@@ -144,7 +144,7 @@ class E2BSandbox(Sandbox):
         config: Optional sandbox configuration.
         api_key: E2B API key. Read from ``E2B_API_KEY`` when omitted.
         domain: E2B domain to talk to, for a self-hosted cluster. Read from
-            ``E2B_DOMAIN`` when omitted, which itself defaults to ``e2b.dev``.
+            ``E2B_DOMAIN`` when omitted, which itself defaults to ``e2b.app``.
         template: The E2B template to create from — a base image with its
             packages already installed. :data:`DEFAULT_TEMPLATE` when omitted.
         allow_internet_access: Whether the sandbox may reach the network at

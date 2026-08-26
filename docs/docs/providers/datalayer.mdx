@@ -9,14 +9,19 @@ Cloud-based execution with full isolation, GPU support, snapshots, and persisten
 
 - **Requirements:** `code-sandboxes[datalayer]` (installs `agent_runtimes`).
 - **Parameters:** `token` (defaults to `DATALAYER_API_KEY`), `run_url`,
-  `snapshot_name`, plus creation options like `environment`, `gpu`, `cpu`, `memory`.
+  `snapshot_name`, `environment`. `gpu=` selects the `python-gpu-env`
+  environment when the named environment is not already a GPU one — the card
+  name itself is not sent, and neither are `cpu` and `memory`: the environment
+  is what decides the machine.
 
 ## How To Obtain Datalayer Credentials
 
 1. Create an account at [datalayer.ai](https://datalayer.ai).
 2. Generate an API token from your account settings (**IAM → Tokens / API Keys**).
-3. Export `DATALAYER_API_KEY` (or pass it as the `token` parameter). Set
-   `DATALAYER_RUN_URL` only for a self-hosted / custom deployment.
+3. Export `DATALAYER_API_KEY` (or pass it as the `token` parameter). For a
+   self-hosted or custom deployment, pass `run_url=` to `Sandbox.create()`:
+   `DATALAYER_RUNTIMES_URL` is read only when listing the environments a
+   provider ships, never when creating a sandbox.
 
 ## Usage
 
@@ -28,8 +33,7 @@ os.environ["DATALAYER_API_KEY"] = "your-datalayer-token"
 
 with Sandbox.create(
     variant="datalayer",
-    gpu="A100",
-    environment="python-gpu-env",
+    environment="python-gpu-env",  # the environment is what carries the GPU
 ) as sandbox:
     sandbox.run_code("import torch; print(torch.cuda.is_available())")
 ```

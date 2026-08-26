@@ -1,20 +1,20 @@
 ---
-title: Jupyter over Provider Ingress
+title: Provider Ingress
 sidebar_position: 2
 ---
 
-# Jupyter over provider ingress
+# Jupyter over Provider Ingress
 
 Daytona, E2B, and Modal support two execution modes. New applications should
-use **Jupyter over provider ingress**, which is the default.
+use **Jupyter over Provider Ingress**, which is the default.
 
-## Provider-ingress mode (default)
+## Provider Ingress Mode (Default)
 
 The sandbox is allocated first. `code-sandboxes` then checks whether
-`jupyter-server` and `ipykernel` are present, installs only what is missing,
-starts a real Jupyter Server inside the sandbox, and waits for its port to be
-ready. A Jupyter kernel client connects through the provider HTTPS/WebSocket
-ingress.
+`jupyter-server` and `ipykernel` are both importable, installs the pair if
+that one check fails, starts a real Jupyter Server inside the sandbox, and
+waits for its port to be ready. A Jupyter kernel client connects through the
+provider HTTPS/WebSocket ingress.
 
 ```text
 client
@@ -40,7 +40,7 @@ The preparation step is idempotent for a sandbox. Prebuilt provider templates
 or snapshots can include Jupyter later to remove installation time; ordinary
 base images use the conditional preliminary installation today.
 
-## Direct provider mode
+## Direct Provider Mode
 
 The former mode calls the provider execution API directly—Daytona's code
 interpreter, E2B's code-interpreter adapter, or Modal's persistent process
@@ -56,7 +56,7 @@ with Sandbox.create(variant="daytona") as provider:
         result = sandbox.run_code("print('direct provider adapter')")
 ```
 
-## REPL and execution examples
+## REPL and Execution Examples
 
 The Daytona, E2B, and Modal examples use provider-ingress mode by default:
 

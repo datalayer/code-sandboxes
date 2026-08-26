@@ -165,8 +165,9 @@ Useful `execute(...)` options:
 - `dataset_sources`, `competition_sources`, `kernel_sources`, `model_sources`
 - `wait=False` to submit now and poll later via `status(...)` and `output(...)`
 
-Each execution runs as a batch job and reaches terminal states like
-`complete`, `error`, or `cancel_acknowledged`.
+Each execution runs as a batch job and reaches a terminal status —
+`COMPLETE`, `ERROR`, or `CANCEL_ACKNOWLEDGED`, upper-cased whatever the API
+returned.
 
 You can also submit as a script with `kernel_type="script"` when needed.
 

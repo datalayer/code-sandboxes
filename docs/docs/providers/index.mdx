@@ -19,8 +19,9 @@ Canonical variant names are `cloudflare`, `coreweave`, `datalayer`,
 `daytona`, `docker`, `e2b`, `eval`, `google-colab`, `jupyter-server`, `kaggle`,
 `modal`, and `monty`. Older `local-*` names are no longer supported.
 
-A name is read in whatever spelling it arrives in: `google-colab`,
-`google_colab` and `Google Colab` all name the same variant.
+A name is read in whatever case and separator it arrives in: `google-colab`,
+`google_colab` and `GOOGLE_COLAB` all name the same variant. A space does not
+work — `normalize_variant` folds underscores, not whitespace.
 
 ```python
 from code_sandboxes import Sandbox
@@ -168,7 +169,7 @@ with Sandbox.create() as sandbox:
     print(result.text)  # 2
 ```
 
-What a variant cannot do is hold a namespace open when its backend gives it
+What a variant cannot do is hold a namespace open when its provider gives it
 nothing to hold one with. [`cloudflare`](./cloudflare) runs each snippet in a
 process of its own for that reason, and its page says what to do instead;
 [`coreweave`](./coreweave) keeps a session process and falls back to the same
@@ -180,7 +181,7 @@ arrangement when that process cannot be started.
 from code_sandboxes import OutputMessage
 
 def on_output(msg: OutputMessage):
-    print(f"[{msg.stream}] {msg.line}")
+    print(f"[{'stderr' if msg.error else 'stdout'}] {msg.line}")
 
 with Sandbox.create() as sandbox:
     result = sandbox.run_code(
@@ -237,10 +238,10 @@ with Sandbox.create() as sandbox:
 ### Reconnecting to a Sandbox
 
 ```python
-# Get sandbox ID for later
+# Get sandbox ID for later — it exists only once the sandbox is started
 sandbox = Sandbox.create(variant="datalayer")
-sandbox_id = sandbox.sandbox_id
 sandbox.start()
+sandbox_id = sandbox.sandbox_id
 
 # Later: reconnect
 sandbox = Sandbox.from_id(sandbox_id)
@@ -250,26 +251,32 @@ result = sandbox.run_code("print('Still running!')")
 ### Listing Sandboxes
 
 ```python
-# List all sandboxes
-sandboxes = Sandbox.list(variant="datalayer")
-for info in sandboxes:
-    print(f"{info.sandbox_id}: {info.status}")
+# List running Datalayer sandboxes — Sandbox.list() answers for that variant
+for sandbox in Sandbox.list():
+    print(f"{sandbox.sandbox_id}: {sandbox.info.status}")
+
+# Any other variant answers through its manager, with SandboxInfo records
+from code_sandboxes import get_manager
+
+for info in get_manager("modal").list():
+    print(f"{info.id}: {info.status}")
 ```
 
 ### Termination
 
 ```python
-sandbox = Sandbox.create()
+sandbox = Sandbox.create(variant="datalayer")
 sandbox.start()
 
-# Graceful shutdown
-sandbox.terminate()
+# Every variant stops the same way
+sandbox.stop()
 
-# Force kill
+# terminate() and kill() are datalayer aliases for stop()
+sandbox.terminate()
 sandbox.kill()
 
 # Or use context manager for automatic cleanup
-with Sandbox.create() as sandbox:
+with Sandbox.create(variant="eval") as sandbox:
     sandbox.run_code("print('auto cleanup')")
 ```
 

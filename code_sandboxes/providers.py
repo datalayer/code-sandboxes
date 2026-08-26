@@ -173,13 +173,13 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
         ),
         requirements=(
             ProviderRequirement(
-                env_vars=("DATALAYER_TOKEN",),
-                hint="Sign in with `datalayer login`, or set DATALAYER_TOKEN.",
+                env_vars=("DATALAYER_API_KEY",),
+                hint="Sign in with `datalayer login`, or set DATALAYER_API_KEY.",
             ),
         ),
         environment_secrets=(
-            ("token", "DATALAYER_TOKEN"),
-            ("run_url", "DATALAYER_RUN_URL"),
+            ("token", "DATALAYER_API_KEY"),
+            ("run_url", "DATALAYER_RUNTIMES_URL"),
         ),
         list_environments=_environments_of(SandboxVariant.DATALAYER),
     ),

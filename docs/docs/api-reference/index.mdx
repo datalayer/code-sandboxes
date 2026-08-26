@@ -27,9 +27,9 @@ def create(
     env: dict[str, str] | None = None,
     tags: dict[str, str] | None = None,
     name: str | None = None,
-    snapshot_name: str | None = None,
     network_policy: str | None = None,
     allowed_hosts: list[str] | None = None,
+    examples: list[tuple[str, str]] | None = None,
     config: SandboxConfig | None = None,
     **kwargs,
 ) -> Sandbox
@@ -48,11 +48,11 @@ def create(
 | `env` | `dict` | Environment variables |
 | `tags` | `dict` | Metadata tags |
 | `name` | `str` | Sandbox name |
-| `snapshot_name` | `str` | Snapshot to restore from |
 | `network_policy` | `str` | Network access policy: `"inherit"`, `"none"`, `"allowlist"`, `"all"` |
 | `allowed_hosts` | `list[str]` | Hosts reachable when the policy is `"allowlist"` |
+| `examples` | `list[tuple[str, str]]` | `(title, code)` pairs the REPL lists under `:examples` |
 | `config` | `SandboxConfig` | Full configuration object |
-| `**kwargs` | `dict` | Variant-specific arguments handed to the sandbox constructor — `template=` (e2b), `container_image=` (coreweave), `api_url=` (cloudflare), and the rest documented on each [variant's page](/providers) |
+| `**kwargs` | `dict` | Variant-specific arguments handed to the sandbox constructor — `template=` (e2b), `container_image=` (coreweave), `api_url=` (cloudflare), `snapshot_name=` (datalayer), and the rest documented on each [variant's page](/providers) |
 
 #### `Sandbox.from_id()`
 
@@ -60,17 +60,24 @@ Reconnects to an existing sandbox.
 
 ```python
 @classmethod
-def from_id(sandbox_id: str, variant: str = "datalayer") -> Sandbox
+def from_id(sandbox_id: str, **kwargs) -> Sandbox
 ```
+
+Datalayer only — it reconnects to a Datalayer runtime whatever else is
+running. `**kwargs` are that variant's: `token=`, `run_url=`.
 
 #### `Sandbox.list()`
 
-Lists all sandboxes.
+Lists running sandboxes, as sandbox objects.
 
 ```python
 @classmethod
-def list(variant: str = "datalayer") -> list[SandboxInfo]
+def list(tags: dict[str, str] | None = None, **kwargs) -> Iterator[Sandbox]
 ```
+
+Datalayer only. For any other variant, ask its manager:
+`get_manager(variant).list()`, which answers with `list[SandboxInfo]` — see
+[the CLI page](/cli#creating-and-managing-sandboxes).
 
 #### `Sandbox.list_environments()`
 
@@ -157,35 +164,31 @@ Stops the sandbox gracefully.
 def stop() -> None
 ```
 
-#### `terminate()`
+#### `terminate()` / `kill()`
 
-Terminates the sandbox.
+Datalayer only; both are aliases for `stop()`. Every other variant is stopped
+with `stop()` — or by leaving its `with` block.
 
 ```python
 def terminate() -> None
-```
-
-#### `kill()`
-
-Force kills the sandbox.
-
-```python
 def kill() -> None
 ```
 
 #### `set_timeout()`
 
-Updates the sandbox timeout.
+Extends the life of a running sandbox. Only two variants offer it, and the
+argument is not spelled the same in both.
 
 ```python
-def set_timeout(timeout: float) -> None
+def set_timeout(timeout_seconds: float) -> None  # datalayer
+def set_timeout(seconds: float) -> None          # e2b
 ```
 
 ### Properties
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `sandbox_id` | `str` | Unique sandbox identifier |
+| `sandbox_id` | `str \| None` | Unique sandbox identifier — `None` until `start()` has run |
 | `files` | `SandboxFilesystem` | Filesystem interface |
 | `commands` | `SandboxCommands` | Command execution interface |
 | `tags` | `dict[str, str]` | Metadata tags |
@@ -205,8 +208,8 @@ It normalizes one-shot outcomes and streaming events across all variants.
 def execute_code(
     code: str,
     language: str = "python",
-    envs: dict[str, str] | None = None,
     timeout: float | None = None,
+    envs: dict[str, str] | None = None,
 ) -> CodeExecutionOutcome
 ```
 
@@ -216,8 +219,8 @@ def execute_code(
 async def execute_code_async(
     code: str,
     language: str = "python",
-    envs: dict[str, str] | None = None,
     timeout: float | None = None,
+    envs: dict[str, str] | None = None,
 ) -> CodeExecutionOutcome
 ```
 
@@ -227,8 +230,8 @@ async def execute_code_async(
 def execute_code_streaming(
     code: str,
     language: str = "python",
-    envs: dict[str, str] | None = None,
     timeout: float | None = None,
+    envs: dict[str, str] | None = None,
 ) -> Iterator[OutputMessage | Result | CodeError]
 ```
 
@@ -238,8 +241,8 @@ def execute_code_streaming(
 async def execute_code_streaming_async(
     code: str,
     language: str = "python",
-    envs: dict[str, str] | None = None,
     timeout: float | None = None,
+    envs: dict[str, str] | None = None,
 ) -> AsyncIterator[OutputMessage | Result | CodeError]
 ```
 
@@ -344,15 +347,23 @@ Reads file contents as bytes.
 #### `write()`
 
 ```python
-def write(path: str, content: str | bytes) -> None
+def write(path: str, content: str, make_dirs: bool = True) -> None
 ```
 
-Writes content to a file.
+Writes text to a file, creating parent directories unless told not to.
+
+#### `write_bytes()`
+
+```python
+def write_bytes(path: str, content: bytes, make_dirs: bool = True) -> None
+```
+
+Writes bytes to a file. `write()` handles text only.
 
 #### `list()`
 
 ```python
-def list(path: str) -> list[FileInfo]
+def list(path: str = "/") -> list[FileInfo]
 ```
 
 Lists directory contents.
@@ -373,6 +384,31 @@ def rm(path: str, recursive: bool = False) -> None
 
 Removes a file or directory.
 
+#### `exists()` / `is_file()` / `is_dir()`
+
+```python
+def exists(path: str) -> bool
+def is_file(path: str) -> bool
+def is_dir(path: str) -> bool
+```
+
+Asks about a path without reading it.
+
+#### `copy()` / `move()`
+
+```python
+def copy(src: str, dst: str) -> None
+def move(src: str, dst: str) -> None
+```
+
+#### `get_info()`
+
+```python
+def get_info(path: str) -> FileInfo
+```
+
+One entry's metadata, without listing its directory.
+
 #### `upload()`
 
 ```python
@@ -389,6 +425,27 @@ def download(remote_path: str, local_path: str) -> None
 
 Downloads a file from the sandbox.
 
+### FileInfo
+
+What `list()` and `get_info()` answer with.
+
+```python
+@dataclass
+class FileInfo:
+    name: str
+    path: str
+    type: FileType = FileType.FILE   # FILE, DIRECTORY, SYMLINK
+    size: int = 0                    # bytes, for files
+    modified: float = 0.0            # Unix timestamp
+    permissions: str = ""
+
+    # Convenience properties
+    @property
+    def is_file(self) -> bool: ...
+    @property
+    def is_directory(self) -> bool: ...
+```
+
 ---
 
 ## SandboxCommands
@@ -402,9 +459,10 @@ Command execution interface.
 ```python
 def run(
     command: str,
-    timeout: float | None = None,
     cwd: str | None = None,
     env: dict[str, str] | None = None,
+    timeout: float | None = None,
+    shell: bool = True,
 ) -> CommandResult
 ```
 
@@ -425,6 +483,46 @@ def spawn(command: str, **kwargs) -> ProcessHandle
 ```
 
 Starts a background process.
+
+### CommandResult
+
+```python
+@dataclass
+class CommandResult:
+    exit_code: int = 0
+    stdout: str = ""
+    stderr: str = ""
+    duration: float = 0.0
+
+    @property
+    def success(self) -> bool: ...  # exit_code == 0
+```
+
+### ProcessHandle
+
+A process still running. `stdout` and `stderr` are iterators that yield as
+output arrives.
+
+```python
+@dataclass
+class ProcessHandle:
+    command: str
+    pid: int | None = None
+
+    @property
+    def stdout(self) -> Iterator[str]: ...
+    @property
+    def stderr(self) -> Iterator[str]: ...
+    @property
+    def returncode(self) -> int | None: ...
+
+    def read_stdout(self) -> str: ...
+    def read_stderr(self) -> str: ...
+    def wait(self, timeout: float | None = None) -> int: ...
+    def poll(self) -> int | None: ...
+    def terminate(self) -> None: ...
+    def kill(self) -> None: ...
+```
 
 ---
 
@@ -514,7 +612,7 @@ Error information when Python code raises an exception.
 class CodeError(BaseModel):
     name: str          # Error class name (e.g., "ValueError")
     value: str         # Error message
-    traceback: str     # Full traceback
+    traceback: str = ""  # Full traceback
 ```
 
 ### SandboxEnvironment
@@ -528,6 +626,11 @@ class SandboxEnvironment(BaseModel):
     visibility: str = "local"
     burning_rate: float = 0.0
     metadata: dict[str, Any] | None = None
+    cpu: str | None = None
+    memory: str | None = None
+    gpu: str | None = None
+    gpu_count: int | None = None
+    gpu_memory: int | None = None
 ```
 
 ### Result
@@ -549,6 +652,12 @@ class Result(BaseModel):
     def json(self) -> Any: ...         # application/json
     @property
     def png(self) -> str | None: ...   # image/png (base64)
+    @property
+    def jpeg(self) -> str | None: ...  # image/jpeg (base64)
+    @property
+    def svg(self) -> str | None: ...   # image/svg+xml
+    @property
+    def markdown(self) -> str | None: ...  # text/markdown
 ```
 
 ### OutputMessage
@@ -599,6 +708,7 @@ class SandboxConfig(BaseModel):
     allowed_hosts: list[str]
     idle_timeout: float | None = None
     max_lifetime: float = 86400.0  # 24 hours
+    examples: list[tuple[str, str]]  # (title, code) pairs for the REPL
 ```
 
 ### SandboxInfo
@@ -619,6 +729,48 @@ class SandboxInfo(BaseModel):
     def remaining_time(self) -> float | None: ...  # Seconds until termination
 ```
 
+### SnapshotInfo
+
+What `create_snapshot()` and `list_snapshots()` answer with — datalayer only.
+
+```python
+class SnapshotInfo(BaseModel):
+    id: str
+    name: str
+    sandbox_id: str
+    created_at: float = 0.0
+    size: int = 0
+    description: str = ""
+```
+
+### JupyterServerOptions
+
+What `prepare_jupyter_server()` is asked for — see
+[Jupyter over Provider Ingress](/provider-ingress).
+
+```python
+class JupyterServerOptions(BaseModel):
+    port: int = 8888
+    token: str | None = None          # generated when omitted
+    install_if_missing: bool = True
+    install_timeout: float = 180.0
+```
+
+### JupyterServerEndpoint
+
+What it answers with. `headers` authenticate the provider ingress and `query`
+authenticates Jupyter itself; both are secrets, and both are kept out of the
+repr.
+
+```python
+class JupyterServerEndpoint(BaseModel):
+    port: int
+    http_url: str
+    websocket_url: str
+    headers: dict[str, str]
+    query: dict[str, str]
+```
+
 ### ResourceConfig
 
 ```python
@@ -632,18 +784,56 @@ class ResourceConfig(BaseModel):
 
 ---
 
+## Management API
+
+The verbs the CLI runs on, from Python. A manager exists per variant, and
+states what it can do rather than failing late.
+
+```python
+from code_sandboxes import get_manager, manageable_variants
+
+manageable_variants()            # the variants a manager exists for
+manager = get_manager("modal")
+manager.capabilities             # frozenset of the verbs this variant answers
+manager.list()                   # list[SandboxInfo]
+manager.get(sandbox_id)          # SandboxInfo | None
+manager.create(**kwargs)         # SandboxInfo
+manager.update(sandbox_id, **changes)
+manager.delete(sandbox_id)       # bool
+```
+
+A verb outside `capabilities` raises `SandboxManagementError`. See
+[the CLI page](/cli#creating-and-managing-sandboxes) for what each variant
+answers.
+
+## Provider Registry
+
+What a variant needs before it can run anything — credentials, and the extra
+that installs it. It reports what is present; it starts nothing and reads no
+secret's value.
+
+```python
+from code_sandboxes import PROVIDERS, available_providers, get_provider
+
+PROVIDERS                        # every provider declared
+available_providers()            # those whose credentials are on this machine
+get_provider("daytona")          # one, or None
+```
+
+---
+
 ## Exceptions
 
 | Exception | Description |
 |-----------|-------------|
 | `SandboxError` | Base exception for all sandbox errors |
-| `SandboxNotFoundError` | Sandbox not found |
 | `SandboxTimeoutError` | Execution timed out |
 | `SandboxExecutionError` | Code execution failed |
+| `SandboxNotStartedError` | The sandbox was used before `start()` |
 | `SandboxConnectionError` | Connection to sandbox failed |
-| `SandboxNotRunningError` | Sandbox is not running |
-| `SandboxFilesystemError` | Filesystem operation failed |
-| `SandboxCommandError` | Command execution failed |
+| `SandboxConfigurationError` | The variant cannot be used as configured — a missing extra, or a setting it refuses |
+| `ContextNotFoundError` | No such execution context |
+| `VariableNotFoundError` | No such variable in the context |
 | `SandboxSnapshotError` | Snapshot operation failed |
 | `SandboxResourceError` | Resource limit exceeded |
 | `SandboxAuthenticationError` | Authentication failed |

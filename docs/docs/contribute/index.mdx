@@ -32,14 +32,12 @@ pytest tests/
 
 Default local test suite environment variables:
 
-- None for core local suites (`eval`, factory, model, and local Jupyter tests).
+- None for the core local suites (`eval`, factory, model).
 
-Optional integration test variables:
+Optional test variables:
 
-- `DATALAYER_API_KEY` for Datalayer runtime smoke tests.
-- `DATALAYER_RUN_URL` for a custom Datalayer runtime URL.
-- `DATALAYER_ENVIRONMENT` for Datalayer environment override.
-- `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` for Modal integration tests.
+- `RUN_JUPYTER_TESTS=1` runs the local Jupyter Server tests, which skip
+  themselves without it — the one variable the suite reads.
 
 ## CI Workflows
 
@@ -83,7 +81,7 @@ remind you of the ones you miss — the tests will. In order:
 8. `pyproject.toml` — the optional dependency, and the same package in `all`.
 
 Then an example under `examples/exec` and one under `examples/repl` with their
-Makefile targets, a page under `docs/docs/sandboxes/`, and a test module. Two
+Makefile targets, a page under `docs/docs/providers/`, and a test module. Two
 tests in the suite fail until a new variant is wired everywhere —
 `test_every_variant_of_the_enum_can_be_created` and
 `test_every_variant_has_a_manager` — which is the reminder the compiler cannot
@@ -95,7 +93,7 @@ Two rules the existing variants follow, and worth following:
   one raises `SandboxConfigurationError` naming the extra that installs it.
   Nothing may be imported at module import time: listing the variants must
   work on a machine that has none of them installed.
-- **What a backend cannot do is refused, not ignored.** A GPU asked of a
+- **What a provider cannot do is refused, not ignored.** A GPU asked of a
   variant that has none, a network policy it cannot apply, a variable it
   cannot keep — each is an error that names the reason and points at a variant
   that can. A sandbox that looks as though it was given an H100 and was not is
@@ -103,6 +101,6 @@ Two rules the existing variants follow, and worth following:
 
 ## Related Docs
 
-- [Guide](/guide) — what the package adds, and how the backends differ
+- [Guide](/guide) — what the package adds, and how the providers differ
 - [Providers](/providers) — the variants themselves
 - [API Reference](/api-reference)

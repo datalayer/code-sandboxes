@@ -50,7 +50,7 @@ Published site:
 pip install code-sandboxes
 ```
 
-For backend-specific extras and credentials, see [https://code-sandboxes.datalayer.tech/install](https://code-sandboxes.datalayer.tech/install) and [https://code-sandboxes.datalayer.tech/providers](https://code-sandboxes.datalayer.tech/providers).
+For provider-specific extras and credentials, see [https://code-sandboxes.datalayer.tech/install](https://code-sandboxes.datalayer.tech/install) and [https://code-sandboxes.datalayer.tech/providers](https://code-sandboxes.datalayer.tech/providers).
 
 ### Jupyter Server Sandbox
 
@@ -71,7 +71,7 @@ with Sandbox.create(
   print(sandbox.run_code("x + 2").text)  # 42
 ```
 
-### Jupyter over provider ingress
+### Jupyter over Provider Ingress
 
 Daytona, E2B, and Modal sandboxes can prepare a real Jupyter Server and
 return the provider HTTPS/WebSocket ingress needed to reach it:
@@ -86,9 +86,9 @@ endpoint = sandbox.prepare_jupyter_server(
 )
 ```
 
-Preparation first checks for `jupyter-server` and `ipykernel`, installs them
-only when absent, launches Jupyter in the background, and waits for its port
-to accept connections. Calling the method again on the same sandbox returns
+Preparation first checks that `jupyter-server` and `ipykernel` are both
+importable, installs the pair if that check fails, launches Jupyter in the
+background, and waits for its port to accept connections. Calling the method again on the same sandbox returns
 the cached endpoint. Provider-ingress credentials are in `endpoint.headers`;
 the separate Jupyter token is in `endpoint.query`. Do not send either to the
 browser: a server-side gateway should apply them while proxying HTTP and

@@ -76,7 +76,7 @@ The Daytona, E2B, and Modal exec examples include a timed loop that prints the
 numbers 1 through 9 one per second. Each number is rendered as it arrives; the
 example does not wait for the loop to finish before displaying its output.
 
-Daytona, E2B, and Modal use Jupyter over provider ingress by default. Use
+Daytona, E2B, and Modal use Jupyter over Provider Ingress by default. Use
 `--direct` to execute through the provider SDK adapter instead:
 
 ```bash

@@ -15,7 +15,7 @@ pip install code-sandboxes
 
 ## Optional Dependencies
 
-Code Sandboxes supports different execution backends via extras:
+Code Sandboxes supports different execution providers via extras:
 
 ```bash
 # With Cloudflare variant support (an HTTP client for the sandbox bridge)
@@ -60,7 +60,8 @@ pip install code-sandboxes[all]
   bridge is what it talks to instead
 - For CoreWeave variant: `code-sandboxes[coreweave]` and `CWSANDBOX_API_KEY`,
   an access token from the CoreWeave console
-- For Datalayer variant: valid `DATALAYER_API_KEY`
+- For Datalayer variant: `code-sandboxes[datalayer]` and `DATALAYER_API_KEY`,
+  or a session from `datalayer login`
 - For Daytona variant: `code-sandboxes[daytona]` and a Daytona API key
   (`DAYTONA_API_KEY`, from app.daytona.io)
 - For Docker variant: Docker installed and running
@@ -80,14 +81,14 @@ pip install code-sandboxes[all]
 | Variable | Description |
 |----------|-------------|
 | `DATALAYER_API_KEY` | API key for Datalayer runtime authentication |
-| `DATALAYER_RUN_URL` | Custom Datalayer service URL (optional) |
+| `DATALAYER_RUNTIMES_URL` | Custom Datalayer runtimes URL (optional; defaults to `https://r1.datalayer.run`) |
 | `MODAL_TOKEN_ID` | Modal token id (Modal variant) |
 | `MODAL_TOKEN_SECRET` | Modal token secret (Modal variant) |
 | `DAYTONA_API_KEY` | Daytona API key (Daytona variant) |
 | `DAYTONA_API_URL` | Daytona API URL (optional, defaults to app.daytona.io) |
 | `DAYTONA_TARGET` | Daytona region (optional) |
 | `E2B_API_KEY` | E2B API key (E2B variant) |
-| `E2B_DOMAIN` | E2B domain (optional, for a self-hosted cluster; defaults to e2b.dev) |
+| `E2B_DOMAIN` | E2B domain (optional, for a self-hosted cluster; defaults to e2b.app) |
 | `CWSANDBOX_API_KEY` | CoreWeave access token (CoreWeave variant) |
 | `CWSANDBOX_BASE_URL` | CoreWeave control plane (optional, defaults to api.cwsandbox.com) |
 | `CLOUDFLARE_SANDBOX_API_URL` | Where the deployed sandbox bridge Worker answers (Cloudflare variant) |
@@ -115,7 +116,7 @@ sandbox = Sandbox.create(config=config)
 ```python
 from code_sandboxes import Sandbox
 
-with Sandbox.create() as sandbox:
+with Sandbox.create(variant="eval") as sandbox:
     result = sandbox.run_code("print('Installation successful!')")
     print(result.stdout)
 ```
