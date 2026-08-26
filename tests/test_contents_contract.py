@@ -761,6 +761,142 @@ def test_a_materialize_entry_that_cannot_be_fetched_is_reported(harness, served)
 # --- Restart and reconcile -----------------------------------------------------
 
 
+class _CutStream(io.BytesIO):
+    """A response that dies after its first chunk, as a dropped connection does."""
+
+    def __init__(self, payload: bytes) -> None:
+        super().__init__(payload)
+        self.reads = 0
+
+    def read(self, size=-1):
+        self.reads += 1
+        if self.reads > 1:
+            raise ConnectionResetError("connection reset by peer")
+        return super().read(size)
+
+
+def test_an_interrupted_download_leaves_no_part_file_and_the_retry_completes(
+    harness, served, monkeypatch
+):
+    """A transfer cut mid-stream fails cleanly — no `.part` beside the
+    target — and the next prepare fetches afresh and completes."""
+    client = _client(harness)
+    spec, target, payload = _materialize_attachment(harness, served)
+    url = spec["materialize"][0]["source_url"]
+    served.files[url] = payload + b"x" * (2 << 20)  # more than one chunk
+    spec["materialize"][0]["sha256"] = hashlib.sha256(served.files[url]).hexdigest()
+    intact = served.urlopen
+    cut_once = {"done": False}
+
+    def urlopen(requested, timeout=None):
+        response = intact(requested, timeout)
+        if cut_once["done"]:
+            return response
+        cut_once["done"] = True
+        return _CutStream(response.getvalue())
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+
+    first = client.prepare_contents(_manifest(harness, spec))
+    assert first[0].status == "failed"
+    assert first[0].error_code == contents.FETCH_FAILED
+    assert "ConnectionResetError" in (first[0].detail or "")
+    assert not target.exists()
+    assert not target.with_suffix(".csv.part").exists()
+
+    again = client.prepare_contents(_manifest(harness, spec))
+    assert again[0].status == "ready"
+    assert target.read_bytes() == served.files[url]
+    assert len(served.fetches) == 2
+
+
+def test_a_large_stream_is_written_whole_and_verified(harness, served):
+    """Several chunks, none dropped, and the digest agrees at the end."""
+    client = _client(harness)
+    spec, target, _small = _materialize_attachment(harness, served)
+    url = spec["materialize"][0]["source_url"]
+    payload = os.urandom((3 << 20) + 7)
+    served.files[url] = payload
+    spec["materialize"][0]["sha256"] = hashlib.sha256(payload).hexdigest()
+
+    prepared = client.attach(_manifest(harness, spec))
+
+    assert prepared[0].status == "ready"
+    assert target.stat().st_size == len(payload)
+    assert target.read_bytes() == payload
+    assert not target.with_suffix(".csv.part").exists()
+
+
+def test_a_signed_url_the_store_refuses_is_a_failed_fetch_naming_the_refusal(
+    harness, served, monkeypatch
+):
+    """A revoked or expired signed URL: the store answers 403, the entry
+    fails with the reason, and nothing is left on disk."""
+    client = _client(harness)
+    spec, target, _payload = _materialize_attachment(harness, served)
+
+    def refuse(requested, timeout=None):
+        raise urllib.error.HTTPError(requested, 403, "Forbidden", {}, None)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("urllib.request.urlopen", refuse)
+
+    prepared = client.prepare_contents(_manifest(harness, spec))
+
+    assert prepared[0].status == "failed"
+    assert prepared[0].error_code == contents.FETCH_FAILED
+    assert "403" in (prepared[0].detail or "")
+    assert not target.exists()
+    assert not target.with_suffix(".csv.part").exists()
+
+
+def test_two_attachments_asking_for_the_same_volume_path_make_one_mount(harness):
+    """Asked twice for one path is one mount, not two, and both are ready."""
+    client = _client(harness)
+    manifest = _manifest(
+        harness, _volume_attachment(harness, "att-1"), _volume_attachment(harness, "att-2")
+    )
+
+    prepared = client.attach(manifest)
+
+    assert [item.status for item in prepared] == ["ready", "ready"]
+    if harness.native_volumes:
+        assert harness.mounts() == [(harness.path("mnt", "vol-a"), "vol-a")]
+
+
+def test_several_materialize_attachments_in_one_manifest_each_land(harness, served):
+    client = _client(harness)
+    first, first_target, first_payload = _materialize_attachment(harness, served, "att-a")
+    second_payload = b"x,y\n3,4\n"
+    second_url = served.serve("other.csv", second_payload)
+    second_target = Path(harness.path("data", "other.csv"))
+    second = _attachment(
+        harness,
+        "att-b",
+        delivery="materialize",
+        mount_path=harness.path("data"),
+        materialize=[
+            {
+                "source_url": second_url,
+                "path": "other.csv",
+                "sha256": hashlib.sha256(second_payload).hexdigest(),
+            }
+        ],
+    )
+
+    prepared = client.attach(_manifest(harness, first, second))
+
+    assert [(item.uid, item.status) for item in prepared] == [
+        ("att-a", "ready"),
+        ("att-b", "ready"),
+    ]
+    assert first_target.read_bytes() == first_payload
+    assert second_target.read_bytes() == second_payload
+
+    client.detach("att-a")
+    assert not first_target.exists()
+    assert second_target.read_bytes() == second_payload
+
+
 def test_restart_then_reconcile_returns_the_same_set_without_duplicate_mounts(harness, served):
     client = _client(harness)
     files, target, payload = _materialize_attachment(harness, served)

@@ -747,9 +747,7 @@ def relay_connector(bridge_uid: str | None = None, session_key: str | None = Non
     """A connector for one bridge: :func:`connect_relay` with its channel settled."""
 
     def connect(relay_url: str, mount_token: str) -> BridgeFileSystem:
-        return connect_relay(
-            relay_url, mount_token, bridge_uid=bridge_uid, session_key=session_key
-        )
+        return connect_relay(relay_url, mount_token, bridge_uid=bridge_uid, session_key=session_key)
 
     return connect
 

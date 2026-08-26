@@ -18,8 +18,8 @@ The operations class is the real one, and so is the tunnel.
 from __future__ import annotations
 
 import errno
-import math
 import json
+import math
 import os
 import stat
 import threading
@@ -805,11 +805,16 @@ def test_the_command_line_carries_the_bridge_uid_and_reads_the_session_key_from_
     monkeypatch.setattr(bm, "run_bridge_mount", run)
     bm.main(
         [
-            "--relay-url", "wss://relay.test/bridges/br-1",
-            "--mount-path", str(tmp_path / "mnt"),
-            "--bridge-uid", "br-1",
-            "--token-file", str(tmp_path / "token"),
-            "--session-key-file", str(tmp_path / "session"),
+            "--relay-url",
+            "wss://relay.test/bridges/br-1",
+            "--mount-path",
+            str(tmp_path / "mnt"),
+            "--bridge-uid",
+            "br-1",
+            "--token-file",
+            str(tmp_path / "token"),
+            "--session-key-file",
+            str(tmp_path / "session"),
         ]
     )
     assert seen["mount_token"] == "mount-token"
