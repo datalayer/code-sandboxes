@@ -14,7 +14,10 @@ from typing import Any, Union
 
 from .commands import SandboxCommands
 from .contents import (
+    CONTENTS_ENVIRONMENT_NAMES,
     FILESYSTEM_PRIMITIVES,
+    LOCAL_BRIDGE_MOUNT,
+    LOCAL_BRIDGE_NOT_A_MOUNT,
     ContentAttachmentSpec,
     ContentCapabilities,
     ContentManifest,
@@ -22,6 +25,8 @@ from .contents import (
     PreparedAttachment,
     contents_environment,
     materialize,
+    not_ready,
+    path_is_mountpoint,
     ready,
     remove_materialized,
     unsupported,
@@ -222,8 +227,15 @@ class Sandbox(ABC):
         here too. Harmless on a sandbox that is already running — the
         variables are exported into the kernel again when the manifest is
         installed.
+
+        Replaces rather than adds: a manifest without a token, after one
+        with, must leave the provider no token to hand to the next creation.
         """
-        self.config.env_vars.update(contents_environment(manifest))
+        environment = contents_environment(manifest)
+        for name in CONTENTS_ENVIRONMENT_NAMES:
+            if name not in environment:
+                self.config.env_vars.pop(name, None)
+        self.config.env_vars.update(environment)
 
     def prepare_contents(self, manifest: ContentManifest) -> list[PreparedAttachment]:
         """Honour each attachment of the manifest, and say what became of it."""
@@ -254,8 +266,10 @@ class Sandbox(ABC):
         self._attachments.pop(uid, None)
         if spec is None:
             return
-        if spec.delivery == "materialize" and self._started:
+        if spec.delivery in ("materialize", "environment") and spec.materialize and self._started:
             remove_materialized(self, spec)
+        if spec.delivery == "local-bridge" and self._started:
+            self._release_local_bridge(spec)
         self._forget_mount(spec)
 
     def _apply_contents(
@@ -280,16 +294,68 @@ class Sandbox(ABC):
             return ready(spec, capabilities=["client"])
         if spec.delivery == "materialize":
             return self._prepare_materialize(spec, reconcile=reconcile)
-        if spec.delivery in ("mount", "environment"):
+        if spec.delivery == "environment":
+            return self._prepare_environment(spec, reconcile=reconcile)
+        if spec.delivery == "mount":
             return self._prepare_mount(spec, reconcile=reconcile)
         if spec.delivery == "local-bridge":
-            return self._prepare_local_bridge(spec, reconcile=reconcile)
+            return self._honest_local_bridge(
+                spec, self._prepare_local_bridge(spec, reconcile=reconcile)
+            )
         return unsupported(spec, self.provider_name)
 
+    def _honest_local_bridge(
+        self, spec: ContentAttachmentSpec, result: PreparedAttachment
+    ) -> PreparedAttachment:
+        """A local bridge is a mount or it is nothing.
+
+        Whatever an adapter answered, `ready` stands only if the answer
+        claims exactly the bridge capability and the path is a mountpoint in
+        the sandbox. A copy of the folder — materialized, synchronized,
+        fetched — is not a bridge, however faithfully it was made, and an
+        adapter that reported one as a mount is caught here rather than
+        believed.
+        """
+        if result.status != "ready":
+            return result
+        mount_path = spec.mount_path or (spec.bridge.mount_path if spec.bridge else None)
+        if result.capabilities != [LOCAL_BRIDGE_MOUNT]:
+            return not_ready(
+                spec,
+                LOCAL_BRIDGE_NOT_A_MOUNT,
+                f"a local bridge was reported ready with capabilities "
+                f"{result.capabilities!r}; only {LOCAL_BRIDGE_MOUNT!r} is a bridge, and "
+                "a copy is never reported as a mount",
+            )
+        if not mount_path or not path_is_mountpoint(self, mount_path):
+            return not_ready(
+                spec,
+                LOCAL_BRIDGE_NOT_A_MOUNT,
+                f"{mount_path or '?'} is not a mountpoint in the sandbox: whatever is "
+                "there is a copy, not the person's folder, and is not reported as a mount",
+            )
+        return result
+
     def _prepare_mount(self, spec: ContentAttachmentSpec, *, reconcile: bool) -> PreparedAttachment:
-        """A `mount` or `environment` attachment. Nothing mounts by default."""
+        """A `mount` attachment. Nothing mounts by default."""
         del reconcile
         return unsupported(spec, self.provider_name)
+
+    def _prepare_environment(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        """A content the sandbox's Environment brings, at its declared path.
+
+        Where the platform mounts it — Datalayer, whose Operator makes the
+        mount before the pod starts — the manifest carries no `materialize`
+        entries and the answer is the mount's. Everywhere else the entries
+        say how the declared path is honoured: a git checkout at its pinned
+        revision, or python access to a bucket. The path itself is the one
+        the Environment declared, on every provider.
+        """
+        if spec.materialize:
+            return self._prepare_materialize(spec, reconcile=reconcile)
+        return self._prepare_mount(spec, reconcile=reconcile)
 
     def _prepare_local_bridge(
         self, spec: ContentAttachmentSpec, *, reconcile: bool
@@ -308,6 +374,10 @@ class Sandbox(ABC):
 
     def _forget_mount(self, spec: ContentAttachmentSpec) -> None:
         """Forget a mount request. Adapters that record mounts override this."""
+        del spec
+
+    def _release_local_bridge(self, spec: ContentAttachmentSpec) -> None:
+        """Take a local bridge down. Adapters that mount one themselves override this."""
         del spec
 
     def interrupt(self) -> bool:

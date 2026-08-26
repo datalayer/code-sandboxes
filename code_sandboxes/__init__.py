@@ -62,6 +62,15 @@ Style usage:
 """
 
 from .base import Sandbox
+from .builds import (
+    ENVIRONMENT_CONTENTS_MANIFEST,
+    BuildEntry,
+    BuiltArtifact,
+    EnvironmentBuild,
+    build_artifact,
+    dockerfile_fragment,
+    installed_environment_contents,
+)
 from .client import CodeExecutionOutcome, CodeSandboxClient, execution_result_to_reply
 from .cloudflare_sandbox import CloudflareSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
@@ -165,9 +174,12 @@ from .providers import (
 #: Everything this package exports, in one sorted list — the groups it
 #: used to be split into stopped matching what they sat above.
 __all__ = [
+    "ENVIRONMENT_CONTENTS_MANIFEST",
     "EXIT_COMMANDS",
     "KAGGLE_API_TOKEN_ENV",
     "PROVIDERS",
+    "BuildEntry",
+    "BuiltArtifact",
     "CloudflareSandbox",
     "CodeError",
     "CodeExecutionOutcome",
@@ -184,6 +196,7 @@ __all__ = [
     "DaytonaSandbox",
     "DockerSandbox",
     "E2BSandbox",
+    "EnvironmentBuild",
     "EvalSandbox",
     "ExecutionResult",
     "FileInfo",
@@ -241,10 +254,13 @@ __all__ = [
     "TunnelInfo",
     "VariableNotFoundError",
     "available_providers",
+    "build_artifact",
+    "dockerfile_fragment",
     "example_code",
     "execution_result_to_reply",
     "get_manager",
     "get_provider",
+    "installed_environment_contents",
     "manageable_variants",
     "normalize_variant",
     "parse_google_colab_channels_url",

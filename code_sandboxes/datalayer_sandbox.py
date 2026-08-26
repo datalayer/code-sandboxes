@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 from .base import Sandbox
 from .contents import (
     FILESYSTEM_PRIMITIVES,
+    LOCAL_BRIDGE_MOUNT,
     MOUNT_MISSING,
     MOUNT_PATH_MISSING,
     ContentAttachmentSpec,
@@ -27,6 +28,7 @@ from .contents import (
     PreparedAttachment,
     not_ready,
     path_exists,
+    path_is_mountpoint,
     ready,
 )
 from .exceptions import (
@@ -483,8 +485,26 @@ class DatalayerSandbox(Sandbox):
     def _prepare_local_bridge(
         self, spec: ContentAttachmentSpec, *, reconcile: bool
     ) -> PreparedAttachment:
+        """The Operator rendered a CSI volume for the bridge; is it mounted?
+
+        A mountpoint, not merely a path: the CSI driver binds the bridge
+        filesystem into the pod, and a directory that is there without a
+        mount behind it is an empty directory the image happened to have —
+        or a copy something else made — and neither is the person's folder.
+        """
         del reconcile
-        return self._operator_mount(spec, capability="local-bridge-mount")
+        mount_path = spec.mount_path or (spec.bridge.mount_path if spec.bridge else None)
+        if not mount_path:
+            return not_ready(spec, MOUNT_PATH_MISSING, "a local bridge needs a mount_path")
+        if path_exists(self, mount_path) and path_is_mountpoint(self, mount_path):
+            return ready(spec, capabilities=[LOCAL_BRIDGE_MOUNT])
+        return not_ready(
+            spec,
+            MOUNT_MISSING,
+            f"{mount_path} is not a mountpoint in the runtime: the Operator renders a "
+            "local bridge as a CSI volume the node driver mounts before the pod "
+            "starts, and this one is not mounted",
+        )
 
     def _operator_mount(
         self, spec: ContentAttachmentSpec, *, capability: str

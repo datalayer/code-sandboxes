@@ -393,7 +393,11 @@ def provider_catalog(
                     # card it is, and that cannot be answered from a name.
                     # Keys the provider did not declare are left out rather
                     # than sent as null, so "did not say" stays tellable from
-                    # "has none".
+                    # "has none". `features` is the exception: it is always a
+                    # list, because an environment that declares none has
+                    # none — there is no "did not say" about whether a
+                    # folder can be bridged in, and a service deciding
+                    # before launch must not have to guess.
                     {
                         key: value
                         for key, value in {
@@ -405,6 +409,7 @@ def provider_catalog(
                             "gpu": environment.gpu,
                             "gpu_count": environment.gpu_count,
                             "gpu_memory": environment.gpu_memory,
+                            "features": environment.features,
                         }.items()
                         if value is not None
                     }

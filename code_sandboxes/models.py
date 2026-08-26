@@ -53,6 +53,22 @@ class SandboxEnvironment(BaseModel):
     gpu_count: Optional[int] = None
     gpu_memory: Optional[str] = None
 
+    @property
+    def features(self) -> list[str]:
+        """What the environment is known to allow, beyond running code.
+
+        Read from `metadata["features"]`, a list of names — `fuse` means the
+        sandbox exposes `/dev/fuse` with fusepy installed, so a local folder
+        can be bridged in as a filesystem. Recorded PER ENVIRONMENT: the same
+        provider ships images that can and images that cannot, and a
+        capability claimed for a provider as a whole would be a lie for
+        half of them. An environment that declares nothing has no features.
+        """
+        raw = (self.metadata or {}).get("features")
+        if isinstance(raw, (list, tuple, set, frozenset)):
+            return [str(feature) for feature in raw]
+        return []
+
 
 class MIMEType(str, Enum):
     """Common MIME types for execution results."""

@@ -35,6 +35,10 @@ code-sandbox = "code_sandboxes.cli:main"
 code-sandboxes = "code_sandboxes.cli:main"
 
 [project.optional-dependencies]
+# What the sandbox-side bridge filesystem (`code_sandboxes.bridge_mount`)
+# needs where it RUNS — inside a sandbox image that exposes /dev/fuse. The
+# host side needs none of it.
+bridge = ["fusepy>=3.0", "websockets>=12"]
 cloudflare = ["httpx>=0.27"]
 coreweave = ["cwsandbox>=1.6"]
 datalayer = ["agent_runtimes>=1.0.16"]

@@ -221,13 +221,23 @@ environment names it: `DATALAYER_CONTENTS_MANIFEST`, `DATALAYER_CONTENTS_URL`,
 the short-lived sandbox credential, kept out of the JSON in a file only the
 owner can read.
 
-| Provider | Volume mount | Shared filesystem | Bucket mount | Local bridge | Materialize | Client |
-| --- | --- | --- | --- | --- | --- | --- |
-| `datalayer` | by the Operator | by the Operator | by the Operator | Clouder CSI | yes | yes |
-| `daytona` | at creation | no | no | no | yes | yes |
-| `e2b` | at creation | no | no | no | yes | yes |
-| `modal` | at creation | no | refused: a credential would leave Contents | no | yes | yes |
-| others | no | no | no | no | no | yes |
+| Provider    | Volume mount    | Shared filesystem | Bucket mount                               | Local bridge            | Materialize | Client |
+| ----------- | --------------- | ----------------- | ------------------------------------------ | ----------------------- | ----------- | ------ |
+| `datalayer` | by the Operator | by the Operator   | by the Operator                            | Clouder CSI             | yes         | yes    |
+| `daytona`   | at creation     | no                | no                                         | per environment: `fuse` | yes         | yes    |
+| `e2b`       | at creation     | no                | no                                         | per environment: `fuse` | yes         | yes    |
+| `modal`     | at creation     | no                | refused: a credential would leave Contents | per environment: `fuse` | yes         | yes    |
+| others      | no              | no                | no                                         | no                      | no          | yes    |
+
+A local bridge — a person's own folder, mounted over the bridge relay — is
+supported per environment, never per provider: only an environment whose
+metadata declares the `fuse` feature (fusepy and `/dev/fuse` in the sandbox)
+starts the bridge filesystem (`code_sandboxes.bridge_mount`) inside the
+sandbox, and none of the stock Daytona, E2B or Modal environments declares
+it. Everywhere else a `local-bridge` attachment is refused with
+`LOCAL_BRIDGE_UNSUPPORTED` and Synchronize is offered instead — a copy is
+never reported as a mount. Install the sandbox side with
+`pip install "code-sandboxes[bridge]"` in an image that exposes `/dev/fuse`.
 
 See the [API reference](https://code-sandboxes.datalayer.tech/api-reference#contents-attachments).
 

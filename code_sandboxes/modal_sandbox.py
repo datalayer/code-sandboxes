@@ -33,8 +33,11 @@ from .contents import (
     ContentCapabilities,
     ContentManifest,
     CreationTimeMounts,
-    LocalBridgeCapability,
     PreparedAttachment,
+    environment_features,
+    local_bridge_capability,
+    prepare_local_bridge,
+    stop_bridge_mount,
 )
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
 from .jupyter_ingress import preparation_command, resolved_options, websocket_url
@@ -167,6 +170,7 @@ class ModalSandbox(Sandbox):
         pip_packages: list[str] | None = None,
         python_version: str = DEFAULT_MODAL_PYTHON_VERSION,
         python_executable: str = "python",
+        features: list[str] | None = None,
         **kwargs,
     ):
         super().__init__(config)
@@ -175,6 +179,10 @@ class ModalSandbox(Sandbox):
         self._pip_packages = pip_packages or []
         self._python_version = python_version
         self._python_executable = python_executable
+        #: What the environment this sandbox runs in is known to allow, when
+        #: the caller passed it with the rest of the environment's metadata;
+        #: otherwise looked up by name in `list_environments()`.
+        self._features = list(features) if features is not None else None
         self._app = None
         self._sandbox = None
         self._sandbox_id = str(uuid.uuid4())
@@ -198,7 +206,7 @@ class ModalSandbox(Sandbox):
             bucket_mount=False,
             materialize=True,
             client=True,
-            local_bridge_mount=LocalBridgeCapability(supported=False),
+            local_bridge_mount=local_bridge_capability(self._environment_features()),
             filesystem_primitives=list(FILESYSTEM_PRIMITIVES),
         )
 
@@ -214,6 +222,34 @@ class ModalSandbox(Sandbox):
 
     def _forget_mount(self, spec: ContentAttachmentSpec) -> None:
         self._volume_mounts.forget(spec)
+
+    def _environment_features(self) -> list[str]:
+        """The features of the environment this sandbox was created with."""
+        return environment_features(
+            type(self).list_environments(), self.config.environment, self._features
+        )
+
+    def _prepare_local_bridge(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        """Bridge a person's folder in, where the ENVIRONMENT can run the filesystem.
+
+        Per environment, never per provider: only an environment advertising
+        `fuse` starts the bridge mount inside the sandbox, and it is ready
+        only once the mount says it is connected. Everywhere else the answer
+        is a refusal that offers Synchronize — a copy, called a copy.
+        """
+        return prepare_local_bridge(
+            self,
+            spec,
+            provider="modal",
+            environment=self.config.environment,
+            features=self._environment_features(),
+            reconcile=reconcile,
+        )
+
+    def _release_local_bridge(self, spec: ContentAttachmentSpec) -> None:
+        stop_bridge_mount(self, spec)
 
     def prepare_jupyter_server(
         self, options: JupyterServerOptions | None = None
@@ -253,6 +289,12 @@ class ModalSandbox(Sandbox):
         are the two shapes worth naming — a plain container, and one with a
         GPU attached — so that choosing an environment is choosing between
         two named things, as it is with every other provider.
+
+        `features` is what each environment is known to allow beyond running
+        code. Neither declares `fuse`: a Modal sandbox does not expose
+        `/dev/fuse`, so no local folder is bridged into either as a
+        filesystem. An image built to expose FUSE with fusepy preinstalled
+        would carry it.
         """
         return [
             SandboxEnvironment(
@@ -262,7 +304,7 @@ class ModalSandbox(Sandbox):
                 owner="modal",
                 visibility="cloud",
                 burning_rate=0.0,
-                metadata={"variant": "modal", "gpu": None},
+                metadata={"variant": "modal", "gpu": None, "features": []},
             ),
             SandboxEnvironment(
                 name="modal-gpu",
@@ -274,7 +316,7 @@ class ModalSandbox(Sandbox):
                 gpu="T4",
                 gpu_count=1,
                 gpu_memory=gpu_memory("T4"),
-                metadata={"variant": "modal", "gpu": "T4"},
+                metadata={"variant": "modal", "gpu": "T4", "features": []},
             ),
         ]
 

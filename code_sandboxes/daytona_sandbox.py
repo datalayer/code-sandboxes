@@ -37,8 +37,11 @@ from .contents import (
     ContentCapabilities,
     ContentManifest,
     CreationTimeMounts,
-    LocalBridgeCapability,
     PreparedAttachment,
+    environment_features,
+    local_bridge_capability,
+    prepare_local_bridge,
+    stop_bridge_mount,
 )
 from .exceptions import (
     SandboxConfigurationError,
@@ -292,6 +295,7 @@ class DaytonaSandbox(Sandbox):
         gpu_count: int = 1,
         spot: bool = False,
         delete_on_stop: bool = True,
+        features: list[str] | None = None,
         **kwargs,
     ):
         super().__init__(config)
@@ -306,6 +310,10 @@ class DaytonaSandbox(Sandbox):
         self._gpu_count = gpu_count
         self._spot = spot
         self._delete_on_stop = delete_on_stop
+        #: What the environment this sandbox runs in is known to allow, when
+        #: the caller passed it with the rest of the environment's metadata;
+        #: otherwise looked up by name in `list_environments()`.
+        self._features = list(features) if features is not None else None
         self._daytona: Any | None = None
         self._sandbox: Any | None = None
         #: The Daytona interpreter context standing for each of ours, made on
@@ -328,7 +336,7 @@ class DaytonaSandbox(Sandbox):
             bucket_mount=False,
             materialize=True,
             client=True,
-            local_bridge_mount=LocalBridgeCapability(supported=False),
+            local_bridge_mount=local_bridge_capability(self._environment_features()),
             filesystem_primitives=list(FILESYSTEM_PRIMITIVES),
         )
 
@@ -342,6 +350,34 @@ class DaytonaSandbox(Sandbox):
 
     def _forget_mount(self, spec: ContentAttachmentSpec) -> None:
         self._volume_mounts.forget(spec)
+
+    def _environment_features(self) -> list[str]:
+        """The features of the environment this sandbox was created with."""
+        return environment_features(
+            type(self).list_environments(), self.config.environment, self._features
+        )
+
+    def _prepare_local_bridge(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        """Bridge a person's folder in, where the ENVIRONMENT can run the filesystem.
+
+        Per environment, never per provider: only an environment advertising
+        `fuse` starts the bridge mount inside the sandbox, and it is ready
+        only once the mount says it is connected. Everywhere else the answer
+        is a refusal that offers Synchronize — a copy, called a copy.
+        """
+        return prepare_local_bridge(
+            self,
+            spec,
+            provider="daytona",
+            environment=self.config.environment,
+            features=self._environment_features(),
+            reconcile=reconcile,
+        )
+
+    def _release_local_bridge(self, spec: ContentAttachmentSpec) -> None:
+        stop_bridge_mount(self, spec)
 
     def prepare_jupyter_server(
         self, options: JupyterServerOptions | None = None
@@ -382,6 +418,12 @@ class DaytonaSandbox(Sandbox):
         stays what it is everywhere else: choosing between named things.
 
         The shape is asked for by argument, not by name: `gpu=` and `spot=`.
+
+        `features` is what each environment is known to allow beyond running
+        code. None of these declares `fuse`: a stock Daytona sandbox does not
+        expose `/dev/fuse`, so a local folder cannot be bridged in as a
+        filesystem on any of them — a snapshot built to expose FUSE, with
+        fusepy and the bridge client preinstalled, is what would carry it.
         """
         return [
             SandboxEnvironment(
@@ -391,7 +433,7 @@ class DaytonaSandbox(Sandbox):
                 owner="daytona",
                 visibility="cloud",
                 burning_rate=0.0,
-                metadata={"variant": "daytona", "gpu": None},
+                metadata={"variant": "daytona", "gpu": None, "features": []},
             ),
             SandboxEnvironment(
                 name="daytona-gpu",
@@ -403,7 +445,7 @@ class DaytonaSandbox(Sandbox):
                 gpu="H100",
                 gpu_count=1,
                 gpu_memory=gpu_memory("H100"),
-                metadata={"variant": "daytona", "gpu": "H100", "spot": False},
+                metadata={"variant": "daytona", "gpu": "H100", "spot": False, "features": []},
             ),
             SandboxEnvironment(
                 name="daytona-gpu-spot",
@@ -415,7 +457,7 @@ class DaytonaSandbox(Sandbox):
                 gpu="H100",
                 gpu_count=1,
                 gpu_memory=gpu_memory("H100"),
-                metadata={"variant": "daytona", "gpu": "H100", "spot": True},
+                metadata={"variant": "daytona", "gpu": "H100", "spot": True, "features": []},
             ),
         ]
 

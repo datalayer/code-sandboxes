@@ -35,8 +35,11 @@ from .contents import (
     ContentCapabilities,
     ContentManifest,
     CreationTimeMounts,
-    LocalBridgeCapability,
     PreparedAttachment,
+    environment_features,
+    local_bridge_capability,
+    prepare_local_bridge,
+    stop_bridge_mount,
 )
 from .exceptions import (
     SandboxConfigurationError,
@@ -171,6 +174,7 @@ class E2BSandbox(Sandbox):
         template: str | None = None,
         allow_internet_access: bool = True,
         secure: bool = True,
+        features: list[str] | None = None,
         **kwargs,
     ):
         super().__init__(config)
@@ -179,6 +183,10 @@ class E2BSandbox(Sandbox):
         self._template = template
         self._allow_internet_access = allow_internet_access
         self._secure = secure
+        #: What the environment this sandbox runs in is known to allow, when
+        #: the caller passed it with the rest of the environment's metadata;
+        #: otherwise looked up by name in `list_environments()`.
+        self._features = list(features) if features is not None else None
         self._sandbox: Any | None = None
         #: The E2B context standing for each of ours, made on first use —
         #: creating one starts a kernel, and most callers use the default
@@ -200,7 +208,7 @@ class E2BSandbox(Sandbox):
             bucket_mount=False,
             materialize=True,
             client=True,
-            local_bridge_mount=LocalBridgeCapability(supported=False),
+            local_bridge_mount=local_bridge_capability(self._environment_features()),
             filesystem_primitives=list(FILESYSTEM_PRIMITIVES),
         )
 
@@ -214,6 +222,34 @@ class E2BSandbox(Sandbox):
 
     def _forget_mount(self, spec: ContentAttachmentSpec) -> None:
         self._volume_mounts.forget(spec)
+
+    def _environment_features(self) -> list[str]:
+        """The features of the environment this sandbox was created with."""
+        return environment_features(
+            type(self).list_environments(), self.config.environment, self._features
+        )
+
+    def _prepare_local_bridge(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        """Bridge a person's folder in, where the ENVIRONMENT can run the filesystem.
+
+        Per environment, never per provider: only an environment advertising
+        `fuse` starts the bridge mount inside the sandbox, and it is ready
+        only once the mount says it is connected. Everywhere else the answer
+        is a refusal that offers Synchronize — a copy, called a copy.
+        """
+        return prepare_local_bridge(
+            self,
+            spec,
+            provider="e2b",
+            environment=self.config.environment,
+            features=self._environment_features(),
+            reconcile=reconcile,
+        )
+
+    def _release_local_bridge(self, spec: ContentAttachmentSpec) -> None:
+        stop_bridge_mount(self, spec)
 
     def prepare_jupyter_server(
         self, options: JupyterServerOptions | None = None
@@ -256,6 +292,11 @@ class E2BSandbox(Sandbox):
         that would start and then fail every execution. A template built on
         top of it is asked for by argument — `template=` — the way an image is
         everywhere else in this package.
+
+        `features` is what the environment is known to allow beyond running
+        code. The interpreter template declares no `fuse`: it does not expose
+        `/dev/fuse`, so no local folder is bridged into it as a filesystem. A
+        template built to expose FUSE with fusepy preinstalled would carry it.
         """
         return [
             SandboxEnvironment(
@@ -265,7 +306,7 @@ class E2BSandbox(Sandbox):
                 owner="e2b",
                 visibility="cloud",
                 burning_rate=0.0,
-                metadata={"variant": "e2b", "template": DEFAULT_TEMPLATE},
+                metadata={"variant": "e2b", "template": DEFAULT_TEMPLATE, "features": []},
             ),
         ]
 

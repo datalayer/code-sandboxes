@@ -532,22 +532,18 @@ class CodeSandboxClient:
         """One entry, or `FileNotFoundError` if the path names nothing."""
         return self.files.get_info(path)
 
-    def read_file(self, path: str, *, binary: bool = False) -> Union[str, bytes]:
+    def read_file(self, path: str, *, binary: bool = False) -> str | bytes:
         """Read a whole file; `binary` for anything that is not text."""
         return self.files.read_bytes(path) if binary else self.files.read(path)
 
-    def write_file(
-        self, path: str, content: Union[str, bytes], *, make_dirs: bool = True
-    ) -> None:
+    def write_file(self, path: str, content: str | bytes, *, make_dirs: bool = True) -> None:
         """Write a whole file, creating the directories above it by default."""
         if isinstance(content, bytes):
             self.files.write_bytes(path, content, make_dirs=make_dirs)
         else:
             self.files.write(path, content, make_dirs=make_dirs)
 
-    def stream_file(
-        self, path: str, *, chunk_size: int = 1024 * 1024
-    ) -> Iterator[bytes]:
+    def stream_file(self, path: str, *, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
         """Read a file in pieces, for something too big to hold at once.
 
         The pieces come from one read of the sandbox: the providers'
@@ -645,9 +641,13 @@ class CodeSandboxClient:
         self._sandbox.remove_attachment(uid)
 
     def _stage_contents(self, manifest: ContentManifest) -> None:
-        """Configure, start, and put the manifest inside — in that order."""
-        if not self.is_started:
-            self._sandbox.configure_contents(manifest)
+        """Configure, start, and put the manifest inside — in that order.
+
+        Configured every time, running or not: the configuration is what the
+        provider is handed at the NEXT creation — a restart — and it must say
+        what this manifest says, not what an earlier one did.
+        """
+        self._sandbox.configure_contents(manifest)
         self.start()
         self._contents_location = install_manifest(self._sandbox, manifest)
 
