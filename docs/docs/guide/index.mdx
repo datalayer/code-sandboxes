@@ -6,15 +6,15 @@ sidebar_position: 1
 # Guide
 
 For Daytona, E2B, and Modal notebook execution, see
-[Jupyter over provider ingress](./provider-ingress). It documents the
+[Jupyter over Provider Ingress](/provider-ingress). It documents the
 real-Jupyter transport and direct provider mode.
 
 One package, many places to run code. This page is the one to read before the
-rest: what Code Sandboxes actually gives you over calling a backend's own SDK,
-what each backend still decides for you, and how to choose between them.
+rest: what Code Sandboxes actually gives you over calling a provider's own SDK,
+what each provider still decides for you, and how to choose between them.
 
 It used to weigh Code Sandboxes against E2B and Modal as alternatives.
-They are not alternatives any more: both are **backends this package drives**,
+They are not alternatives any more: both are **providers this package drives**,
 alongside [Daytona](/providers/daytona), [CoreWeave](/providers/coreweave) and
 [Cloudflare](/providers/cloudflare). `variant="e2b"` and `variant="modal"` run
 code on E2B and on Modal, through their own SDKs, with their own accounts and
@@ -26,18 +26,18 @@ still decides for you once you are on it.
 
 ## What Code Sandboxes Adds
 
-- **One result, whichever backend answered.** `run_code` comes back as an
+- **One result, whichever provider answered.** `run_code` comes back as an
   `ExecutionResult` everywhere, with the failure split three ways: the sandbox
   (`execution_ok`), the process (`exit_code`), and the code itself
-  (`code_error`). A caller that handles those handles every backend.
+  (`code_error`). A caller that handles those handles every provider.
 - **One vocabulary for the rest.** `sandbox.files`, `sandbox.commands`,
-  `create_context()`, `set_timeout()`, names and tags mean the same thing on
-  each backend and are mapped onto whatever it actually offers — a filesystem
+  `create_context()`, `stop()`, names and tags mean the same thing on
+  each provider and are mapped onto whatever it actually offers — a filesystem
   API where there is one, a snippet that decodes base64 where there is not.
 - **CRUD in one place.** `code-sandboxes list`, `get`, `create` and `delete`
-  work across the backends that can answer them; see the
+  work across the providers that can answer them; see the
   [management guide](/cli#creating-and-managing-sandboxes).
-- **A refusal instead of a surprise.** Where a backend cannot do what was
+- **A refusal instead of a surprise.** Where a provider cannot do what was
   asked, the call says so rather than quietly doing something else:
   `network_policy="allowlist"` on E2B is refused because E2B has no host
   allowlist, `list` on Cloudflare raises because the bridge cannot enumerate
@@ -45,13 +45,13 @@ still decides for you once you are on it.
   mangled.
 - **Nothing is required to be a cloud.** `eval`, `monty`, `docker` and
   `jupyter-server` run on the machine in front of you, through the same
-  interface as the cloud backends — which is what makes a test suite that
+  interface as the cloud providers — which is what makes a test suite that
   exercises the interface cheap to run.
 
-The package is BSD-3 licensed and no backend is privileged in it. Moving
+The package is BSD-3 licensed and no provider is privileged in it. Moving
 between them is a change of one string.
 
-## The Same Program, On Any Backend
+## The Same Program, On Any Provider
 
 ```python
 from code_sandboxes import Sandbox
@@ -61,16 +61,16 @@ for variant in ("eval", "e2b", "modal", "daytona", "coreweave"):
         print(variant, sandbox.run_code("40 + 2").text)  # "42" on each
 ```
 
-What the interface cannot do is give a backend a capability it does not have.
+What the interface cannot do is give a provider a capability it does not have.
 That is the other half of the comparison, and it is the table below.
 
-## What Each Backend Brings
+## What Each Provider Brings
 
-| Backend | Runs code in | State between calls | Rich display data | GPU | Management verbs |
+| Provider | Runs code in | State between calls | Rich display data | GPU | Management verbs |
 | --- | --- | --- | --- | --- | --- |
 | [`cloudflare`](/providers/cloudflare) | a container on the edge, through a bridge Worker | none — a process per snippet | no | not exposed here | create, get, delete |
 | [`coreweave`](/providers/coreweave) | a container on CoreWeave | a session process, falling back to none | no | `gpu=` | create, list, get, delete |
-| [`datalayer`](/providers/datalayer) | a Datalayer runtime | a kernel | yes | `gpu=` | create, list, get, update, delete |
+| [`datalayer`](/providers/datalayer) | a Datalayer runtime | a kernel | yes | `gpu=`, which picks a GPU environment | create, list, get, update, delete |
 | [`daytona`](/providers/daytona) | a Daytona sandbox | the code interpreter, one namespace per context | no | `gpu=`, spot capacity | create, list, get, update, delete |
 | [`e2b`](/providers/e2b) | a Firecracker microVM | a Jupyter kernel per context | yes | not exposed here | create, list, get, delete |
 | [`modal`](/providers/modal) | a Modal container | a session process, falling back to none | no | `gpu=` | create, list, get, update, delete |
@@ -78,7 +78,7 @@ That is the other half of the comparison, and it is the table below.
 "Not exposed here" is about this package, not about the vendor: it means the
 variant has no `gpu=` to pass on, not that the platform has no hardware.
 
-The local backends answer the same interface with none of the accounts:
+The local providers answer the same interface with none of the accounts:
 [`docker`](/providers/docker) runs a container on this machine,
 [`jupyter-server`](/providers/jupyter-server) a kernel of a Jupyter Server,
 [`monty`](/providers/monty) a restricted Python subset in this process, and
@@ -100,12 +100,12 @@ the left column is the same sentence in every row, and the others are not.
 | Shell command | `sandbox.commands.run(cmd)` | `sandbox.commands.run(cmd)` | `sandbox.exec(*args)` |
 | Write a file | `sandbox.files.write(path, content)` | `sandbox.files.write(path, content)` | `sandbox.open(path, "w")` |
 | Read a file | `sandbox.files.read(path)` | `sandbox.files.read(path)` | `sandbox.open(path)` |
-| Extend the life | `sandbox.set_timeout(seconds)` | `sandbox.set_timeout(seconds)` | — |
-| Terminate | `sandbox.terminate()` | `sandbox.kill()` | `sandbox.terminate()` |
+| Extend the life | `sandbox.set_timeout(...)` (e2b, datalayer) | `sandbox.set_timeout(seconds)` | — |
+| Terminate | `sandbox.stop()` | `sandbox.kill()` | `sandbox.terminate()` |
 | List what is running | `get_manager(variant).list()` | `Sandbox.list()` | `modal.Sandbox.list()` |
 | A GPU | `Sandbox.create(variant="modal", gpu="T4")` | — | `modal.Sandbox.create(gpu="T4")` |
 
-Where a backend has nothing for a row, the variant either builds it —
+Where a provider has nothing for a row, the variant either builds it —
 Cloudflare and CoreWeave run each snippet through a small program that reports
 the trailing expression and the traceback, because `exec` on its own reports
 neither — or refuses it, and its page says which.
@@ -147,7 +147,7 @@ reclaimed. See [Daytona](/providers/daytona).
 ## Coming from E2B
 
 The sandbox is the same sandbox; what changes is the interface in front of it,
-and that a second backend costs one string.
+and that a second provider costs one string.
 
 ```python
 # E2B, directly
@@ -193,9 +193,9 @@ with Sandbox.create(variant="modal", gpu="T4") as sandbox:
 Credentials are Modal's own — `modal token new`, or `MODAL_TOKEN_ID` with
 `MODAL_TOKEN_SECRET`. See [Modal](/providers/modal).
 
-## Choosing a Backend
+## Choosing a Provider
 
-| Use case | Backend |
+| Use case | Provider |
 |----------|---------|
 | Development and tests, no account, no isolation | `eval` |
 | LLM-generated snippets that must not touch the host | `monty` |
@@ -210,9 +210,9 @@ Credentials are Modal's own — `modal token new`, or `MODAL_TOKEN_ID` with
 ## What This Package Is Not
 
 It is not a compute platform. Capacity, regions, quotas, cold starts and the
-bill belong to the backend you chose, and no interface in front of them changes
+bill belong to the provider you chose, and no interface in front of them changes
 any of it. It adds no isolation either: an `eval` sandbox is `exec()` in this
 process however carefully the result is reported, and a sandbox is only as
-contained as the backend running it.
+contained as the provider running it.
 
 What it does is make the choice reversible.

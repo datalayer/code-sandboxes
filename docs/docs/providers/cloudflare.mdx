@@ -41,8 +41,11 @@ sandbox.run_code("x + 2").code_error.name  # "NameError"
    It answers with a URL of the shape
    `https://cloudflare-sandbox-bridge.<subdomain>.workers.dev` and a
    `SANDBOX_API_KEY` secret.
-2. Export both — this variant needs **both**, since a bridge on the public
-   internet with no key is a sandbox anybody may run code in:
+2. Export the URL, which is required, and the key, which every bridge
+   deployed with one requires — a bridge on the public internet with no key is
+   a sandbox anybody may run code in, and only a local development bridge
+   should have none. The provider is listed as available only when both are
+   set:
    ```bash
    export CLOUDFLARE_SANDBOX_API_URL="https://cloudflare-sandbox-bridge.example.workers.dev"
    export CLOUDFLARE_SANDBOX_API_KEY="..."
@@ -135,10 +138,11 @@ with one JSON line, so:
 - There is no interrupt: `sandbox.interrupt()` answers `False`, and a runaway
   execution is stopped by its timeout.
 - Reading a variable is **refused**, with the reason: `get_variable` binds the
-  value in one execution and reads it back in a second, and this backend's
-  first process is gone before the second starts. `sandbox.commands.run`, which
-  is built on it, is refused the same way. Have the snippet print what you
-  need, or keep it in a file.
+  value in one execution and reads it back in a second, and this provider's
+  first process is gone before the second starts. `sandbox.commands.run` is
+  built on it: the command still runs, but its output cannot be read back, so
+  it answers with `exit_code=-1` and that reason in `stderr` rather than
+  raising. Have the snippet print what you need, or keep it in a file.
 - `sandbox.files.read` and `.write` **do** work: they go through the bridge's
   own file endpoints rather than through a variable, which is one round trip
   and needs no session. So do `upload_file` and `download_file`.

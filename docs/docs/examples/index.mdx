@@ -8,7 +8,7 @@ sidebar_position: 6
 The Daytona, E2B, and Modal `exec` and `repl` examples use a real Jupyter
 Server over provider ingress by default. Pass `--direct` to use the provider
 SDK adapter instead. See
-[Jupyter over provider ingress](/guide/provider-ingress).
+[Jupyter over Provider Ingress](/provider-ingress).
 
 The repository carries a runnable example for every variant, in two sets that
 differ only in what they do with the sandbox once it is open.
@@ -60,7 +60,7 @@ round it.
 ```text
 sandbox(daytona:tan-law-5384)>>> :examples
 
-# What the GPU is, straight from the driver
+# 1. What the GPU is, straight from the driver
 import subprocess
 print(subprocess.run(["nvidia-smi"], capture_output=True, text=True).stdout)
 ...
@@ -80,8 +80,8 @@ to pick one to run. The credentials themselves are documented under
 | [Eval](/providers/eval) | `make eval` | nothing | — |
 | [Monty](/providers/monty) | `make monty` | nothing | `[monty]` |
 | [Docker](/providers/docker) | `make docker` | a Docker daemon | `[docker]` |
-| [Jupyter Server](/providers/jupyter-server) | `make jupyter-server` | a running Jupyter Server, `JUPYTER_SERVER_URL` | — |
-| [Datalayer](/providers/datalayer) | `make datalayer` | `DATALAYER_TOKEN` | `[datalayer]` |
+| [Jupyter Server](/providers/jupyter-server) | `make jupyter-server` | nothing — a local Jupyter Server is started for you | — |
+| [Datalayer](/providers/datalayer) | `make datalayer` | `DATALAYER_API_KEY` | `[datalayer]` |
 | [E2B](/providers/e2b) | `make e2b` | `E2B_API_KEY` | `[e2b]` |
 | [Modal](/providers/modal) | `make modal` | `MODAL_TOKEN_ID` + `MODAL_TOKEN_SECRET` | `[modal]` |
 | [Daytona](/providers/daytona) | `make daytona` | `DAYTONA_API_KEY` | `[daytona]` |
@@ -96,7 +96,7 @@ Most of the examples say the same thing in the same shape, because most of the
 variants behave the same way. Two do not, and the difference is the point:
 
 - **[Cloudflare](https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/cloudflare_sandbox_example.py)**
-  demonstrates a stateless backend: it shows `x = 1` in one snippet failing to
+  demonstrates a stateless provider: it shows `x = 1` in one snippet failing to
   be there in the next, and then both ways round it — putting what shares state
   into one snippet, or keeping it in a file, which does persist.
 - **[E2B](https://github.com/datalayer/code-sandboxes/blob/main/examples/exec/e2b_sandbox_example.py)**

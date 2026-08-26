@@ -34,7 +34,7 @@ This section clarifies what the package owns versus what is delegated to adjacen
 - ✅ Execute Python/shell code safely in isolated environments
 - ✅ Provide filesystem operations (read, write, list, upload, download)
 - ✅ Run shell commands with streaming output
-- ✅ Manage sandbox lifecycle (start, stop, snapshot)
+- ✅ Manage sandbox lifecycle (start, stop, and snapshot on `datalayer`)
 - ✅ Support multiple execution variants through one API
 
 **Not Responsible For:**
@@ -51,10 +51,10 @@ This section clarifies what the package owns versus what is delegated to adjacen
 - **🧭 Unified Client API**: Use `CodeSandboxClient` for variant-agnostic execution and streaming
 - **📊 Detailed Status Reporting**: Distinguish between infrastructure and code-level failures
 - **🎯 Pydantic Models**: Type-safe models with automatic validation and JSON serialization
-- **⚡ Multiple Backends**: eval, Docker, Jupyter, Monty, Kaggle, Colab, Modal, Daytona, E2B, CoreWeave, Cloudflare, and Datalayer
+- **⚡ Multiple Providers**: eval, Docker, Jupyter, Monty, Kaggle, Colab, Modal, Daytona, E2B, CoreWeave, Cloudflare, and Datalayer
 - **🔄 State Persistence**: Maintain variables and context between executions
 - **📊 Rich Output**: Support for text, HTML, images, and structured data
-- **📸 Snapshots**: Save and restore sandbox state
+- **📸 Snapshots**: Save and restore sandbox state (`datalayer`)
 - **🚀 GPU Support**: Access GPU compute for ML workloads
 
 ## Sandbox Variants
@@ -155,4 +155,4 @@ executor = SandboxExecutor(sandbox)
 
 Code Sandboxes is open source, and a new variant is a well-worn path: see
 [Contribute](/contribute) for the development setup, the CI workflows, and
-what wiring up a backend takes.
+what wiring up a provider takes.

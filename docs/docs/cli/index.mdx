@@ -162,8 +162,9 @@ needs.
   deployed with. Each snippet — and each line of the REPL — runs in a process
   of its own, so a definition on one line is gone by the next.
 - `coreweave`: starts a CoreWeave sandbox and holds a session process for it,
-  so lines share a namespace. `--gpu` is not passed on for this variant; a GPU
-  is asked for from Python, `Sandbox.create(variant="coreweave", gpu="H100")`.
+  so lines share a namespace. `--gpu` takes a CoreWeave GPU kind; CoreWeave
+  places a sandbox on runners of one kind only, so if several are given
+  comma-separated the first one is used rather than walked as a fallback list.
 - `daytona`: starts a Daytona sandbox; `--gpu` takes Daytona's own flavors
   (`H100`, `H200`, `RTX-4090`, ...), several of them comma-separated to fall
   back along, and `--spot` runs on preemptible capacity.
@@ -236,7 +237,7 @@ code-sandboxes delete sb-XXXX -v modal --yes
 # Create a sandbox and leave it running, detached from this process
 code-sandboxes create -v modal
 code-sandboxes create -v docker
-code-sandboxes create -v jupyter --server-url http://localhost:8888
+code-sandboxes create -v jupyter-server --server-url http://localhost:8888
 
 # The environments sandboxes can be created in
 code-sandboxes environments
@@ -293,7 +294,7 @@ get_manager("datalayer", token="...", run_url="https://...")
 | `kaggle` | a kernel on kaggle.com (batch mode creates one per run) | the code (a new version) | the kernel |
 | `modal` | a Modal sandbox of the `code-sandboxes` app | the tags | the Modal sandbox |
 
-Not every backend can honour every verb. A manager states what it supports
+Not every provider can honour every verb. A manager states what it supports
 through `manager.capabilities` and raises `SandboxManagementError` with the
 reason for the rest — an `eval` sandbox lives and dies inside the process that
 made it, so `list` truthfully answers `[]` and `delete` explains itself rather

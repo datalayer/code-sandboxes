@@ -78,8 +78,8 @@ def test_datalayer_declares_the_credentials_its_listing_takes():
     provider = get_provider("datalayer")
 
     assert provider.environment_secrets == (
-        ("token", "DATALAYER_TOKEN"),
-        ("run_url", "DATALAYER_RUN_URL"),
+        ("token", "DATALAYER_API_KEY"),
+        ("run_url", "DATALAYER_RUNTIMES_URL"),
     )
 
 
@@ -98,7 +98,7 @@ def test_the_catalog_answers_both_questions_from_the_same_secrets(monkeypatch):
 
     monkeypatch.setattr(Sandbox, "list_environments", classmethod(fake_list_environments))
 
-    catalog = provider_catalog({"DATALAYER_TOKEN": "account-token"})
+    catalog = provider_catalog({"DATALAYER_API_KEY": "account-token"})
     datalayer = next(entry for entry in catalog if entry["name"] == "datalayer")
 
     assert datalayer["enabled"]
@@ -122,7 +122,7 @@ def test_a_provider_that_is_not_enabled_is_never_asked(monkeypatch):
 
 
 def test_availability_is_read_from_the_secrets_given_not_from_the_process():
-    names = {provider.name for provider in available_providers({"DATALAYER_TOKEN": "t"})}
+    names = {provider.name for provider in available_providers({"DATALAYER_API_KEY": "t"})}
 
     assert "datalayer" in names
     # Nothing was read from os.environ: a provider with no requirements is
