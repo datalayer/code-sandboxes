@@ -78,7 +78,7 @@ def test_repl_colab_prompts_and_forwards_credentials(monkeypatch):
     assert captured["kwargs"]["variant"] == "google-colab"
     assert captured["kwargs"]["server_url"] == "https://colab-host.example"
     assert captured["kwargs"]["kernel_id"] == "kernel-abc"
-    assert captured["kwargs"]["proxy_token"] == "proxy-xyz"  # noqa: S105
+    assert captured["kwargs"]["proxy_token"] == "proxy-xyz"
 
 
 def test_repl_kaggle_prompts_and_forwards_credentials(monkeypatch):
@@ -100,7 +100,7 @@ def test_repl_kaggle_prompts_and_forwards_credentials(monkeypatch):
     assert captured["kwargs"]["variant"] == "kaggle"
     assert captured["kwargs"]["server_url"] == "https://kaggle-host.example/proxy"
     assert captured["kwargs"]["kernel_id"] == "kernel-abc"
-    assert captured["kwargs"]["token"] == "env-token"  # noqa: S105
+    assert captured["kwargs"]["token"] == "env-token"
 
 
 def test_repl_kaggle_creates_kernel_without_kernel_id(monkeypatch):
@@ -122,7 +122,7 @@ def test_repl_kaggle_creates_kernel_without_kernel_id(monkeypatch):
     assert captured["kwargs"]["variant"] == "kaggle"
     assert captured["kwargs"]["server_url"] == "https://kaggle-host.example/proxy"
     assert "kernel_id" not in captured["kwargs"]
-    assert captured["kwargs"]["token"] == "env-token"  # noqa: S105
+    assert captured["kwargs"]["token"] == "env-token"
 
 
 def test_root_defaults_to_jupyter_repl(monkeypatch):

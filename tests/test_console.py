@@ -13,6 +13,7 @@ is shown, whether stderr is told apart, and what ends a session.
 from __future__ import annotations
 
 import builtins
+from types import SimpleNamespace
 
 import pytest
 from rich.console import Console
@@ -167,6 +168,25 @@ def test_show_and_run_prints_the_code_then_the_answer():
     assert "    1 + 1" in rendered
 
 
+def test_show_and_run_prints_callback_output_before_execution_returns():
+    console, _ = _console()
+
+    class StreamingSandbox(_FakeSandbox):
+        def run_code(self, code: str, **kwargs) -> ExecutionResult:
+            kwargs["on_stdout"](OutputMessage(line="first"))
+            # The first event is visible while execution is still in progress.
+            assert "first" in console.export_text(clear=False)
+            kwargs["on_stdout"](OutputMessage(line="second"))
+            return _result(stdout="first\nsecond")
+
+    result = show_and_run(StreamingSandbox(), "stream()", console=console)
+
+    assert result.stdout == "first\nsecond"
+    rendered = _rendered(console)
+    assert rendered.count("    first") == 1
+    assert rendered.count("    second") == 1
+
+
 # --- The prompt -----------------------------------------------------------
 
 
@@ -201,6 +221,126 @@ def test_every_exit_command_leaves(monkeypatch, command):
     run_repl(sandbox, console=console, banner=False)
 
     assert sandbox.ran == []
+
+
+def test_examples_prints_the_snippets_and_runs_none_of_them(monkeypatch):
+    """`:examples` is for a person with a cursor: it shows, it does not run."""
+    console, _ = _console()
+    sandbox = _FakeSandbox()
+    _typing(monkeypatch, ":examples", ":exit")
+
+    run_repl(
+        sandbox,
+        console=console,
+        banner=False,
+        examples=[("Discover the GPU", "import torch\ntorch.cuda.get_device_name(0)")],
+    )
+
+    rendered = _rendered(console)
+    assert "# 1. Discover the GPU" in rendered
+    assert "torch.cuda.get_device_name(0)" in rendered
+    # Shown, never executed: the sandbox was not asked to run a thing.
+    assert sandbox.ran == []
+
+
+def test_examples_come_from_the_sandbox_they_were_created_with(monkeypatch):
+    """Declared once at creation; the prompt needs no arrangement of its own."""
+    console, _ = _console()
+    sandbox = _FakeSandbox()
+    sandbox.config = SimpleNamespace(examples=[("From the config", "1 + 1")])
+    _typing(monkeypatch, ":examples", ":exit")
+
+    run_repl(sandbox, console=console, banner=False)
+
+    assert "# 1. From the config" in _rendered(console)
+
+
+def test_an_example_can_be_run_by_its_number(monkeypatch):
+    """`:examples:2` is for a reader who wants the answer, not the paste."""
+    console, _ = _console()
+    sandbox = _FakeSandbox({"second()": _result(text="ok")})
+    _typing(monkeypatch, ":examples:2", ":exit")
+
+    run_repl(
+        sandbox,
+        console=console,
+        banner=False,
+        examples=[("First", "first()"), ("Second", "second()")],
+    )
+
+    # Run, and shown before it ran: an answer with no visible cause is worse.
+    assert sandbox.ran == ["second()"]
+    assert "    second()" in _rendered(console)
+
+
+def test_a_number_that_is_not_an_example_is_refused_without_running_anything(monkeypatch):
+    console, _ = _console()
+    sandbox = _FakeSandbox()
+    _typing(monkeypatch, ":examples:9", ":examples:x", ":exit")
+
+    run_repl(sandbox, console=console, banner=False, examples=[("Only one", "1")])
+
+    assert sandbox.ran == []
+    assert sum("no example" in line for line in _rendered(console)) == 2
+
+
+def test_brackets_in_a_snippet_survive_being_printed(monkeypatch):
+    """Rich reads `[...]` as a style tag, so a type hint would print mangled —
+    and be wrong exactly where someone was about to copy it."""
+    console, _ = _console()
+    _typing(monkeypatch, ":examples", ":exit")
+
+    run_repl(
+        _FakeSandbox(),
+        console=console,
+        banner=False,
+        examples=[("Types", "items: list[str] = []\nitems[0:1]")],
+    )
+
+    rendered = _rendered(console)
+    assert "items: list[str] = []" in rendered
+    assert "items[0:1]" in rendered
+
+
+def test_a_prompt_with_no_examples_says_so_rather_than_printing_nothing(monkeypatch):
+    console, _ = _console()
+    _typing(monkeypatch, ":examples", ":exit")
+
+    run_repl(_FakeSandbox(), console=console, banner=False)
+
+    assert "This sandbox ships no examples." in _rendered(console)
+
+
+def test_the_help_names_examples_only_when_there_are_some(monkeypatch):
+    """An empty command in the help is worse than no mention of it."""
+    with_examples, _ = _console()
+    _typing(monkeypatch, ":help", ":exit")
+    run_repl(_FakeSandbox(), console=with_examples, banner=False, examples=[("A", "1")])
+    assert any(":examples" in line for line in _rendered(with_examples))
+
+    without, _ = _console()
+    _typing(monkeypatch, ":help", ":exit")
+    run_repl(_FakeSandbox(), console=without, banner=False)
+    assert not any(":examples" in line for line in _rendered(without))
+
+
+def test_a_snippet_is_printed_dedented_so_it_can_be_pasted(monkeypatch):
+    """It is copied straight into the prompt, so leading indentation would
+    reach the interpreter as an IndentationError."""
+    console, _ = _console()
+    _typing(monkeypatch, ":examples", ":exit")
+
+    run_repl(
+        _FakeSandbox(),
+        console=console,
+        banner=False,
+        examples=[("Indented in the source", "\n            x = 21\n            x * 2\n")],
+    )
+
+    rendered = _rendered(console)
+    # Flush left, exactly as it must arrive at the prompt.
+    assert "x = 21" in rendered
+    assert not any(line.startswith(" ") and line.strip() == "x = 21" for line in rendered)
 
 
 def test_the_prompt_runs_what_is_typed_and_shows_the_answer(monkeypatch):

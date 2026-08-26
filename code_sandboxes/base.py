@@ -19,6 +19,8 @@ from .models import (
     CodeError,
     Context,
     ExecutionResult,
+    JupyterServerEndpoint,
+    JupyterServerOptions,
     OutputHandler,
     OutputMessage,
     Result,
@@ -138,6 +140,20 @@ class Sandbox(ABC):
         """Expose an optional kernel client interface for kernel-backed variants."""
         return None
 
+    def prepare_jupyter_server(
+        self, options: JupyterServerOptions | None = None
+    ) -> JupyterServerEndpoint:
+        """Install, start and expose a real Jupyter Server in this sandbox.
+
+        Cloud-container providers override this method.  It is intentionally
+        separate from :meth:`start`: callers using the lightweight code API
+        should not pay the Jupyter installation and startup cost.
+        """
+        del options
+        raise NotImplementedError(
+            f"{type(self).__name__} does not expose Jupyter over provider ingress"
+        )
+
     def interrupt(self) -> bool:
         """Request interruption of the currently running code.
 
@@ -220,6 +236,7 @@ class Sandbox(ABC):
         network_policy: str | None = None,
         allowed_hosts: list[str] | None = None,
         tags: dict[str, str] | None = None,
+        examples: list[tuple[str, str]] | None = None,
         **kwargs,
     ) -> Sandbox:
         """Factory method to create a sandbox of the specified variant.
@@ -283,7 +300,13 @@ class Sandbox(ABC):
                 name=name or generate_sandbox_name(),
                 network_policy=network_policy or "inherit",
                 allowed_hosts=allowed_hosts or [],
+                examples=examples or [],
             )
+        elif examples:
+            # A caller who brought a whole config AND a list of examples means
+            # the examples: the config is the machine, these are what to try on
+            # it, and silently dropping them would be the surprising reading.
+            config = config.model_copy(update={"examples": list(examples)})
 
         from .eval_sandbox import EvalSandbox
 

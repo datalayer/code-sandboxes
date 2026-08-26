@@ -21,7 +21,7 @@ being lost.
 import argparse
 import os
 
-from code_sandboxes import Sandbox, show_and_run
+from code_sandboxes import Sandbox, provider_ingress_execution, show_and_run
 
 
 def _parse_args() -> argparse.Namespace:
@@ -36,6 +36,11 @@ def _parse_args() -> argparse.Namespace:
             "the interpreter this variant drives."
         ),
     )
+    parser.add_argument(
+        "--direct",
+        action="store_true",
+        help="Execute directly through the E2B code-interpreter adapter.",
+    )
     return parser.parse_args()
 
 
@@ -49,8 +54,11 @@ def main() -> None:
     print(f"Launching e2b sandbox from template: {args.template or 'code-interpreter-v1'}")
 
     try:
-        with Sandbox.create(variant="e2b", timeout=60, template=args.template) as sandbox:
-            print(f"Sandbox: {sandbox.sandbox_id}")
+        with (
+            Sandbox.create(variant="e2b", timeout=60, template=args.template) as provider,
+            provider_ingress_execution(provider, direct=args.direct) as sandbox,
+        ):
+            print(f"Sandbox: {provider.sandbox_id}")
 
             # What tells this variant apart from a per-snippet runner: the
             # kernel holds one namespace, so the second snippet sees what the
@@ -63,6 +71,12 @@ def main() -> None:
                     f"State did not survive between snippets: x + 2 gave {state.text!r}."
                 )
             print("state verified: the namespace is shared between snippets.")
+
+            print("-- streaming: one number should appear every second --")
+            show_and_run(
+                sandbox,
+                "import time\nfor i in range(1, 10):\n    print(i)\n    time.sleep(1)",
+            )
 
             # A kernel has a channel for rich display data, which a process
             # writing to stdout has not: what the code displays arrives as a
@@ -78,17 +92,17 @@ def main() -> None:
             # E2B takes a sandbox down when its timeout runs out, whatever it
             # is doing — so a long job says so before it starts, and the count
             # restarts at the call.
-            sandbox.set_timeout(300)
+            provider.set_timeout(300)
             print("timeout extended: the sandbox has five minutes from now.")
 
             # Every port inside has a public host of its own, which is what
             # makes a server started in the sandbox reachable without a tunnel.
-            print("host for port 8000:", sandbox.get_host(8000))
+            print("host for port 8000:", provider.get_host(8000))
 
             # Bytes take the filesystem of the sandbox, not a program that
             # decodes them.
-            sandbox.files.write_bytes("/tmp/hello.bin", b"from e2b")
-            print("file round trip:", sandbox.files.read_bytes("/tmp/hello.bin"))
+            provider.files.write_bytes("/tmp/hello.bin", b"from e2b")
+            print("file round trip:", provider.files.read_bytes("/tmp/hello.bin"))
 
             # The error path, demonstrated ON PURPOSE: the run must not die,
             # the failure must come back as a `code_error` on the result. Said

@@ -107,10 +107,15 @@ warning, when on-demand capacity needs it.
 Sandbox.create(variant="daytona", gpu="H100,H200", spot=True)
 ```
 
-Spot is GPU-only, and it is built from an image with `auto_delete_interval=0`
-so a reclaimed sandbox does not linger. Both are checked here: `spot=True`
-without a `gpu=`, or together with a `snapshot=`, is refused with the reason
-rather than coming back as an API error.
+Spot is GPU-only and is built from an image rather than from a snapshot. Both
+are checked here: `spot=True` without a `gpu=`, or together with a `snapshot=`,
+is refused with the reason rather than coming back as an API error.
+
+Every GPU sandbox is created as **ephemeral** — `auto_delete_interval=0`, so it
+is deleted rather than kept when it stops. That is Daytona's rule, not this
+package's: it refuses any other value with *"GPU sandboxes must be ephemeral"*.
+It applies to on-demand GPUs as much as to preemptible ones, so a GPU sandbox
+cannot be created detached and picked up later the way a plain one can.
 
 An ordered list of GPUs is worth more on spot than anywhere else — what is
 free changes minute to minute.

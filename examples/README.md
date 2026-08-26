@@ -72,6 +72,26 @@ make modal
 make monty
 ```
 
+The Daytona, E2B, and Modal exec examples include a timed loop that prints the
+numbers 1 through 9 one per second. Each number is rendered as it arrives; the
+example does not wait for the loop to finish before displaying its output.
+
+Daytona, E2B, and Modal use Jupyter over provider ingress by default. Use
+`--direct` to execute through the provider SDK adapter instead:
+
+```bash
+# Python entry points accept the flag directly.
+python daytona_sandbox_example.py --direct
+python e2b_sandbox_example.py --direct
+python modal_sandbox_example.py --direct
+
+# GNU Make consumes command-line options itself, so pass example flags through
+# the ARGS variable rather than writing `make daytona --direct`.
+make daytona ARGS=--direct
+make e2b ARGS=--direct
+make modal ARGS=--direct
+```
+
 Run REPL examples from `examples/repl/`:
 
 ```bash
@@ -88,6 +108,13 @@ make jupyter-server
 make kaggle
 make modal
 make monty
+```
+
+The REPL entry points use the same mode selection:
+
+```bash
+python daytona_sandbox_example.py --direct
+make daytona ARGS=--direct
 ```
 
 Notes by variant:

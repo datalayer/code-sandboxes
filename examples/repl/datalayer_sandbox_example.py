@@ -6,6 +6,42 @@
 from code_sandboxes import Sandbox, run_repl
 
 
+def _examples() -> list[tuple[str, str]]:
+    """Snippets worth pasting into this sandbox, for `:examples`."""
+    return [
+        (
+            "State is kept between lines",
+            """
+            totals = [1, 2, 3]
+            totals.append(4)
+            sum(totals)
+            """,
+        ),
+        (
+            "Where this is running",
+            """
+            import platform, sys
+            platform.node(), platform.platform(), sys.version.split()[0]
+            """,
+        ),
+        (
+            "What the runtime was given",
+            """
+            import os
+            {k: v for k, v in os.environ.items() if k.startswith("DATALAYER_")}
+            """,
+        ),
+        (
+            "The filesystem is the sandbox's own",
+            """
+            from pathlib import Path
+            Path("/tmp/notes.txt").write_text("written inside the sandbox")
+            Path("/tmp/notes.txt").read_text()
+            """,
+        ),
+    ]
+
+
 def main() -> None:
     try:
         environments = Sandbox.list_environments(variant="datalayer")
@@ -19,6 +55,7 @@ def main() -> None:
             variant="datalayer",
             timeout=60,
             environment=first_env.name,
+            examples=_examples(),
         ) as sandbox:
             run_repl(sandbox)
     except Exception as exc:

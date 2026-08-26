@@ -35,6 +35,24 @@ class SandboxEnvironment(BaseModel):
     burning_rate: float = 0.0
     metadata: Optional[dict[str, Any]] = None
 
+    #: What the environment runs on, where the provider says.
+    #:
+    #: Named rather than buried in `metadata` because these are what a person
+    #: choosing an environment compares — a surface listing them should not
+    #: have to know which key each provider happened to use. Every one is
+    #: optional and absent means UNKNOWN, not zero: a provider that does not
+    #: publish its CPU allocation should be reported as not saying, rather
+    #: than as giving none.
+    #:
+    #: `gpu` is the card as the provider names it, `gpu_memory` what that card
+    #: carries — see `gpu_memory()`, which knows the hardware rather than the
+    #: provider. Sizes are written the way the platform writes them: `16Gi`.
+    cpu: Optional[str] = None
+    memory: Optional[str] = None
+    gpu: Optional[str] = None
+    gpu_count: Optional[int] = None
+    gpu_memory: Optional[str] = None
+
 
 class MIMEType(str, Enum):
     """Common MIME types for execution results."""
@@ -103,6 +121,44 @@ class GPUType(str, Enum):
     A100_80GB = "A100-80GB"
     H100 = "H100"
     L4 = "L4"
+
+
+#: What each card carries, by the name a provider offers it under.
+#:
+#: A property of the HARDWARE, not of any provider: an H100 has 80 GB whoever
+#: rents it out. Kept here so a surface listing environments can say what a
+#: GPU environment actually gets without every provider repeating it, and so
+#: that a name nobody here knows is reported as unknown rather than guessed
+#: at. Aliases are spelled the way the providers spell them.
+GPU_MEMORY: dict[str, str] = {
+    "T4": "16Gi",
+    "L4": "24Gi",
+    "A10G": "24Gi",
+    "A100": "40Gi",
+    "A100-80GB": "80Gi",
+    "H100": "80Gi",
+    "H200": "141Gi",
+    "RTX-4090": "24Gi",
+    # Kaggle names its accelerators in full.
+    "NvidiaTeslaT4": "16Gi",
+    "NvidiaTeslaP100": "16Gi",
+}
+
+
+def gpu_memory(gpu: str | None) -> str | None:
+    """How much memory that card has, or None when it is not one we know.
+
+    The name arrives as a provider spells it, and several are asked for as an
+    ordered list of preferences — `"H100,H200"` — of which the first is the
+    one that would be given.
+    """
+    if not gpu:
+        return None
+    first = gpu.split(",")[0].strip()
+    for name, memory in GPU_MEMORY.items():
+        if name.lower() == first.lower():
+            return memory
+    return None
 
 
 class ResourceConfig(BaseModel):
@@ -465,6 +521,15 @@ class SandboxConfig(BaseModel):
     idle_timeout: Optional[float] = None
     max_lifetime: float = 86400.0  # 24 hours default like Modal
 
+    #: Snippets worth running in THIS sandbox, as (title, code) pairs.
+    #:
+    #: They belong to the sandbox rather than to the prompt because what is
+    #: worth trying depends on what was created: a sandbox with an H100 in it
+    #: wants device discovery and a matmul, one that runs in this very process
+    #: wants neither. `run_repl` reads them from here, so a caller passes them
+    #: once, at creation, and the prompt needs no arrangement of its own.
+    examples: list[tuple[str, str]] = Field(default_factory=list)
+
 
 class SandboxInfo(BaseModel):
     """Information about a running sandbox.
@@ -553,3 +618,32 @@ class TunnelInfo(BaseModel):
 
     def __repr__(self) -> str:
         return f"TunnelInfo(port={self.port}, url={self.url!r})"
+
+
+class JupyterServerEndpoint(BaseModel):
+    """A provider ingress endpoint for a Jupyter Server in a sandbox.
+
+    ``headers`` authenticate the provider ingress and ``query`` authenticates
+    Jupyter itself.  They are deliberately separate: Modal, for example,
+    consumes the HTTP Authorization header before the request reaches
+    Jupyter.  The values are secrets and are therefore omitted from reprs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    port: int
+    http_url: str
+    websocket_url: str
+    headers: dict[str, str] = Field(default_factory=dict, repr=False)
+    query: dict[str, str] = Field(default_factory=dict, repr=False)
+
+
+class JupyterServerOptions(BaseModel):
+    """Options for preparing a real Jupyter Server inside a sandbox."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    port: int = 8888
+    token: Optional[str] = Field(default=None, repr=False)
+    install_if_missing: bool = True
+    install_timeout: float = 180.0

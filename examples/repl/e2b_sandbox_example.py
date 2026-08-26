@@ -19,7 +19,7 @@ with its value.
 import argparse
 import os
 
-from code_sandboxes import Sandbox, run_repl
+from code_sandboxes import Sandbox, provider_ingress_execution, run_repl
 
 
 def _parse_args() -> argparse.Namespace:
@@ -44,7 +44,60 @@ def _parse_args() -> argparse.Namespace:
             "somebody is still typing at."
         ),
     )
+    parser.add_argument(
+        "--direct",
+        action="store_true",
+        help="Execute directly through the E2B code-interpreter adapter.",
+    )
     return parser.parse_args()
+
+
+def _examples() -> list[tuple[str, str]]:
+    """Snippets worth pasting into this sandbox, for `:examples`."""
+    return [
+        (
+            "State is kept between lines",
+            """
+            totals = [1, 2, 3]
+            totals.append(4)
+            sum(totals)
+            """,
+        ),
+        (
+            "The one backend that answers with rich outputs: this is an image",
+            """
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots()
+            ax.plot([1, 4, 9, 16], marker="o")
+            ax.set_title("returned as a PNG, not as text")
+            fig
+            """,
+        ),
+        (
+            "And an HTML repr comes back as HTML",
+            """
+            import pandas as pd
+            pd.DataFrame({"variant": ["e2b", "daytona"], "state": [True, True]})
+            """,
+        ),
+        (
+            "Where this is running",
+            """
+            import platform, sys
+            platform.node(), platform.platform(), sys.version.split()[0]
+            """,
+        ),
+        (
+            "The filesystem is the sandbox's own",
+            """
+            from pathlib import Path
+            Path("/tmp/notes.txt").write_text("written inside the sandbox")
+            Path("/tmp/notes.txt").read_text()
+            """,
+        ),
+    ]
 
 
 def main() -> None:
@@ -57,11 +110,16 @@ def main() -> None:
     print(f"Launching e2b sandbox REPL from template: {args.template or 'code-interpreter-v1'}")
 
     try:
-        with Sandbox.create(variant="e2b", timeout=60, template=args.template) as sandbox:
-            print(f"Sandbox: {sandbox.sandbox_id}")
+        with (
+            Sandbox.create(
+                variant="e2b", timeout=60, template=args.template, examples=_examples()
+            ) as provider,
+            provider_ingress_execution(provider, direct=args.direct) as sandbox,
+        ):
+            print(f"Sandbox: {provider.sandbox_id}")
             # A REPL is read at human speed, and the default life of a sandbox
             # is shorter than a session usually is.
-            sandbox.set_timeout(args.minutes * 60)
+            provider.set_timeout(args.minutes * 60)
             run_repl(sandbox)
     except Exception as exc:
         print("e2b REPL failed:", exc)

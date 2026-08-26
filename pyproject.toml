@@ -21,10 +21,8 @@ classifiers = [
   "Programming Language :: Python :: 3",
 ]
 dependencies = [
-  # Readable names for sandboxes nobody named — what a person
-  # reads in the runtimes table instead of a bare identifier.
   "faker",
-  "jupyter-kernel-client",
+  "jupyter-kernel-client>=1.0.2",
   "jupyter-server",
   "jupyter-server-client",
   "pydantic>=2.0",
@@ -40,23 +38,23 @@ code-sandboxes = "code_sandboxes.cli:main"
 cloudflare = ["httpx>=0.27"]
 coreweave = ["cwsandbox>=1.6"]
 datalayer = ["agent_runtimes>=1.0.16"]
-daytona = ["daytona>=0.100"]
+daytona = ["daytona>=0.205.1"]
 docker = ["docker>=6.0"]
-e2b = ["e2b-code-interpreter>=2.0"]
+e2b = ["e2b-code-interpreter>=2.9.1"]
 google-colab = []
 kaggle = ["kaggle>=1.6"]
 monty = ["pydantic-monty"]
-modal = ["modal>=0.64"]
+modal = ["modal>=1.5.2"]
 all = [
   "agent_runtimes",
   "cwsandbox>=1.6",
-  "daytona>=0.100",
+  "daytona>=0.205.1",
   "docker>=6.0",
-  "e2b-code-interpreter>=2.0",
+  "e2b-code-interpreter>=2.9.1",
   "httpx>=0.27",
   "kaggle>=1.6",
   "pydantic-monty",
-  "modal>=0.64",
+  "modal>=1.5.2",
 ]
 test = [
   "ipykernel",
@@ -145,7 +143,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # S101 Use of `assert` detected
-"tests/*" = ["S101"]
+# S105/S106 the credentials a test asserts on are invented for the test
+"tests/*" = ["S101", "S105", "S106"]
 # Deprecated monolithic test module retained only as a skipped compatibility stub.
 "tests/test_sandboxes.py" = ["F821"]
 "examples/*" = ["S108", "T201"]

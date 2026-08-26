@@ -5,6 +5,11 @@ sidebar_position: 6
 
 # Examples
 
+The Daytona, E2B, and Modal `exec` and `repl` examples use a real Jupyter
+Server over provider ingress by default. Pass `--direct` to use the provider
+SDK adapter instead. See
+[Jupyter over provider ingress](/guide/provider-ingress).
+
 The repository carries a runnable example for every variant, in two sets that
 differ only in what they do with the sandbox once it is open.
 
@@ -43,6 +48,26 @@ make daytona-gpu-spot     # the same on preemptible capacity
 make coreweave-gpu        # COREWEAVE_GPU, default H100
 make kaggle-gpu           # KAGGLE_GPU, default T4
 ```
+
+## `:examples`, Once You Are In
+
+Every REPL example answers `:examples` at its prompt: a handful of snippets to
+copy straight in, chosen for the sandbox you actually opened. A GPU run offers
+device discovery and a timed matmul; a plain one offers state, packages and
+files; the Cloudflare one demonstrates its own statelessness and the two ways
+round it.
+
+```text
+sandbox(daytona:tan-law-5384)>>> :examples
+
+# What the GPU is, straight from the driver
+import subprocess
+print(subprocess.run(["nvidia-smi"], capture_output=True, text=True).stdout)
+...
+```
+
+Each line stands on its own, because the prompt reads one at a time — so a
+whole snippet can be pasted at once.
 
 ## What Each One Needs
 

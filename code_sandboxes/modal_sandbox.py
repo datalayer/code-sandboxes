@@ -27,10 +27,13 @@ from typing import Any
 
 from .base import Sandbox
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
+from .jupyter_ingress import preparation_command, resolved_options, websocket_url
 from .models import (
     CodeError,
     Context,
     ExecutionResult,
+    JupyterServerEndpoint,
+    JupyterServerOptions,
     Logs,
     OutputHandler,
     OutputMessage,
@@ -39,6 +42,7 @@ from .models import (
     SandboxEnvironment,
     SandboxInfo,
     SandboxStatus,
+    gpu_memory,
 )
 
 logger = logging.getLogger(__name__)
@@ -165,7 +169,38 @@ class ModalSandbox(Sandbox):
         self._sandbox = None
         self._sandbox_id = str(uuid.uuid4())
         self._execution_count = 0
+        self._jupyter_endpoint: JupyterServerEndpoint | None = None
         self._extra_kwargs = kwargs
+
+    def prepare_jupyter_server(
+        self, options: JupyterServerOptions | None = None
+    ) -> JupyterServerEndpoint:
+        """Prepare Jupyter and expose it through a Modal connect token."""
+        if not self._started or self._sandbox is None:
+            raise SandboxNotStartedError()
+        if self._jupyter_endpoint is not None:
+            return self._jupyter_endpoint
+
+        value = resolved_options(options)
+        process = self._sandbox.exec(
+            "sh", "-lc", preparation_command(value), timeout=math.ceil(value.install_timeout)
+        )
+        process.wait()
+        if getattr(process, "returncode", 0) not in (0, None):
+            stderr = process.stderr.read() if getattr(process, "stderr", None) else ""
+            raise SandboxConfigurationError(
+                "Could not install and start Jupyter Server in the Modal sandbox: " + str(stderr)
+            )
+        credentials = self._sandbox.create_connect_token(port=value.port)
+        url = credentials.url.rstrip("/")
+        self._jupyter_endpoint = JupyterServerEndpoint(
+            port=value.port,
+            http_url=url,
+            websocket_url=websocket_url(url),
+            headers={"Authorization": f"Bearer {credentials.token}"},
+            query={"token": value.token or ""},
+        )
+        return self._jupyter_endpoint
 
     @classmethod
     def list_environments(cls) -> list[SandboxEnvironment]:
@@ -193,6 +228,9 @@ class ModalSandbox(Sandbox):
                 owner="modal",
                 visibility="cloud",
                 burning_rate=0.0,
+                gpu="T4",
+                gpu_count=1,
+                gpu_memory=gpu_memory("T4"),
                 metadata={"variant": "modal", "gpu": "T4"},
             ),
         ]
@@ -335,6 +373,7 @@ class ModalSandbox(Sandbox):
                 logger.debug("Ignoring error while detaching Modal sandbox", exc_info=True)
             self._sandbox = None
         self._app = None
+        self._jupyter_endpoint = None
         self._started = False
         if self._info:
             self._info.status = SandboxStatus.STOPPED

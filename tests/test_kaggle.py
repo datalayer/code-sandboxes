@@ -52,13 +52,13 @@ def test_kaggle_kernel_client_uses_explicit_token(monkeypatch):
     KaggleKernelClient(
         server_url=SERVER_URL,
         kernel_id=KERNEL_ID,
-        token="explicit-token",  # noqa: S106
+        token="explicit-token",
         log=logging.getLogger("test"),
     )
 
     assert captured["server_url"] == SERVER_URL
     assert captured["kernel_id"] == KERNEL_ID
-    assert captured["token"] == "explicit-token"  # noqa: S105
+    assert captured["token"] == "explicit-token"
 
 
 def test_kaggle_kernel_client_reads_token_from_env(monkeypatch):
@@ -74,7 +74,7 @@ def test_kaggle_kernel_client_reads_token_from_env(monkeypatch):
 
     KaggleKernelClient(server_url=SERVER_URL)
 
-    assert captured["token"] == "env-token"  # noqa: S105
+    assert captured["token"] == "env-token"
 
 
 def test_kaggle_kernel_client_token_none_without_env(monkeypatch):
@@ -124,4 +124,4 @@ def test_kaggle_kernel_client_allows_missing_kernel_id_for_new_kernel(monkeypatc
     KaggleKernelClient(server_url=SERVER_URL)
 
     assert captured["kernel_id"] is None
-    assert captured["token"] == "env-token"  # noqa: S105
+    assert captured["token"] == "env-token"

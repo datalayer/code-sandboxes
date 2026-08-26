@@ -15,6 +15,42 @@ def _require(name: str) -> str:
     return value
 
 
+def _examples() -> list[tuple[str, str]]:
+    """Snippets worth pasting into this sandbox, for `:examples`."""
+    return [
+        (
+            "State is kept between lines",
+            """
+            totals = [1, 2, 3]
+            totals.append(4)
+            sum(totals)
+            """,
+        ),
+        (
+            "Where this is running",
+            """
+            import platform, sys
+            platform.node(), platform.platform(), sys.version.split()[0]
+            """,
+        ),
+        (
+            "What the Colab runtime was given, GPU included when there is one",
+            """
+            import subprocess
+            print(subprocess.run(["nvidia-smi"], capture_output=True, text=True).stdout or "no GPU")
+            """,
+        ),
+        (
+            "The filesystem is the sandbox's own",
+            """
+            from pathlib import Path
+            Path("/tmp/notes.txt").write_text("written inside the sandbox")
+            Path("/tmp/notes.txt").read_text()
+            """,
+        ),
+    ]
+
+
 def main() -> None:
     try:
         runtime_url = _require("RUNTIME_URL")
@@ -27,6 +63,7 @@ def main() -> None:
             server_url=runtime_url,
             kernel_id=runtime_id,
             proxy_token=runtime_proxy_token,
+            examples=_examples(),
         ) as sandbox:
             run_repl(sandbox)
     except Exception as exc:

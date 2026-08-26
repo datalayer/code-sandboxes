@@ -47,31 +47,25 @@ def _urls_for_run(run_url: str):
     prefix, so one URL is enough to reach all of them. `DatalayerURLs` has no
     constructor for that shape — it takes the services one by one — so they are
     filled in here rather than in the SDK.
+
+    Which services those are is read off the SDK rather than written down
+    here. A list copied from it goes stale the moment a URL is renamed there,
+    and it went stale exactly that way: `mcp_server_url` became
+    `jupyter_mcp_server_url` and every execution died on the unexpected
+    keyword, far from the rename that caused it. Asking the signature means a
+    new service is picked up for free and a renamed one cannot break this.
     """
+    import inspect
+
     from datalayer_core.utils.urls import DatalayerURLs
 
     base = (run_url or "").rstrip("/")
-    return DatalayerURLs.from_environment(
-        **dict.fromkeys(
-            [
-                "iam_url",
-                "runtimes_url",
-                "spacer_url",
-                "library_url",
-                "manager_url",
-                "ai_agents_url",
-                "ai_inference_url",
-                "otel_url",
-                "growth_url",
-                "success_url",
-                "status_url",
-                "support_url",
-                "mcp_server_url",
-                "scheduler_url",
-            ],
-            base,
-        )
-    )
+    services = [
+        name
+        for name in inspect.signature(DatalayerURLs.from_environment).parameters
+        if name.endswith("_url")
+    ]
+    return DatalayerURLs.from_environment(**dict.fromkeys(services, base))
 
 
 class DatalayerSandbox(Sandbox):
@@ -273,9 +267,18 @@ class DatalayerSandbox(Sandbox):
             from agent_runtimes.client import AgentClient
             from agent_runtimes.client.agent_client import DEFAULT_TIME_RESERVATION
         except ImportError as e:
+            # What actually failed, not what usually fails.
+            #
+            # The message used to name the missing package and the command
+            # that installs it, whatever the import error said. When the
+            # package WAS installed and one of these names had moved, it sent
+            # the reader to reinstall a dependency that was already there —
+            # the real reason, `cannot import name X`, was thrown away with
+            # the exception it was written on.
             raise SandboxConfigurationError(
-                "agent-runtimes package is required for DatalayerSandbox. "
-                "Install it with: pip install code-sandboxes[datalayer]"
+                f"DatalayerSandbox cannot be used: {e}. "
+                "If the package is missing, install it with: "
+                "pip install code-sandboxes[datalayer]"
             ) from e
 
         try:

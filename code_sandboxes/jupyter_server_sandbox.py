@@ -21,6 +21,7 @@ import tempfile
 import threading
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse, urlunparse
 
@@ -46,6 +47,10 @@ from .models import (
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 0
 DEFAULT_STARTUP_TIMEOUT = 30.0
+
+#: How many of the server's last lines are kept, to quote when it will not
+#: start. Enough for a traceback, not enough to hold a log in memory.
+SERVER_OUTPUT_LINES = 50
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +116,8 @@ class JupyterServerSandbox(Sandbox):
         self._server_app = None
         self._server_thread: threading.Thread | None = None
         self._server_process: subprocess.Popen | None = None
+        #: The last lines the server wrote, to quote when it fails to start.
+        self._server_output: deque[str] = deque(maxlen=SERVER_OUTPUT_LINES)
         self._client: ISandboxClient | None = None
         self._sandbox_id = str(uuid.uuid4())
         self._workdir: str | None = None
@@ -241,15 +248,47 @@ class JupyterServerSandbox(Sandbox):
             workdir,
         )
 
+        # Kept, not discarded.
+        #
+        # This was `DEVNULL` on both streams, so a server that failed to start
+        # — a missing package, a port already taken, a bad argument — said why
+        # into nothing, and the only thing anyone ever saw was "Timed out
+        # waiting for Jupyter Server" thirty seconds later. Read on a thread so
+        # the pipe cannot fill and block the server that IS starting.
         self._server_process = subprocess.Popen(  # noqa: S603 — argv built above, no shell
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
             # Start in its own process group so we can kill the tree.
             preexec_fn=os.setsid if hasattr(os, "setsid") else None,
         )
+        # A fresh buffer per start, so a previous run's drain thread cannot append
+        # its last lines to the output quoted for this one. Declared in __init__.
+        self._server_output = deque(maxlen=SERVER_OUTPUT_LINES)
+        threading.Thread(
+            target=self._drain_server_output,
+            name=f"jupyter-server-{port}",
+            daemon=True,
+        ).start()
 
         self._server_url = f"http://{self._host}:{port}"
+
+    def _drain_server_output(self) -> None:
+        """Keep what the server says, so a failure can be quoted."""
+        stream = getattr(self._server_process, "stdout", None)
+        if stream is None:
+            return
+        with contextlib.suppress(Exception):
+            for line in stream:
+                text = line.rstrip()
+                if text:
+                    self._server_output.append(text)
+                    logger.debug("[jupyter-server] %s", text)
+
+    def _server_said(self) -> str:
+        """The last of the server's own output, for an error message."""
+        return "\n".join(getattr(self, "_server_output", ()))
 
     def _start_local_server_inprocess(self, workdir: str, port: int) -> None:
         """Start the Jupyter server in a daemon thread (legacy mode).
@@ -301,6 +340,16 @@ class JupyterServerSandbox(Sandbox):
             raise SandboxConfigurationError("Server URL not available")
         deadline = time.time() + timeout
         while time.time() < deadline:
+            # A server that has already exited is not going to answer, and
+            # waiting out the timeout to say so turns a plain error — the
+            # module is not installed, the port is taken — into a mystery.
+            process = self._server_process
+            if process is not None and process.poll() is not None:
+                said = self._server_said()
+                raise SandboxConfigurationError(
+                    f"The Jupyter Server exited with code {process.returncode} "
+                    f"before it was ready" + (f": {said}" if said else " and said nothing")
+                )
             try:
                 response = requests.get(
                     f"{self._server_url}/api/status",
@@ -312,7 +361,11 @@ class JupyterServerSandbox(Sandbox):
                     return
             except Exception:
                 time.sleep(0.5)
-        raise SandboxConfigurationError("Timed out waiting for Jupyter Server")
+        said = self._server_said()
+        raise SandboxConfigurationError(
+            f"Timed out waiting for Jupyter Server after {timeout:.0f}s"
+            + (f": {said}" if said else "")
+        )
 
     def _find_existing_kernel(self) -> str | None:
         """Find an existing pre-warmed kernel to reuse.
@@ -529,8 +582,78 @@ class JupyterServerSandbox(Sandbox):
             env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
             code = f"{env_code}\n{code}"
 
+        stdout_messages: list[OutputMessage] = []
+        stderr_messages: list[OutputMessage] = []
+        results: list[Result] = []
+        code_error: CodeError | None = None
+        exit_code: int | None = None
+
+        def consume_stream(content: dict, timestamp: float) -> None:
+            """One stream message: its text, split into lines, to stdout or stderr."""
+            is_stderr = content.get("name") == "stderr"
+            sink = stderr_messages if is_stderr else stdout_messages
+            handler = on_stderr if is_stderr else on_stdout
+            for line in content.get("text", "").splitlines():
+                msg = OutputMessage(line=line, timestamp=timestamp, error=is_stderr)
+                sink.append(msg)
+                if handler:
+                    handler(msg)
+
+        def consume_result(output_type: str, content: dict) -> None:
+            """One rendered value. Only `execute_result` is the cell's own answer."""
+            result = Result(
+                data=content.get("data", {}),
+                is_main_result=output_type == "execute_result",
+                extra=content.get("metadata", {}),
+            )
+            results.append(result)
+            if on_result:
+                on_result(result)
+
+        def consume_error(content: dict) -> None:
+            """One raised exception — or, for SystemExit, a status rather than a failure."""
+            nonlocal code_error, exit_code
+
+            ename = content.get("ename", "Error")
+            evalue = content.get("evalue", "")
+            if ename == "SystemExit":
+                try:
+                    exit_code = int(evalue) if evalue else 0
+                except (ValueError, TypeError):
+                    exit_code = 1 if evalue else 0
+                return
+            code_error = CodeError(
+                name=ename,
+                value=evalue,
+                traceback="\n".join(content.get("traceback", [])),
+            )
+            if on_error:
+                on_error(code_error)
+
+        def consume(message: dict) -> None:
+            """Normalize one IOPub message while it is still arriving."""
+            header = message.get("header", {})
+            output_type = header.get("msg_type") or message.get("msg_type")
+            content = message.get("content", {})
+
+            if output_type == "stream":
+                consume_stream(content, time.time())
+            elif output_type in ("execute_result", "display_data"):
+                consume_result(output_type, content)
+            elif output_type == "error":
+                consume_error(content)
+            elif output_type == "clear_output" and not content.get("wait", False):
+                # Not "wait": the cell asked for the output so far to be dropped now.
+                stdout_messages.clear()
+                stderr_messages.clear()
+                results.clear()
+
         try:
-            reply = self._client.execute(code, timeout=timeout or self.config.timeout)
+            reply = self._client.execute_interactive(
+                code,
+                timeout=timeout or self.config.timeout,
+                output_hook=consume,
+            )
         except Exception as e:
             # Infrastructure failure or interruption
             self._executing_event.clear()
@@ -552,56 +675,6 @@ class JupyterServerSandbox(Sandbox):
                 else None,
             )
 
-        stdout_messages: list[OutputMessage] = []
-        stderr_messages: list[OutputMessage] = []
-        results: list[Result] = []
-        code_error: CodeError | None = None
-        exit_code: int | None = None
-
-        current_time = time.time()
-        for output in reply.get("outputs", []):
-            output_type = output.get("output_type")
-            if output_type == "stream":
-                name = output.get("name")
-                text = output.get("text", "")
-                for line in text.splitlines():
-                    msg = OutputMessage(line=line, timestamp=current_time, error=name == "stderr")
-                    if name == "stderr":
-                        stderr_messages.append(msg)
-                        if on_stderr:
-                            on_stderr(msg)
-                    else:
-                        stdout_messages.append(msg)
-                        if on_stdout:
-                            on_stdout(msg)
-            elif output_type in ("execute_result", "display_data"):
-                result = Result(
-                    data=output.get("data", {}),
-                    is_main_result=output_type == "execute_result",
-                    extra=output.get("metadata", {}),
-                )
-                results.append(result)
-                if on_result:
-                    on_result(result)
-            elif output_type == "error":
-                ename = output.get("ename", "Error")
-                evalue = output.get("evalue", "")
-
-                # Handle SystemExit specially - extract exit code
-                if ename == "SystemExit":
-                    try:
-                        exit_code = int(evalue) if evalue else 0
-                    except (ValueError, TypeError):
-                        exit_code = 1 if evalue else 0
-                else:
-                    code_error = CodeError(
-                        name=ename,
-                        value=evalue,
-                        traceback="\n".join(output.get("traceback", [])),
-                    )
-                    if on_error:
-                        on_error(code_error)
-
         # Clear execution tracking
         self._executing_event.clear()
         was_interrupted = self._interrupt_requested.is_set()
@@ -613,7 +686,7 @@ class JupyterServerSandbox(Sandbox):
             execution_ok=True,
             code_error=code_error,
             exit_code=exit_code,
-            execution_count=reply.get("execution_count", 0),
+            execution_count=reply.get("content", {}).get("execution_count", 0),
             context_id=context.id if context else "default",
             started_at=started_at,
             completed_at=time.time(),

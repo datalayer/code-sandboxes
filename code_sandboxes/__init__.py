@@ -67,10 +67,12 @@ from .cloudflare_sandbox import CloudflareSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .console import (
     EXIT_COMMANDS,
+    example_code,
     repl_prompt,
     run_repl,
     show_and_run,
     show_code,
+    show_examples,
     show_result,
 )
 from .coreweave_sandbox import CoreWeaveSandbox
@@ -123,6 +125,8 @@ from .models import (
     Context,
     ExecutionResult,
     GPUType,
+    JupyterServerEndpoint,
+    JupyterServerOptions,
     Logs,
     MIMEType,
     OutputHandler,
@@ -139,6 +143,7 @@ from .models import (
     normalize_variant,
 )
 from .monty_sandbox import MontySandbox
+from .provider_ingress import provider_ingress_execution
 from .providers import (
     PROVIDERS,
     ProviderRequirement,
@@ -175,6 +180,8 @@ __all__ = [
     "GoogleColabKernelClient",
     "GoogleColabSandbox",
     "ISandboxClient",
+    "JupyterServerEndpoint",
+    "JupyterServerOptions",
     "JupyterServerSandbox",
     "KaggleExecutionResult",
     "KaggleKernelClient",
@@ -216,6 +223,7 @@ __all__ = [
     "TunnelInfo",
     "VariableNotFoundError",
     "available_providers",
+    "example_code",
     "execution_result_to_reply",
     "get_manager",
     "get_provider",
@@ -223,9 +231,11 @@ __all__ = [
     "normalize_variant",
     "parse_google_colab_channels_url",
     "parse_kaggle_channels_url",
+    "provider_ingress_execution",
     "repl_prompt",
     "run_repl",
     "show_and_run",
     "show_code",
+    "show_examples",
     "show_result",
 ]

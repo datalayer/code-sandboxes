@@ -594,6 +594,28 @@ def test_asking_for_resources_creates_from_an_image():
     assert from_image.resources.cpu == 2
 
 
+def test_a_gpu_sandbox_is_asked_for_as_ephemeral_even_without_spot():
+    """Daytona refuses a GPU sandbox that outlives its stop.
+
+    "GPU sandboxes must be ephemeral; set autoDeleteInterval to 0" — of every
+    GPU sandbox, not only the preemptible ones, which is where this used to be
+    set. An on-demand `gpu=` was therefore refused by the API on creation.
+    """
+    daytona = pytest.importorskip("daytona")
+
+    on_demand = _started(SandboxConfig(gpu="H100"))._create_params(daytona)
+    assert on_demand.auto_delete_interval == 0
+    assert not getattr(on_demand, "spot", None)
+
+    preemptible = _started(SandboxConfig(gpu="H100"), spot=True)._create_params(daytona)
+    assert preemptible.auto_delete_interval == 0
+    assert preemptible.spot is True
+
+    # A sandbox with no GPU is left alone: it may outlive its stop.
+    plain = _started(SandboxConfig())._create_params(daytona)
+    assert getattr(plain, "auto_delete_interval", None) != 0
+
+
 def test_only_the_client_settings_that_were_given_are_passed_on():
     """What is left out is what the SDK reads from the environment."""
     daytona = pytest.importorskip("daytona")

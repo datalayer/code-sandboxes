@@ -1,0 +1,91 @@
+---
+title: Jupyter over Provider Ingress
+sidebar_position: 2
+---
+
+# Jupyter over provider ingress
+
+Daytona, E2B, and Modal support two execution modes. New applications should
+use **Jupyter over provider ingress**, which is the default.
+
+## Provider-ingress mode (default)
+
+The sandbox is allocated first. `code-sandboxes` then checks whether
+`jupyter-server` and `ipykernel` are present, installs only what is missing,
+starts a real Jupyter Server inside the sandbox, and waits for its port to be
+ready. A Jupyter kernel client connects through the provider HTTPS/WebSocket
+ingress.
+
+```text
+client
+  -> provider HTTPS/WSS ingress
+    -> Jupyter Server in the Daytona, E2B, or Modal sandbox
+      -> Python kernel
+```
+
+This mode preserves the complete Jupyter protocol: kernel state, incremental
+streaming, rich display messages, interrupts, restarts, comms, and normal
+kernel status transitions. Provider ingress credentials and the Jupyter token
+are separate and should remain in the server-side client or proxy.
+
+```python
+from code_sandboxes import Sandbox, provider_ingress_execution
+
+with Sandbox.create(variant="daytona") as provider:
+    with provider_ingress_execution(provider) as sandbox:
+        result = sandbox.run_code("print('executed by the real Jupyter kernel')")
+```
+
+The preparation step is idempotent for a sandbox. Prebuilt provider templates
+or snapshots can include Jupyter later to remove installation time; ordinary
+base images use the conditional preliminary installation today.
+
+## Direct provider mode
+
+The former mode calls the provider execution API directly—Daytona's code
+interpreter, E2B's code-interpreter adapter, or Modal's persistent process
+driver. Consumers then have to translate those provider results into
+Jupyter-like behavior. That translation implements only a subset of the
+protocol, but can be useful when only the provider execution API is needed.
+
+Select it explicitly with `direct=True`:
+
+```python
+with Sandbox.create(variant="daytona") as provider:
+    with provider_ingress_execution(provider, direct=True) as sandbox:
+        result = sandbox.run_code("print('direct provider adapter')")
+```
+
+## REPL and execution examples
+
+The Daytona, E2B, and Modal examples use provider-ingress mode by default:
+
+```bash
+python examples/exec/daytona_sandbox_example.py
+python examples/exec/e2b_sandbox_example.py
+python examples/exec/modal_sandbox_example.py
+
+python examples/repl/daytona_sandbox_example.py
+python examples/repl/e2b_sandbox_example.py
+python examples/repl/modal_sandbox_example.py
+```
+
+Pass `--direct` to any of those commands to use the direct provider adapter:
+
+```bash
+python examples/exec/daytona_sandbox_example.py --direct
+python examples/repl/modal_sandbox_example.py --direct
+```
+
+## Datalayer Runtimes URLs
+
+The Datalayer Runtimes gateway exposes the corresponding choices as stable
+base URLs:
+
+| Mode | External sandbox base URL |
+| --- | --- |
+| Provider ingress (default) | `/api/runtimes/v1/external/{pod}/jupyter` |
+| Direct | `/api/runtimes/v1/external/{pod}` |
+
+One live sandbox cannot mix the two transports. Close it before changing
+mode, otherwise the two clients would disagree about kernel identity.
