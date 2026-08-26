@@ -49,6 +49,7 @@ from typing import Any, Callable, Union
 
 from .base import Sandbox
 from .commands import CommandResult
+from .filesystem import FileInfo, SandboxFilesystem
 from .models import (
     CodeError,
     ExecutionResult,
@@ -498,6 +499,73 @@ class CodeSandboxClient:
         """Run a shell command inside the sandbox."""
         self.start()
         return self._sandbox.commands.run(command, timeout=timeout)
+
+    # -- the filesystem ----------------------------------------------------
+    #
+    # A file browser and a terminal look at the same tree, and both of them
+    # reach it through this client rather than through a provider's SDK: that
+    # is what makes a workflow written for one sandbox work on the next. Each
+    # of these starts the sandbox first, because asking about files before
+    # there is a sandbox to ask is a mistake worth answering rather than
+    # crashing on.
+
+    @property
+    def files(self) -> SandboxFilesystem:
+        """Filesystem operations, whichever provider is underneath."""
+        self.start()
+        return self._sandbox.files
+
+    def list_files(self, path: str = "/") -> list[FileInfo]:
+        """What is in a directory: names, sizes and what each one is."""
+        return self.files.list(path)
+
+    def stat_file(self, path: str) -> FileInfo:
+        """One entry, or `FileNotFoundError` if the path names nothing."""
+        return self.files.get_info(path)
+
+    def read_file(self, path: str, *, binary: bool = False) -> Union[str, bytes]:
+        """Read a whole file; `binary` for anything that is not text."""
+        return self.files.read_bytes(path) if binary else self.files.read(path)
+
+    def write_file(
+        self, path: str, content: Union[str, bytes], *, make_dirs: bool = True
+    ) -> None:
+        """Write a whole file, creating the directories above it by default."""
+        if isinstance(content, bytes):
+            self.files.write_bytes(path, content, make_dirs=make_dirs)
+        else:
+            self.files.write(path, content, make_dirs=make_dirs)
+
+    def stream_file(
+        self, path: str, *, chunk_size: int = 1024 * 1024
+    ) -> Iterator[bytes]:
+        """Read a file in pieces, for something too big to hold at once.
+
+        The pieces come from one read of the sandbox: the providers'
+        filesystem APIs answer a whole file, and pretending otherwise would
+        promise a memory bound this cannot keep. What it does keep is the
+        shape a caller writes against, so a ranged read behind one provider
+        does not change the code above it.
+        """
+        content = self.files.read_bytes(path)
+        for start in range(0, len(content), max(1, chunk_size)):
+            yield content[start : start + chunk_size]
+
+    def delete_file(self, path: str, *, recursive: bool = False) -> None:
+        """Remove a file, or a directory when `recursive` says so."""
+        self.files.rm(path, recursive=recursive)
+
+    def make_directory(self, path: str, *, parents: bool = True) -> None:
+        """Create a directory, and the ones above it by default."""
+        self.files.mkdir(path, parents=parents)
+
+    def upload_file(self, local_path: str, remote_path: str) -> None:
+        """Put a local file into the sandbox."""
+        self.files.upload(local_path, remote_path)
+
+    def download_file(self, remote_path: str, local_path: str) -> None:
+        """Take a file out of the sandbox."""
+        self.files.download(remote_path, local_path)
 
     def __enter__(self) -> CodeSandboxClient:
         self.start()
