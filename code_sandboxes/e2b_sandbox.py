@@ -199,9 +199,7 @@ class E2BSandbox(Sandbox):
             )
         url = f"https://{self._sandbox.get_host(value.port)}"
         traffic_token = getattr(self._sandbox, "traffic_access_token", None)
-        headers = (
-            {"E2B-Traffic-Access-Token": traffic_token} if traffic_token else {}
-        )
+        headers = {"E2B-Traffic-Access-Token": traffic_token} if traffic_token else {}
         self._jupyter_endpoint = JupyterServerEndpoint(
             port=value.port,
             http_url=url,

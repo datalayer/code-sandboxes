@@ -263,7 +263,9 @@ class JupyterServerSandbox(Sandbox):
             # Start in its own process group so we can kill the tree.
             preexec_fn=os.setsid if hasattr(os, "setsid") else None,
         )
-        self._server_output: deque[str] = deque(maxlen=SERVER_OUTPUT_LINES)
+        # A fresh buffer per start, so a previous run's drain thread cannot append
+        # its last lines to the output quoted for this one. Declared in __init__.
+        self._server_output = deque(maxlen=SERVER_OUTPUT_LINES)
         threading.Thread(
             target=self._drain_server_output,
             name=f"jupyter-server-{port}",
@@ -586,58 +588,62 @@ class JupyterServerSandbox(Sandbox):
         code_error: CodeError | None = None
         exit_code: int | None = None
 
-        def consume(message: dict) -> None:
-            """Normalize one IOPub message while it is still arriving."""
+        def consume_stream(content: dict, timestamp: float) -> None:
+            """One stream message: its text, split into lines, to stdout or stderr."""
+            is_stderr = content.get("name") == "stderr"
+            sink = stderr_messages if is_stderr else stdout_messages
+            handler = on_stderr if is_stderr else on_stdout
+            for line in content.get("text", "").splitlines():
+                msg = OutputMessage(line=line, timestamp=timestamp, error=is_stderr)
+                sink.append(msg)
+                if handler:
+                    handler(msg)
+
+        def consume_result(output_type: str, content: dict) -> None:
+            """One rendered value. Only `execute_result` is the cell's own answer."""
+            result = Result(
+                data=content.get("data", {}),
+                is_main_result=output_type == "execute_result",
+                extra=content.get("metadata", {}),
+            )
+            results.append(result)
+            if on_result:
+                on_result(result)
+
+        def consume_error(content: dict) -> None:
+            """One raised exception — or, for SystemExit, a status rather than a failure."""
             nonlocal code_error, exit_code
 
+            ename = content.get("ename", "Error")
+            evalue = content.get("evalue", "")
+            if ename == "SystemExit":
+                try:
+                    exit_code = int(evalue) if evalue else 0
+                except (ValueError, TypeError):
+                    exit_code = 1 if evalue else 0
+                return
+            code_error = CodeError(
+                name=ename,
+                value=evalue,
+                traceback="\n".join(content.get("traceback", [])),
+            )
+            if on_error:
+                on_error(code_error)
+
+        def consume(message: dict) -> None:
+            """Normalize one IOPub message while it is still arriving."""
             header = message.get("header", {})
             output_type = header.get("msg_type") or message.get("msg_type")
             content = message.get("content", {})
-            current_time = time.time()
 
             if output_type == "stream":
-                name = content.get("name")
-                text = content.get("text", "")
-                for line in text.splitlines():
-                    msg = OutputMessage(
-                        line=line,
-                        timestamp=current_time,
-                        error=name == "stderr",
-                    )
-                    if name == "stderr":
-                        stderr_messages.append(msg)
-                        if on_stderr:
-                            on_stderr(msg)
-                    else:
-                        stdout_messages.append(msg)
-                        if on_stdout:
-                            on_stdout(msg)
+                consume_stream(content, time.time())
             elif output_type in ("execute_result", "display_data"):
-                result = Result(
-                    data=content.get("data", {}),
-                    is_main_result=output_type == "execute_result",
-                    extra=content.get("metadata", {}),
-                )
-                results.append(result)
-                if on_result:
-                    on_result(result)
+                consume_result(output_type, content)
             elif output_type == "error":
-                ename = content.get("ename", "Error")
-                evalue = content.get("evalue", "")
-                if ename == "SystemExit":
-                    try:
-                        exit_code = int(evalue) if evalue else 0
-                    except (ValueError, TypeError):
-                        exit_code = 1 if evalue else 0
-                else:
-                    code_error = CodeError(
-                        name=ename,
-                        value=evalue,
-                        traceback="\n".join(content.get("traceback", [])),
-                    )
-                    if on_error:
-                        on_error(code_error)
+                consume_error(content)
             elif output_type == "clear_output" and not content.get("wait", False):
+                # Not "wait": the cell asked for the output so far to be dropped now.
                 stdout_messages.clear()
                 stderr_messages.clear()
                 results.clear()

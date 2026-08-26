@@ -93,7 +93,7 @@ def test_colab_execute_exception_sets_execution_ok_false():
         config=SandboxConfig(timeout=10.0),
         server_url="https://colab-host.example",
         kernel_id="kernel-id",
-        proxy_token="proxy-token",  # noqa: S106
+        proxy_token="proxy-token",
     )
     sandbox._started = True
     sandbox._client = MagicMock()

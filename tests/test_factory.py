@@ -144,7 +144,7 @@ class TestSandboxFactory:
             variant="google-colab",
             server_url="https://colab-host.example",
             kernel_id="kernel-id",
-            proxy_token="proxy-token",  # noqa: S106
+            proxy_token="proxy-token",
             channels_url=(
                 "wss://colab-host.example/api/kernels/kernel-id/channels"
                 "?colab-runtime-proxy-token=proxy-token"
@@ -154,7 +154,7 @@ class TestSandboxFactory:
         assert isinstance(sandbox, GoogleColabSandbox)
         assert sandbox._server_url == "https://colab-host.example"
         assert sandbox._kernel_id == "kernel-id"
-        assert sandbox._proxy_token == "proxy-token"  # noqa: S105
+        assert sandbox._proxy_token == "proxy-token"
         assert sandbox._channels_url.startswith("wss://colab-host.example")
 
     def test_create_kaggle_forwards_connection_kwargs(self):
@@ -163,22 +163,22 @@ class TestSandboxFactory:
             variant="kaggle",
             server_url="https://kaggle-host.example/proxy",
             kernel_id="kernel-id",
-            token="api-token",  # noqa: S106
+            token="api-token",
         )
         assert isinstance(sandbox, KaggleSandbox)
         assert sandbox._server_url == "https://kaggle-host.example/proxy"
         assert sandbox._kernel_id == "kernel-id"
-        assert sandbox._token == "api-token"  # noqa: S105
+        assert sandbox._token == "api-token"
 
     def test_create_datalayer_forwards_runtime_kwargs(self):
         """Test that datalayer-specific kwargs are propagated."""
         sandbox = Sandbox.create(
             variant="datalayer",
-            token="api-token",  # noqa: S106
+            token="api-token",
             run_url="https://run.example",
             snapshot_name="snap-1",
         )
         assert isinstance(sandbox, DatalayerSandbox)
-        assert sandbox._token == "api-token"  # noqa: S105
+        assert sandbox._token == "api-token"
         assert sandbox._run_url == "https://run.example"
         assert sandbox._snapshot_name == "snap-1"

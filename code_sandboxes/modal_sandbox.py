@@ -189,8 +189,7 @@ class ModalSandbox(Sandbox):
         if getattr(process, "returncode", 0) not in (0, None):
             stderr = process.stderr.read() if getattr(process, "stderr", None) else ""
             raise SandboxConfigurationError(
-                "Could not install and start Jupyter Server in the Modal sandbox: "
-                + str(stderr)
+                "Could not install and start Jupyter Server in the Modal sandbox: " + str(stderr)
             )
         credentials = self._sandbox.create_connect_token(port=value.port)
         url = credentials.url.rstrip("/")

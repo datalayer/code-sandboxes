@@ -25,7 +25,7 @@ CHANNELS_URL = (
 )
 SERVER_URL = "https://abc123.prod.colab.dev"
 KERNEL_ID = "11e073f0-e82d-4029-be8d-3918f7ed1a9e"
-PROXY_TOKEN = "proxy-abc"  # noqa: S105
+PROXY_TOKEN = "proxy-abc"
 
 
 def test_colab_kernel_client_injects_headers_and_extra_params(monkeypatch):
@@ -41,7 +41,7 @@ def test_colab_kernel_client_injects_headers_and_extra_params(monkeypatch):
     GoogleColabKernelClient(
         server_url="https://colab-host.example",
         kernel_id="kernel-123",
-        proxy_token="proxy-abc",  # noqa: S106
+        proxy_token="proxy-abc",
         client_agent="custom-agent",
         headers={"Existing": "value"},
         client_kwargs={"extra_params": {"existing": "p"}},
@@ -74,8 +74,8 @@ def test_colab_kernel_client_drops_any_provided_jupyter_token(monkeypatch):
     GoogleColabKernelClient(
         server_url="https://colab-host.example",
         kernel_id="kernel-123",
-        proxy_token="proxy-abc",  # noqa: S106
-        token="should-be-ignored",  # noqa: S106
+        proxy_token="proxy-abc",
+        token="should-be-ignored",
         log=logging.getLogger("test"),
     )
 

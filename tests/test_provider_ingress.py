@@ -49,9 +49,7 @@ def test_default_connects_a_jupyter_sandbox(monkeypatch):
         def stop(self):
             calls.append(SimpleNamespace(kind="stop"))
 
-    monkeypatch.setattr(
-        "code_sandboxes.provider_ingress.JupyterServerSandbox", _Jupyter
-    )
+    monkeypatch.setattr("code_sandboxes.provider_ingress.JupyterServerSandbox", _Jupyter)
     provider = _Provider()
 
     with provider_ingress_execution(provider) as execution:

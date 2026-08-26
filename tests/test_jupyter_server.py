@@ -326,7 +326,7 @@ class TestAServerThatWillNotStart:
 
         sandbox = JupyterServerSandbox.__new__(JupyterServerSandbox)
         sandbox._server_url = "http://127.0.0.1:1"
-        sandbox._token = "not-a-secret"  # noqa: S105 - a stand-in, not a credential
+        sandbox._token = "not-a-secret"
         sandbox._headers = {}
         sandbox._server_output = deque(said)
         sandbox._server_process = type(

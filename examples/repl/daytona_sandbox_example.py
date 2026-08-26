@@ -165,16 +165,17 @@ def main() -> None:
         print("Launching daytona sandbox REPL without GPU.")
 
     try:
-        with Sandbox.create(
-            variant="daytona",
-            timeout=60,
-            gpu=args.gpu,
-            spot=args.spot,
-            delete_on_stop=not args.keep,
-            examples=_examples(args.gpu),
-        ) as provider, provider_ingress_execution(
-            provider, direct=args.direct
-        ) as sandbox:
+        with (
+            Sandbox.create(
+                variant="daytona",
+                timeout=60,
+                gpu=args.gpu,
+                spot=args.spot,
+                delete_on_stop=not args.keep,
+                examples=_examples(args.gpu),
+            ) as provider,
+            provider_ingress_execution(provider, direct=args.direct) as sandbox,
+        ):
             print(f"Sandbox: {provider.sandbox_id}")
             run_repl(sandbox)
             if args.keep:

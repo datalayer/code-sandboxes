@@ -110,11 +110,12 @@ def main() -> None:
     print(f"Launching e2b sandbox REPL from template: {args.template or 'code-interpreter-v1'}")
 
     try:
-        with Sandbox.create(
-            variant="e2b", timeout=60, template=args.template, examples=_examples()
-        ) as provider, provider_ingress_execution(
-            provider, direct=args.direct
-        ) as sandbox:
+        with (
+            Sandbox.create(
+                variant="e2b", timeout=60, template=args.template, examples=_examples()
+            ) as provider,
+            provider_ingress_execution(provider, direct=args.direct) as sandbox,
+        ):
             print(f"Sandbox: {provider.sandbox_id}")
             # A REPL is read at human speed, and the default life of a sandbox
             # is shorter than a session usually is.

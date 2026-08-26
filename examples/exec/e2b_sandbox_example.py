@@ -54,11 +54,10 @@ def main() -> None:
     print(f"Launching e2b sandbox from template: {args.template or 'code-interpreter-v1'}")
 
     try:
-        with Sandbox.create(
-            variant="e2b", timeout=60, template=args.template
-        ) as provider, provider_ingress_execution(
-            provider, direct=args.direct
-        ) as sandbox:
+        with (
+            Sandbox.create(variant="e2b", timeout=60, template=args.template) as provider,
+            provider_ingress_execution(provider, direct=args.direct) as sandbox,
+        ):
             print(f"Sandbox: {provider.sandbox_id}")
 
             # What tells this variant apart from a per-snippet runner: the

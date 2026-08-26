@@ -143,6 +143,7 @@ from .models import (
     normalize_variant,
 )
 from .monty_sandbox import MontySandbox
+from .provider_ingress import provider_ingress_execution
 from .providers import (
     PROVIDERS,
     ProviderRequirement,
@@ -150,7 +151,6 @@ from .providers import (
     available_providers,
     get_provider,
 )
-from .provider_ingress import provider_ingress_execution
 
 #: Everything this package exports, in one sorted list — the groups it
 #: used to be split into stopped matching what they sat above.
@@ -180,9 +180,9 @@ __all__ = [
     "GoogleColabKernelClient",
     "GoogleColabSandbox",
     "ISandboxClient",
-    "JupyterServerSandbox",
     "JupyterServerEndpoint",
     "JupyterServerOptions",
+    "JupyterServerSandbox",
     "KaggleExecutionResult",
     "KaggleKernelClient",
     "KaggleKernelExecutor",

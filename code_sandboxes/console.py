@@ -342,7 +342,7 @@ def run_repl(  # noqa: C901
             code = chosen
 
         try:
-            result = _run_and_show(sandbox, code, console=out, labelled=False)
+            _run_and_show(sandbox, code, console=out, labelled=False)
         except KeyboardInterrupt:
             out.print("\nExecution interrupted.", style="yellow")
             continue

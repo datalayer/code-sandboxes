@@ -87,14 +87,15 @@ def main() -> None:
         print("Launching modal sandbox without GPU.")
 
     try:
-        with Sandbox.create(
-            variant="modal",
-            timeout=60,
-            gpu=gpu,
-            pip_packages=["numpy"],
-        ) as provider, provider_ingress_execution(
-            provider, direct=args.direct
-        ) as sandbox:
+        with (
+            Sandbox.create(
+                variant="modal",
+                timeout=60,
+                gpu=gpu,
+                pip_packages=["numpy"],
+            ) as provider,
+            provider_ingress_execution(provider, direct=args.direct) as sandbox,
+        ):
             show_and_run(sandbox, "import numpy as np; print(int(np.arange(5).sum()))")
 
             print("-- streaming: one number should appear every second --")

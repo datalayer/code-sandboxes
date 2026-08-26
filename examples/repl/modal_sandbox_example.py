@@ -129,14 +129,15 @@ def main() -> None:
         print("Launching modal sandbox REPL without GPU.")
 
     try:
-        with Sandbox.create(
-            variant="modal",
-            timeout=60,
-            gpu=args.gpu,
-            examples=_examples(args.gpu),
-        ) as provider, provider_ingress_execution(
-            provider, direct=args.direct
-        ) as sandbox:
+        with (
+            Sandbox.create(
+                variant="modal",
+                timeout=60,
+                gpu=args.gpu,
+                examples=_examples(args.gpu),
+            ) as provider,
+            provider_ingress_execution(provider, direct=args.direct) as sandbox,
+        ):
             run_repl(sandbox)
     except Exception as exc:
         print("modal REPL failed:", exc)

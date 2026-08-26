@@ -117,11 +117,10 @@ def main() -> None:
         print("Launching daytona sandbox without GPU.")
 
     try:
-        with Sandbox.create(
-            variant="daytona", timeout=60, gpu=args.gpu, spot=args.spot
-        ) as provider, provider_ingress_execution(
-            provider, direct=args.direct
-        ) as sandbox:
+        with (
+            Sandbox.create(variant="daytona", timeout=60, gpu=args.gpu, spot=args.spot) as provider,
+            provider_ingress_execution(provider, direct=args.direct) as sandbox,
+        ):
             print(f"Sandbox: {provider.sandbox_id}")
 
             # What tells this variant apart from a per-snippet runner: the

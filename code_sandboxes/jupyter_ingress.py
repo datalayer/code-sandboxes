@@ -25,9 +25,7 @@ def preparation_command(options: JupyterServerOptions) -> str:
     packages = "jupyter-server ipykernel"
     check = "python -c 'import jupyter_server, ipykernel'"
     if options.install_if_missing:
-        install = (
-            "python -m pip install --disable-pip-version-check --quiet " + packages
-        )
+        install = "python -m pip install --disable-pip-version-check --quiet " + packages
         prerequisite = f"{check} >/dev/null 2>&1 || {install}"
     else:
         prerequisite = check
@@ -47,7 +45,9 @@ def preparation_command(options: JupyterServerOptions) -> str:
             "--ServerApp.password=''",
         ]
     )
-    pid_file = f"/tmp/code-sandboxes-jupyter-{options.port}.pid"
+    # Written by the shell this string is handed to, so the path is one in the
+    # sandbox's own filesystem and not on the machine building the command.
+    pid_file = f"/tmp/code-sandboxes-jupyter-{options.port}.pid"  # noqa: S108
     probe = (
         'python -c "import socket; '
         f"socket.create_connection(('127.0.0.1', {options.port}), 1).close()\""
