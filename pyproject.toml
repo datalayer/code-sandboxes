@@ -81,6 +81,10 @@ path = "code_sandboxes/__version__.py"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+  "live: runs against the real sandbox providers; needs CODE_SANDBOXES_LIVE=1 and credentials",
+]
+addopts = "-m 'not live'"
 filterwarnings = [
   "error",
   "ignore::pytest.PytestUnraisableExceptionWarning",
