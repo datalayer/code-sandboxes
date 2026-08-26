@@ -29,6 +29,15 @@ import time
 from typing import Any
 
 from .base import Sandbox
+from .contents import (
+    FILESYSTEM_PRIMITIVES,
+    ContentAttachmentSpec,
+    ContentCapabilities,
+    ContentManifest,
+    CreationTimeMounts,
+    LocalBridgeCapability,
+    PreparedAttachment,
+)
 from .exceptions import (
     SandboxConfigurationError,
     SandboxExecutionError,
@@ -177,7 +186,34 @@ class E2BSandbox(Sandbox):
         self._contexts: dict[str, Any] = {}
         self._execution_count = 0
         self._jupyter_endpoint: JupyterServerEndpoint | None = None
+        #: Volumes to mount, which E2B takes only when the sandbox is
+        #: created: `Sandbox.create(volume_mounts={path: volume})`.
+        self._volume_mounts = CreationTimeMounts()
         self._extra_kwargs = kwargs
+
+    # -- Contents attachments ---------------------------------------------
+
+    def content_capabilities(self) -> ContentCapabilities:
+        return ContentCapabilities(
+            provider="e2b",
+            mount=True,
+            bucket_mount=False,
+            materialize=True,
+            client=True,
+            local_bridge_mount=LocalBridgeCapability(supported=False),
+            filesystem_primitives=list(FILESYSTEM_PRIMITIVES),
+        )
+
+    def configure_contents(self, manifest: ContentManifest) -> None:
+        super().configure_contents(manifest)
+        self._volume_mounts.request_all(manifest)
+
+    def _prepare_mount(self, spec: ContentAttachmentSpec, *, reconcile: bool) -> PreparedAttachment:
+        del reconcile
+        return self._volume_mounts.prepare(self, spec, provider="e2b")
+
+    def _forget_mount(self, spec: ContentAttachmentSpec) -> None:
+        self._volume_mounts.forget(spec)
 
     def prepare_jupyter_server(
         self, options: JupyterServerOptions | None = None
@@ -260,6 +296,7 @@ class E2BSandbox(Sandbox):
         self._refuse_what_cannot_be_honoured()
         e2b = _import_e2b()
         self._sandbox = e2b.Sandbox.create(**self._create_params())
+        self._volume_mounts.created()
 
         self._default_context = self.create_context("default")
         self._info = SandboxInfo(
@@ -301,6 +338,8 @@ class E2BSandbox(Sandbox):
             params["domain"] = self._domain
         if self.config.env_vars:
             params["envs"] = dict(self.config.env_vars)
+        if self._volume_mounts.requested:
+            params["volume_mounts"] = dict(self._volume_mounts.requested)
         if self.config.max_lifetime:
             # E2B counts the life of a sandbox in whole seconds, and takes it
             # down when they are up.
@@ -349,6 +388,7 @@ class E2BSandbox(Sandbox):
             self._sandbox = None
         self._contexts.clear()
         self._jupyter_endpoint = None
+        self._volume_mounts.stopped()
         self._started = False
         if self._info:
             self._info.status = SandboxStatus.STOPPED

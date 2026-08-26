@@ -13,6 +13,20 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any, Union
 
 from .commands import SandboxCommands
+from .contents import (
+    FILESYSTEM_PRIMITIVES,
+    ContentAttachmentSpec,
+    ContentCapabilities,
+    ContentManifest,
+    LocalBridgeCapability,
+    PreparedAttachment,
+    contents_environment,
+    materialize,
+    ready,
+    remove_materialized,
+    unsupported,
+)
+from .exceptions import SandboxNotStartedError
 from .filesystem import SandboxFilesystem
 from .interfaces import ISandboxClient
 from .models import (
@@ -119,6 +133,11 @@ class Sandbox(ABC):
         self._tool_caller: Any | None = None  # Tool caller function for MCP tools
         self._executing_event = threading.Event()  # Set while code is running
         self._interrupt_requested = threading.Event()  # Set to request interruption
+        #: What became of each Contents attachment at the last prepare or
+        #: reconcile, and the attachment it was — kept so `attachment_status`
+        #: can answer and `remove_attachment` knows what to take away.
+        self._attachments: dict[str, PreparedAttachment] = {}
+        self._attachment_specs: dict[str, ContentAttachmentSpec] = {}
 
     @property
     def info(self) -> SandboxInfo | None:
@@ -153,6 +172,143 @@ class Sandbox(ABC):
         raise NotImplementedError(
             f"{type(self).__name__} does not expose Jupyter over provider ingress"
         )
+
+    # -- Contents attachments ---------------------------------------------
+    #
+    # The Contents service says what a sandbox is to be given; these say how
+    # this provider honours it, in one vocabulary. Adapters override the
+    # small hooks — `content_capabilities`, `_prepare_mount`, `_forget_mount`
+    # — rather than the walk over the manifest, which is the same everywhere.
+    # Every one of them is safe to call again.
+
+    @property
+    def provider_name(self) -> str:
+        """The provider this sandbox runs on, as Contents names it.
+
+        The variant of a started sandbox; before it starts, the name the
+        class carries — `DaytonaSandbox` is `daytona` — so capabilities can
+        be asked for before anything is created.
+        """
+        if self._info is not None and self._info.variant:
+            return self._info.variant
+        name = type(self).__name__
+        if name.endswith("Sandbox"):
+            name = name[: -len("Sandbox")]
+        return name.lower()
+
+    def content_capabilities(self) -> ContentCapabilities:
+        """What this provider can do with a Contents attachment.
+
+        The base answer is the least any provider offers: the sandbox can
+        reach Contents itself (`client`), and this package's filesystem
+        works over its kernel. Nothing is mounted, nothing is fetched.
+        """
+        return ContentCapabilities(
+            provider=self.provider_name,
+            mount=False,
+            bucket_mount=False,
+            materialize=False,
+            client=True,
+            local_bridge_mount=LocalBridgeCapability(supported=False),
+            filesystem_primitives=list(FILESYSTEM_PRIMITIVES),
+        )
+
+    def configure_contents(self, manifest: ContentManifest) -> None:
+        """What the sandbox must know BEFORE it is created.
+
+        The environment a Contents client inside reads goes into the
+        configuration, for the providers that take their environment at
+        creation. Adapters that mount only at creation record the mounts
+        here too. Harmless on a sandbox that is already running — the
+        variables are exported into the kernel again when the manifest is
+        installed.
+        """
+        self.config.env_vars.update(contents_environment(manifest))
+
+    def prepare_contents(self, manifest: ContentManifest) -> list[PreparedAttachment]:
+        """Honour each attachment of the manifest, and say what became of it."""
+        return self._apply_contents(manifest, reconcile=False)
+
+    def reconcile_contents(self, manifest: ContentManifest) -> list[PreparedAttachment]:
+        """Re-check every attachment and repair what is missing.
+
+        The same walk as :meth:`prepare_contents`, minus the work already
+        done: a mount that is there is ready, a materialized file with the
+        right digest is not fetched again.
+        """
+        return self._apply_contents(manifest, reconcile=True)
+
+    def attachment_status(self, uid: str) -> PreparedAttachment | None:
+        """What the last prepare or reconcile said of this attachment."""
+        return self._attachments.get(uid)
+
+    def remove_attachment(self, uid: str) -> None:
+        """Detach: take away what was delivered, never the source.
+
+        Materialized files are removed where the sandbox is running; a mount
+        request is forgotten so the next start does not make it. A volume,
+        a bucket, a home folder — the thing attached — is left exactly as it
+        was, because detaching is not deleting.
+        """
+        spec = self._attachment_specs.pop(uid, None)
+        self._attachments.pop(uid, None)
+        if spec is None:
+            return
+        if spec.delivery == "materialize" and self._started:
+            remove_materialized(self, spec)
+        self._forget_mount(spec)
+
+    def _apply_contents(
+        self, manifest: ContentManifest, *, reconcile: bool
+    ) -> list[PreparedAttachment]:
+        if not self._started:
+            raise SandboxNotStartedError()
+        prepared: list[PreparedAttachment] = []
+        for spec in manifest.attachments:
+            result = self._prepare_attachment(spec, reconcile=reconcile)
+            self._attachments[spec.uid] = result
+            self._attachment_specs[spec.uid] = spec
+            prepared.append(result)
+        return prepared
+
+    def _prepare_attachment(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        if spec.delivery == "client":
+            # The sandbox reaches Contents itself, with the manifest and the
+            # credentials installed beside it. Nothing to mount or fetch.
+            return ready(spec, capabilities=["client"])
+        if spec.delivery == "materialize":
+            return self._prepare_materialize(spec, reconcile=reconcile)
+        if spec.delivery in ("mount", "environment"):
+            return self._prepare_mount(spec, reconcile=reconcile)
+        if spec.delivery == "local-bridge":
+            return self._prepare_local_bridge(spec, reconcile=reconcile)
+        return unsupported(spec, self.provider_name)
+
+    def _prepare_mount(self, spec: ContentAttachmentSpec, *, reconcile: bool) -> PreparedAttachment:
+        """A `mount` or `environment` attachment. Nothing mounts by default."""
+        del reconcile
+        return unsupported(spec, self.provider_name)
+
+    def _prepare_local_bridge(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        """A person's own folder bridged in. Needs a driver; none by default."""
+        del reconcile
+        return unsupported(spec, self.provider_name)
+
+    def _prepare_materialize(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        """Fetch the files inside the sandbox, where the provider allows it."""
+        if not self.content_capabilities().materialize:
+            return unsupported(spec, self.provider_name)
+        return materialize(self, spec, reconcile=reconcile)
+
+    def _forget_mount(self, spec: ContentAttachmentSpec) -> None:
+        """Forget a mount request. Adapters that record mounts override this."""
+        del spec
 
     def interrupt(self) -> bool:
         """Request interruption of the currently running code.

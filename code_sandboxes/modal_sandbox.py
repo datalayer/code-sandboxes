@@ -26,6 +26,16 @@ import uuid
 from typing import Any
 
 from .base import Sandbox
+from .contents import (
+    CREDENTIAL_DELIVERY_UNSUPPORTED,
+    FILESYSTEM_PRIMITIVES,
+    ContentAttachmentSpec,
+    ContentCapabilities,
+    ContentManifest,
+    CreationTimeMounts,
+    LocalBridgeCapability,
+    PreparedAttachment,
+)
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
 from .jupyter_ingress import preparation_command, resolved_options, websocket_url
 from .models import (
@@ -170,7 +180,40 @@ class ModalSandbox(Sandbox):
         self._sandbox_id = str(uuid.uuid4())
         self._execution_count = 0
         self._jupyter_endpoint: JupyterServerEndpoint | None = None
+        #: Volumes to mount, which Modal takes only when the sandbox is
+        #: created: `Sandbox.create(volumes={path: Volume.from_name(...)})`.
+        self._volume_mounts = CreationTimeMounts()
         self._extra_kwargs = kwargs
+
+    # -- Contents attachments ---------------------------------------------
+
+    def content_capabilities(self) -> ContentCapabilities:
+        # Modal CAN mount a bucket — `CloudBucketMount` — but only from a
+        # Modal secret holding the bucket's credentials, which would mean a
+        # credential leaving Contents for the provider. Refused, so it stays
+        # False here and a bucket mount is answered with why.
+        return ContentCapabilities(
+            provider="modal",
+            mount=True,
+            bucket_mount=False,
+            materialize=True,
+            client=True,
+            local_bridge_mount=LocalBridgeCapability(supported=False),
+            filesystem_primitives=list(FILESYSTEM_PRIMITIVES),
+        )
+
+    def configure_contents(self, manifest: ContentManifest) -> None:
+        super().configure_contents(manifest)
+        self._volume_mounts.request_all(manifest)
+
+    def _prepare_mount(self, spec: ContentAttachmentSpec, *, reconcile: bool) -> PreparedAttachment:
+        del reconcile
+        return self._volume_mounts.prepare(
+            self, spec, provider="modal", bucket_code=CREDENTIAL_DELIVERY_UNSUPPORTED
+        )
+
+    def _forget_mount(self, spec: ContentAttachmentSpec) -> None:
+        self._volume_mounts.forget(spec)
 
     def prepare_jupyter_server(
         self, options: JupyterServerOptions | None = None
@@ -267,8 +310,16 @@ class ModalSandbox(Sandbox):
             create_kwargs["gpu"] = _resolve_modal_gpu(self.config.gpu, modal)
         if secrets:
             create_kwargs["secrets"] = secrets
+        if self._volume_mounts.requested:
+            # `from_name` never creates: a volume Contents named that Modal
+            # does not have is Modal's error to raise, not ours to paper over.
+            create_kwargs["volumes"] = {
+                mount_path: modal.Volume.from_name(volume_id)
+                for mount_path, volume_id in self._volume_mounts.requested.items()
+            }
 
         self._sandbox = modal.Sandbox.create(**create_kwargs)
+        self._volume_mounts.created()
         self._start_driver()
 
         self._default_context = self.create_context("default")
@@ -374,6 +425,7 @@ class ModalSandbox(Sandbox):
             self._sandbox = None
         self._app = None
         self._jupyter_endpoint = None
+        self._volume_mounts.stopped()
         self._started = False
         if self._info:
             self._info.status = SandboxStatus.STOPPED

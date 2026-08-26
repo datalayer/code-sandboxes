@@ -49,6 +49,14 @@ from typing import Any, Callable, Union
 
 from .base import Sandbox
 from .commands import CommandResult
+from .contents import (
+    ContentAttachmentError,
+    ContentCapabilities,
+    ContentManifest,
+    ManifestLocation,
+    PreparedAttachment,
+    install_manifest,
+)
 from .filesystem import FileInfo, SandboxFilesystem
 from .models import (
     CodeError,
@@ -220,6 +228,7 @@ class CodeSandboxClient:
         """
         self._sandbox = sandbox
         self._owns_sandbox = owns_sandbox
+        self._contents_location: ManifestLocation | None = None
 
     @classmethod
     def create(
@@ -566,6 +575,81 @@ class CodeSandboxClient:
     def download_file(self, remote_path: str, local_path: str) -> None:
         """Take a file out of the sandbox."""
         self.files.download(remote_path, local_path)
+
+    # -- Contents attachments ---------------------------------------------
+    #
+    # The Contents service hands over a manifest; the sandbox is given what
+    # it names. The client's part is the order of things — configure before
+    # the sandbox exists, start, install the manifest inside, then prepare —
+    # and the one strict verb, `attach`, that refuses to pretend a required
+    # attachment is there when it is not.
+
+    @property
+    def contents_location(self) -> ManifestLocation | None:
+        """Where the manifest was last written inside the sandbox, if it was."""
+        return self._contents_location
+
+    def content_capabilities(self) -> ContentCapabilities:
+        """What the wrapped sandbox's provider can do with an attachment."""
+        return self._sandbox.content_capabilities()
+
+    def prepare_contents(self, manifest: ContentManifest) -> list[PreparedAttachment]:
+        """Give the sandbox what the manifest names, and say what became of it.
+
+        A sandbox not yet started is configured first — the environment, and
+        the mounts a provider only makes at creation — then started, then
+        given the manifest file and the credentials to Contents, and only
+        then are the attachments prepared. Nothing here raises for an
+        attachment that could not be honoured; :meth:`attach` does.
+        """
+        self._stage_contents(manifest)
+        return self._sandbox.prepare_contents(manifest)
+
+    def reconcile_contents(self, manifest: ContentManifest) -> list[PreparedAttachment]:
+        """Re-check every attachment and repair what is missing.
+
+        After a restart, a reconnect, or a manifest that grew: the same as
+        :meth:`prepare_contents`, minus the work already done.
+        """
+        self._stage_contents(manifest)
+        return self._sandbox.reconcile_contents(manifest)
+
+    def attach(self, manifest: ContentManifest) -> list[PreparedAttachment]:
+        """Prepare the manifest and insist that every required attachment is ready.
+
+        Raises:
+            ContentAttachmentError: naming the first required attachment that
+                is not ready and why, with the whole list on `attachments`.
+                The sandbox is LEFT RUNNING — whether a sandbox without its
+                data is still worth having is the caller's call.
+        """
+        prepared = self.prepare_contents(manifest)
+        for result in prepared:
+            spec = manifest.attachment(result.uid)
+            if spec is not None and spec.required and result.status != "ready":
+                raise ContentAttachmentError(
+                    result.uid,
+                    result.error_code or "ATTACHMENT_NOT_READY",
+                    f"Content attachment {result.uid} is {result.status}"
+                    + (f": {result.detail}" if result.detail else ""),
+                    attachments=prepared,
+                )
+        return prepared
+
+    def attachment_status(self, uid: str) -> PreparedAttachment | None:
+        """What the last prepare or reconcile said of one attachment."""
+        return self._sandbox.attachment_status(uid)
+
+    def detach(self, uid: str) -> None:
+        """Take away what one attachment delivered; the source is untouched."""
+        self._sandbox.remove_attachment(uid)
+
+    def _stage_contents(self, manifest: ContentManifest) -> None:
+        """Configure, start, and put the manifest inside — in that order."""
+        if not self.is_started:
+            self._sandbox.configure_contents(manifest)
+        self.start()
+        self._contents_location = install_manifest(self._sandbox, manifest)
 
     def __enter__(self) -> CodeSandboxClient:
         self.start()

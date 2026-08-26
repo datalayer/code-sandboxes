@@ -17,6 +17,18 @@ if TYPE_CHECKING:
     from .filesystem import SandboxFileHandle
 
 from .base import Sandbox
+from .contents import (
+    FILESYSTEM_PRIMITIVES,
+    MOUNT_MISSING,
+    MOUNT_PATH_MISSING,
+    ContentAttachmentSpec,
+    ContentCapabilities,
+    LocalBridgeCapability,
+    PreparedAttachment,
+    not_ready,
+    path_exists,
+    ready,
+)
 from .exceptions import (
     SandboxConfigurationError,
     SandboxConnectionError,
@@ -437,6 +449,58 @@ class DatalayerSandbox(Sandbox):
     def _setup_tool_caller(self) -> None:
         """Keep tool calling on the client side for remote sandboxes."""
         return
+
+    # -- Contents attachments ---------------------------------------------
+    #
+    # On Datalayer the mounts are not this adapter's to make: the Operator
+    # reads them off the pod's annotation and mounts them — a volume, a
+    # bucket, a person's own folder through Clouder's CSI — before the pod
+    # starts. What is left to do here is to LOOK: is the path there, or not.
+
+    def content_capabilities(self) -> ContentCapabilities:
+        return ContentCapabilities(
+            provider="datalayer",
+            mount=True,
+            bucket_mount=True,
+            materialize=True,
+            client=True,
+            local_bridge_mount=LocalBridgeCapability(
+                supported=True,
+                required_features=["clouder-csi"],
+                allowed_roots=[],
+                read_only=True,
+                read_write=True,
+                reconnect=True,
+                cleanup=True,
+            ),
+            filesystem_primitives=list(FILESYSTEM_PRIMITIVES),
+        )
+
+    def _prepare_mount(self, spec: ContentAttachmentSpec, *, reconcile: bool) -> PreparedAttachment:
+        del reconcile
+        return self._operator_mount(spec, capability="mount")
+
+    def _prepare_local_bridge(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        del reconcile
+        return self._operator_mount(spec, capability="local-bridge-mount")
+
+    def _operator_mount(
+        self, spec: ContentAttachmentSpec, *, capability: str
+    ) -> PreparedAttachment:
+        """Ready when the Operator's mount is there; otherwise, say it is not."""
+        if not spec.mount_path:
+            return not_ready(spec, MOUNT_PATH_MISSING, "a mount needs a mount_path")
+        if path_exists(self, spec.mount_path):
+            return ready(spec, capabilities=[capability])
+        return not_ready(
+            spec,
+            MOUNT_MISSING,
+            f"{spec.mount_path} is not mounted in the runtime: the Operator makes "
+            "mounts from the pod annotation before the pod starts, and this one "
+            "was not made",
+        )
 
     def poll(self) -> Optional[int]:
         """Check if the sandbox has finished running.

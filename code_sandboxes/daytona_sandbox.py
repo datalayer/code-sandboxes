@@ -31,6 +31,15 @@ import time
 from typing import Any
 
 from .base import Sandbox
+from .contents import (
+    FILESYSTEM_PRIMITIVES,
+    ContentAttachmentSpec,
+    ContentCapabilities,
+    ContentManifest,
+    CreationTimeMounts,
+    LocalBridgeCapability,
+    PreparedAttachment,
+)
 from .exceptions import (
     SandboxConfigurationError,
     SandboxExecutionError,
@@ -305,7 +314,34 @@ class DaytonaSandbox(Sandbox):
         self._contexts: dict[str, Any] = {}
         self._execution_count = 0
         self._jupyter_endpoint: JupyterServerEndpoint | None = None
+        #: Volumes to mount, which Daytona takes only when the sandbox is
+        #: created: `params.volumes=[VolumeMount(...)]`, nothing afterwards.
+        self._volume_mounts = CreationTimeMounts()
         self._extra_kwargs = kwargs
+
+    # -- Contents attachments ---------------------------------------------
+
+    def content_capabilities(self) -> ContentCapabilities:
+        return ContentCapabilities(
+            provider="daytona",
+            mount=True,
+            bucket_mount=False,
+            materialize=True,
+            client=True,
+            local_bridge_mount=LocalBridgeCapability(supported=False),
+            filesystem_primitives=list(FILESYSTEM_PRIMITIVES),
+        )
+
+    def configure_contents(self, manifest: ContentManifest) -> None:
+        super().configure_contents(manifest)
+        self._volume_mounts.request_all(manifest)
+
+    def _prepare_mount(self, spec: ContentAttachmentSpec, *, reconcile: bool) -> PreparedAttachment:
+        del reconcile
+        return self._volume_mounts.prepare(self, spec, provider="daytona")
+
+    def _forget_mount(self, spec: ContentAttachmentSpec) -> None:
+        self._volume_mounts.forget(spec)
 
     def prepare_jupyter_server(
         self, options: JupyterServerOptions | None = None
@@ -390,6 +426,7 @@ class DaytonaSandbox(Sandbox):
         daytona = _import_daytona()
         self._daytona = daytona.Daytona(self._client_config(daytona))
         self._sandbox = self._daytona.create(self._create_params(daytona))
+        self._volume_mounts.created()
 
         self._default_context = self.create_context("default")
         self._info = SandboxInfo(
@@ -441,6 +478,13 @@ class DaytonaSandbox(Sandbox):
         if self.config.max_lifetime:
             common["ttl_minutes"] = max(1, round(self.config.max_lifetime / 60))
         common.update(self._network_params())
+        if self._volume_mounts.requested:
+            # One mount per path, in the order they were asked for: the
+            # record is keyed by path, so asking twice cannot mount twice.
+            common["volumes"] = [
+                daytona.VolumeMount(volume_id=volume_id, mount_path=mount_path)
+                for mount_path, volume_id in self._volume_mounts.requested.items()
+            ]
 
         resources = self._resources(daytona)
         if _asks_for_a_gpu(resources):
@@ -555,6 +599,7 @@ class DaytonaSandbox(Sandbox):
         self._daytona = None
         self._jupyter_endpoint = None
         self._contexts.clear()
+        self._volume_mounts.stopped()
         self._started = False
         if self._info:
             self._info.status = SandboxStatus.STOPPED

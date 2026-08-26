@@ -75,6 +75,16 @@ from .console import (
     show_examples,
     show_result,
 )
+from .contents import (
+    ContentAttachmentError,
+    ContentAttachmentSpec,
+    ContentCapabilities,
+    ContentManifest,
+    LocalBridgeCapability,
+    ManifestLocation,
+    MaterializeEntry,
+    PreparedAttachment,
+)
 from .coreweave_sandbox import CoreWeaveSandbox
 from .datalayer_sandbox import DatalayerSandbox
 from .daytona_sandbox import DaytonaSandbox
@@ -163,6 +173,10 @@ __all__ = [
     "CodeExecutionOutcome",
     "CodeSandboxClient",
     "CommandResult",
+    "ContentAttachmentError",
+    "ContentAttachmentSpec",
+    "ContentCapabilities",
+    "ContentManifest",
     "Context",
     "ContextNotFoundError",
     "CoreWeaveSandbox",
@@ -187,12 +201,16 @@ __all__ = [
     "KaggleKernelClient",
     "KaggleKernelExecutor",
     "KaggleSandbox",
+    "LocalBridgeCapability",
     "Logs",
     "MIMEType",
+    "ManifestLocation",
+    "MaterializeEntry",
     "ModalSandbox",
     "MontySandbox",
     "OutputHandler",
     "OutputMessage",
+    "PreparedAttachment",
     "ProcessHandle",
     "ProviderRequirement",
     "ResourceConfig",
