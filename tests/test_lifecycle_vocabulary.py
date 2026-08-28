@@ -33,6 +33,7 @@ class TestVocabulary:
             "resume",
             "list",
             "get",
+            "update",
             "snapshot",
             "execute",
         }
@@ -110,3 +111,96 @@ class TestRefusals:
         from code_sandboxes.eval_sandbox import EvalSandbox
 
         assert EvalSandbox().supports("teleport") is False
+
+
+class TestTheTwoShapes:
+    """One sandbox and a collection of them are different objects."""
+
+    def test_every_verb_belongs_to_exactly_one_shape(self) -> None:
+        from code_sandboxes.lifecycle import (
+            INSTANCE_OPERATIONS,
+            MANAGER_OPERATIONS,
+        )
+
+        assert not INSTANCE_OPERATIONS & MANAGER_OPERATIONS
+        assert INSTANCE_OPERATIONS | MANAGER_OPERATIONS == set(LIFECYCLE_OPERATIONS)
+
+    def test_the_instance_protocol_covers_the_instance_verbs(self) -> None:
+        from code_sandboxes.lifecycle import INSTANCE_OPERATIONS, SandboxLifecycle
+
+        # "execute" is spelled `run_code` on the protocol, for the same reason
+        # `Sandbox` spells it that way: it is the one verb that takes code.
+        named = {v for v in INSTANCE_OPERATIONS if v != "execute"}
+        assert named <= set(dir(SandboxLifecycle))
+        assert "run_code" in dir(SandboxLifecycle)
+
+    def test_the_manager_protocol_covers_the_manager_verbs(self) -> None:
+        from code_sandboxes.lifecycle import (
+            MANAGER_OPERATIONS,
+            SandboxManagerLifecycle,
+        )
+
+        assert MANAGER_OPERATIONS <= set(dir(SandboxManagerLifecycle))
+
+
+class TestTheVocabularyIsReachable:
+    """A consumer should not need to know which module it lives in."""
+
+    def test_the_package_root_exports_it(self) -> None:
+        import code_sandboxes
+
+        for name in (
+            "LIFECYCLE_OPERATIONS",
+            "SandboxLifecycle",
+            "SandboxManagerLifecycle",
+            "SandboxOperationNotSupported",
+            "unsupported",
+        ):
+            assert name in code_sandboxes.__all__
+            assert hasattr(code_sandboxes, name)
+
+
+class TestTheRuntimeUrls:
+    """One place knows how a runtime is addressed, so callers cannot drift."""
+
+    BASE = "https://runtimes.example"
+
+    def test_a_trailing_slash_on_the_base_changes_nothing(self) -> None:
+        from code_sandboxes.lifecycle import runtime_url
+
+        assert runtime_url(self.BASE, "runtime-1") == runtime_url(
+            self.BASE + "/", "runtime-1"
+        )
+
+    def test_the_urls_match_what_the_vocabulary_documents(self) -> None:
+        from code_sandboxes.lifecycle import (
+            LIFECYCLE_OPERATIONS,
+            runtime_pause_url,
+            runtime_resume_url,
+            runtime_url,
+            runtimes_url,
+            sandbox_snapshots_url,
+        )
+
+        built = {
+            "list": runtimes_url(self.BASE),
+            "create": runtimes_url(self.BASE),
+            "get": runtime_url(self.BASE, "{runtime_name}"),
+            "stop": runtime_url(self.BASE, "{runtime_name}"),
+            "update": runtime_url(self.BASE, "{runtime_name}"),
+            "pause": runtime_pause_url(self.BASE, "{runtime_name}"),
+            "resume": runtime_resume_url(self.BASE, "{runtime_name}"),
+            "snapshot": sandbox_snapshots_url(self.BASE),
+        }
+        for verb, url in built.items():
+            # The documented spelling is "<METHOD> <path>"; the path is what a
+            # URL builder has to agree with.
+            path = LIFECYCLE_OPERATIONS[verb].split(" ", 1)[1]
+            assert url == f"{self.BASE}/api/runtimes/v1{path}", verb
+
+    def test_stopping_a_paused_runtime_uses_the_same_url(self) -> None:
+        from code_sandboxes.lifecycle import runtime_url
+
+        # There is one `stop`, so there is one URL — a paused runtime does not
+        # get a second path of its own.
+        assert runtime_url(self.BASE, "runtime-1").endswith("/runtimes/runtime-1")

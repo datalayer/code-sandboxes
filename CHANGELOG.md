@@ -8,6 +8,28 @@
 
 ## Unreleased
 
+- Exported the lifecycle vocabulary from the package root, so a consumer writes
+  `from code_sandboxes import SandboxLifecycle` rather than reaching into
+  `code_sandboxes.lifecycle` — the import path is the part that cannot be
+  changed afterwards, which is why it moved before anything depended on it.
+
+  The vocabulary gained `update` (the Runtimes API's `PUT`) and split in two.
+  `SandboxLifecycle` is one sandbox — `start`, `stop`, `pause`, `resume`,
+  `snapshot`, `run_code`; `SandboxManagerLifecycle` is whoever hands them out —
+  `create`, `list`, `get`, `update`. They were one protocol that quietly
+  disagreed with `LIFECYCLE_OPERATIONS`, because `Sandbox.create` is a
+  classmethod and a client's `create` is not; `INSTANCE_OPERATIONS` and
+  `MANAGER_OPERATIONS` now say which verb belongs to which shape, and a test
+  holds them to covering every verb exactly once.
+
+  It also gained the URL builders — `runtimes_url`, `runtime_url`,
+  `runtime_pause_url`, `runtime_resume_url`, `sandbox_snapshots_url`,
+  `sandbox_snapshot_url`, `runtime_checkpoints_url` — so every Python caller of
+  the Runtimes API builds a path from one place instead of its own f-string.
+  `snapshot` is recorded against `POST /sandbox-snapshots`, which is the route
+  that exists; it had been documented as a sub-path of the runtime, which was
+  not.
+
 - Numbered the prompt's examples, and made one runnable by its number:
   `:examples` lists them `1.`, `2.`, … and `:examples:2` prints the second and
   then executes it, for a reader who wants the answer rather than the paste.

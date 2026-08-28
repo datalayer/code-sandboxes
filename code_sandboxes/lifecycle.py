@@ -13,7 +13,7 @@ The answer is convergence rather than a facade: one set of verbs, spelled the
 same way wherever it appears. A facade would have frozen the divergence behind
 something nobody wants to own.
 
-    create · start · stop · pause · resume · list · get · snapshot · execute
+    create · start · stop · pause · resume · list · get · update · snapshot · execute
 
 This module states that vocabulary and nothing else. It is a `Protocol`, so a
 class conforms by having the methods rather than by inheriting anything, and the
@@ -50,14 +50,25 @@ class SandboxOperationNotSupported(SandboxError):
 LIFECYCLE_OPERATIONS: dict[str, str] = {
     "create": "POST /runtimes",
     "start": "POST /runtimes (implied) — begin a created sandbox",
-    "stop": "DELETE /runtimes/{pod_name}",
-    "pause": "POST /runtimes/{pod_name}/pause",
-    "resume": "POST /runtimes/{pod_name}/resume",
+    "stop": "DELETE /runtimes/{runtime_name}",
+    "pause": "POST /runtimes/{runtime_name}/pause",
+    "resume": "POST /runtimes/{runtime_name}/resume",
     "list": "GET /runtimes",
-    "get": "GET /runtimes/{pod_name}",
-    "snapshot": "POST /runtimes/{pod_name}/snapshots",
+    "get": "GET /runtimes/{runtime_name}",
+    "update": "PUT /runtimes/{runtime_name}",
+    "snapshot": "POST /sandbox-snapshots",
     "execute": "run code in the sandbox",
 }
+
+#: The verbs that belong to one sandbox, and so appear on `SandboxLifecycle`.
+#: The rest — `create`, `list`, `get`, `update` — belong to whoever manages a
+#: collection of them, which is a different object with a different shape.
+INSTANCE_OPERATIONS: frozenset[str] = frozenset(
+    {"start", "stop", "pause", "resume", "snapshot", "execute"}
+)
+
+#: The verbs that belong to a manager of sandboxes rather than to one sandbox.
+MANAGER_OPERATIONS: frozenset[str] = frozenset({"create", "list", "get", "update"})
 
 
 @runtime_checkable
@@ -99,6 +110,90 @@ class SandboxLifecycle(Protocol):
 
     def run_code(self, code: str, **kwargs: Any) -> Any:
         """Execute code and return what it produced."""
+        ...
+
+
+#: The Runtimes API prefix, below whichever host serves it.
+RUNTIMES_API_PREFIX = "api/runtimes/v1"
+
+
+def _join(base_url: str, path: str) -> str:
+    """Join a base to a path without doubling or dropping the slash between."""
+    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def runtimes_url(base_url: str) -> str:
+    """Every runtime — the collection. `create` posts here, `list` gets here."""
+    return _join(base_url, f"{RUNTIMES_API_PREFIX}/runtimes")
+
+
+def runtime_url(base_url: str, runtime_name: str) -> str:
+    """One runtime, by name.
+
+    `get` reads it, `update` puts to it, and `stop` deletes it — whether the
+    runtime is running or paused, which is why there is no second path for the
+    paused case.
+    """
+    return f"{runtimes_url(base_url)}/{runtime_name}"
+
+
+def runtime_pause_url(base_url: str, runtime_name: str) -> str:
+    """Suspend one runtime, keeping its state."""
+    return f"{runtime_url(base_url, runtime_name)}/pause"
+
+
+def runtime_resume_url(base_url: str, runtime_name: str) -> str:
+    """Bring one paused runtime back."""
+    return f"{runtime_url(base_url, runtime_name)}/resume"
+
+
+def sandbox_snapshots_url(base_url: str) -> str:
+    """The snapshots collection.
+
+    A snapshot outlives the runtime it came from, which is why it is its own
+    resource rather than a sub-path.
+    """
+    return _join(base_url, f"{RUNTIMES_API_PREFIX}/sandbox-snapshots")
+
+
+def sandbox_snapshot_url(base_url: str, snapshot_id: str) -> str:
+    """One snapshot, by UID."""
+    return f"{sandbox_snapshots_url(base_url)}/{snapshot_id}"
+
+
+def runtime_checkpoints_url(base_url: str) -> str:
+    """The checkpoint records behind pause and resume."""
+    return _join(base_url, f"{RUNTIMES_API_PREFIX}/runtime-checkpoints")
+
+
+@runtime_checkable
+class SandboxManagerLifecycle(Protocol):
+    """What a *collection* of sandboxes can be asked.
+
+    `SandboxLifecycle` is one sandbox; this is whoever hands them out. The
+    Runtimes client is both — it manages pods, and `handle()` narrows it to one.
+    Keeping the two apart is why `Sandbox.create()` can stay a classmethod
+    while a client's `create()` is an ordinary call.
+    """
+
+    def supports(self, operation: str) -> bool:
+        """Whether this manager can do a verb at all."""
+        ...
+
+    def create(self, **kwargs: Any) -> Any:
+        """Bring a new sandbox into being and return what identifies it."""
+        ...
+
+    def list(self, **kwargs: Any) -> Any:
+        """Every sandbox this caller can see."""
+        ...
+
+    def get(self, identifier: str, **kwargs: Any) -> Any:
+        """One sandbox, by whatever names it."""
+        ...
+
+    def update(self, identifier: str, **kwargs: Any) -> Any:
+        """Change a sandbox in place, without restarting it."""
         ...
 
 
