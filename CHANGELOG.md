@@ -8,6 +8,14 @@
 
 ## Unreleased
 
+- `CodeExecutionOutcome` now carries `outputs`: the rich results as Jupyter
+  outputs, with their mime bundles intact. It called itself a faithful superset
+  of the raw `ExecutionResult` and was not — every representation but
+  `text/plain` was dropped on the way through, so a matplotlib figure reached
+  its callers as the string `<Figure size 640x480 with 1 Axes>` and anything
+  wanting to draw it had nothing to draw. `results` is unchanged, for callers
+  that only print.
+
 - Exported the lifecycle vocabulary from the package root, so a consumer writes
   `from code_sandboxes import SandboxLifecycle` rather than reaching into
   `code_sandboxes.lifecycle` — the import path is the part that cannot be

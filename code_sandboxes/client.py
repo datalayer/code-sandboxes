@@ -140,6 +140,11 @@ class CodeExecutionOutcome:
         stderr: Combined standard error text.
         results: Textual representation of rich results (display data / return
             values) produced by the execution.
+        outputs: The same rich results as Jupyter outputs, mime bundles intact.
+            `results` keeps only `text/plain`, which is enough to print and not
+            enough to draw: a figure, an HTML table and a `repr` all arrive as
+            one string. Anything that renders — the A2UI converter, a notebook
+            panel — reads this instead.
         error: Human-readable error message when ``success`` is False, otherwise
             ``None``.
         execution_error: Infrastructure failure detail when ``execution_ok`` is
@@ -156,6 +161,7 @@ class CodeExecutionOutcome:
     stdout: str = ""
     stderr: str = ""
     results: list[str] = field(default_factory=list)
+    outputs: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
     execution_error: str | None = None
     code_error: dict[str, str] | None = None
@@ -166,10 +172,26 @@ class CodeExecutionOutcome:
     def from_execution_result(cls, execution: ExecutionResult) -> CodeExecutionOutcome:
         """Build a normalized outcome from a raw :class:`ExecutionResult`."""
         results: list[str] = []
+        outputs: list[dict[str, Any]] = []
         for result in execution.results:
             text = getattr(result, "text", None)
             if text:
                 results.append(text)
+            data = getattr(result, "data", None)
+            if isinstance(data, dict) and data:
+                # Jupyter's own shape, so a consumer that already knows how to
+                # read a notebook output does not need a second reader.
+                outputs.append(
+                    {
+                        "output_type": (
+                            "execute_result"
+                            if getattr(result, "is_main_result", False)
+                            else "display_data"
+                        ),
+                        "data": dict(data),
+                        "metadata": dict(getattr(result, "extra", None) or {}),
+                    }
+                )
 
         code_error_dict: dict[str, str] | None = None
         if execution.code_error is not None:
@@ -200,6 +222,7 @@ class CodeExecutionOutcome:
             stdout=execution.logs.stdout_text,
             stderr=execution.logs.stderr_text,
             results=results,
+            outputs=outputs,
             error=error,
             execution_error=execution.execution_error,
             code_error=code_error_dict,
