@@ -727,6 +727,52 @@ class Sandbox(ABC):
         """Async context manager exit."""
         await self.stop_async()
 
+    # ------------------------------------------------------------------
+    # The converged lifecycle vocabulary. See `code_sandboxes.lifecycle`:
+    # one set of verbs, spelled the same way here and on the Runtimes API, so a
+    # caller written against either works with both.
+    # ------------------------------------------------------------------
+
+    #: Verbs this variant can actually do. A provider that can pause says so by
+    #: listing it; the base answers honestly for everyone else.
+    LIFECYCLE_SUPPORTED: tuple[str, ...] = (
+        "create",
+        "start",
+        "stop",
+        "execute",
+    )
+
+    def supports(self, operation: str) -> bool:
+        """Whether this sandbox can do a lifecycle verb at all.
+
+        Asked before committing rather than discovered by an exception:
+        "pause this and come back tomorrow" is a plan a caller makes, and it
+        deserves an answer before it makes it.
+        """
+        return operation in type(self).LIFECYCLE_SUPPORTED
+
+    def pause(self, **kwargs: Any) -> None:
+        """Suspend the sandbox, keeping its state.
+
+        Providers that can do it override this. The rest refuse in the same
+        words rather than each inventing their own failure.
+        """
+        from code_sandboxes.lifecycle import unsupported
+
+        raise unsupported("pause", getattr(self, "variant", "") or "")
+
+    def resume(self, **kwargs: Any) -> None:
+        """Bring a paused sandbox back with its state intact."""
+        from code_sandboxes.lifecycle import unsupported
+
+        raise unsupported("resume", getattr(self, "variant", "") or "")
+
+    def snapshot(self, name: str, **kwargs: Any) -> Any:
+        """Capture the sandbox's state under a name, without ending it."""
+        from code_sandboxes.lifecycle import unsupported
+
+        raise unsupported("snapshot", getattr(self, "variant", "") or "")
+
     @abstractmethod
     def start(self) -> None:
         """Start the sandbox.
