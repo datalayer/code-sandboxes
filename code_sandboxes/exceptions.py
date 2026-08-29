@@ -52,6 +52,21 @@ class SandboxConfigurationError(SandboxError):
     pass
 
 
+class SandboxNotFoundError(SandboxError):
+    """Raised when no sandbox with the given id exists.
+
+    The alternative — answering an object that is not connected to anything —
+    is what `DatalayerSandbox.from_id` used to do, and it is worse than an
+    error: every call on it fails later, somewhere else, with a message about
+    whatever it happened to touch first rather than about the id that was
+    wrong.
+    """
+
+    def __init__(self, sandbox_id: str, message: Optional[str] = None):
+        self.sandbox_id = sandbox_id
+        super().__init__(message or f"No sandbox with id '{sandbox_id}'")
+
+
 class ContextNotFoundError(SandboxError):
     """Raised when a requested context does not exist."""
 

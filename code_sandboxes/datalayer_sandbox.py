@@ -34,6 +34,7 @@ from .contents import (
 from .exceptions import (
     SandboxConfigurationError,
     SandboxConnectionError,
+    SandboxNotFoundError,
     SandboxNotStartedError,
     SandboxSnapshotError,
 )
@@ -156,23 +157,104 @@ class DatalayerSandbox(Sandbox):
         return self._sandbox_id
 
     @classmethod
-    def from_id(cls, sandbox_id: str, **kwargs) -> "DatalayerSandbox":
-        """Retrieve an existing sandbox by its ID.
+    def from_id(
+        cls,
+        sandbox_id: str,
+        token: Optional[str] = None,
+        run_url: Optional[str] = None,
+        **kwargs,
+    ) -> "DatalayerSandbox":
+        """Retrieve an existing sandbox by its id, connected.
 
-        Similar to Modal's Sandbox.from_id() method.
+        What :meth:`list_all` does for every runtime, this does for one. It
+        used to return an unconnected object with a comment saying it "would
+        need agent-runtimes support" — which was there all along, and meant
+        every caller wanting an existing runtime wrote the same four lines.
 
-        Args:
-            sandbox_id: The unique identifier of the sandbox.
-            **kwargs: Additional arguments (token, run_url).
+        `sandbox_id` is either the Runtimes `runtime_name` or the runtime's
+        `uid`. Both, because `list_all` hands out the uid and `AgentClient`
+        looks up by name: a `from_id` that took only one of them would refuse
+        the very id this class had just given the caller.
 
-        Returns:
-            A DatalayerSandbox instance connected to the existing runtime.
+        Raises:
+            SandboxNotFoundError: when no such runtime exists, or when the
+                lookup cannot be made at all. Answering an object that is not
+                connected — the old behaviour — is worse than an error: every
+                call on it fails later, somewhere else, with a message about
+                whatever it touched first rather than about the wrong id.
         """
-        # Create a new sandbox instance with the existing ID
-        sandbox = cls(**kwargs)
-        sandbox._sandbox_id = sandbox_id
-        # Connect to existing runtime - this would need runtime lookup
-        # For now, this is a placeholder that would need agent-runtimes support
+        try:
+            import datalayer_core.utils.urls  # noqa: F401 - availability check
+            from agent_runtimes.client import AgentClient
+        except ImportError as error:
+            raise SandboxNotFoundError(
+                sandbox_id,
+                f"Cannot look up sandbox '{sandbox_id}': the Datalayer client "
+                f"is not installed. Install code-sandboxes with the "
+                f"[datalayer] extra.",
+            ) from error
+
+        if run_url:
+            client = AgentClient(urls=_urls_for_run(run_url), api_key=token)
+        else:
+            client = AgentClient(api_key=token)
+
+        runtime = cls._find_runtime(client, sandbox_id)
+        if runtime is None:
+            raise SandboxNotFoundError(sandbox_id)
+        return cls._adopt(runtime, token=token, run_url=run_url, **kwargs)
+
+    @staticmethod
+    def _find_runtime(client, sandbox_id: str):
+        """The runtime this id names, by name and then by uid.
+
+        By name first because it is one request; the scan is the fallback for
+        a uid, which is what `list_all` hands out.
+        """
+        try:
+            return client.get_runtime(sandbox_id)
+        except Exception:  # noqa: BLE001 - not a name; try it as a uid
+            pass
+        try:
+            runtimes = client.list_runtimes()
+        except Exception:  # noqa: BLE001
+            return None
+        for runtime in runtimes:
+            if sandbox_id in (runtime.uid, runtime.runtime_name):
+                return runtime
+        return None
+
+    @classmethod
+    def _adopt(
+        cls,
+        runtime,
+        *,
+        token: Optional[str] = None,
+        run_url: Optional[str] = None,
+        **kwargs,
+    ) -> "DatalayerSandbox":
+        """A sandbox around a runtime that is already running.
+
+        Shared with :meth:`list_all` so the two cannot drift — one adopting a
+        runtime differently from the other is how `from_id` would come to
+        return something that behaves unlike what iteration yields.
+        """
+        sandbox = cls(token=token, run_url=run_url, **kwargs)
+        sandbox._client = getattr(runtime, "_client", None) or sandbox._client
+        sandbox._runtime = runtime
+        sandbox._sandbox_id = runtime.uid or runtime.runtime_name or str(uuid.uuid4())
+        sandbox._started = True
+        sandbox._info = SandboxInfo(
+            id=sandbox._sandbox_id,
+            variant="datalayer",
+            status=SandboxStatus.RUNNING,
+            created_at=time.time(),
+            name=runtime.name,
+            metadata={
+                "network_policy": sandbox.config.network_policy,
+                "allowed_hosts": sandbox.config.allowed_hosts,
+            },
+        )
         return sandbox
 
     @classmethod
@@ -210,22 +292,8 @@ class DatalayerSandbox(Sandbox):
             runtimes = client.list_runtimes()
 
             for runtime in runtimes:
-                sandbox = cls(token=token, run_url=run_url)
+                sandbox = cls._adopt(runtime, token=token, run_url=run_url)
                 sandbox._client = client
-                sandbox._runtime = runtime
-                sandbox._sandbox_id = runtime.uid or str(uuid.uuid4())
-                sandbox._started = True
-                sandbox._info = SandboxInfo(
-                    id=sandbox._sandbox_id,
-                    variant="datalayer",
-                    status=SandboxStatus.RUNNING,
-                    created_at=time.time(),
-                    name=runtime.name,
-                    metadata={
-                        "network_policy": sandbox.config.network_policy,
-                        "allowed_hosts": sandbox.config.allowed_hosts,
-                    },
-                )
                 yield sandbox
         except Exception:
             return
