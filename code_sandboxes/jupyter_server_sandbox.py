@@ -238,6 +238,22 @@ class JupyterServerSandbox(Sandbox):
             f"--ServerApp.port={port}",
             "--ServerApp.port_retries=0",
             "--ServerApp.allow_origin=*",
+            # A browser on another origin is a first-class client here: the
+            # notebook and document editors of the workspace connect to this
+            # server directly from a page served by the dev server or the SaaS.
+            #
+            # `allow_origin` alone is not enough for that. Starting a kernel is
+            # a POST, and Jupyter's XSRF check rejects a cross-origin write
+            # *before* the CORS headers are attached — so the browser reports a
+            # missing `Access-Control-Allow-Origin` on a 403 and neither half of
+            # the message names the real cause. Requests still have to carry the
+            # token above; this only stops the cookie-based defence from
+            # refusing a client that was never going to send a cookie.
+            "--ServerApp.disable_check_xsrf=True",
+            # Answer on both loopback names. The URL handed to the browser is
+            # whatever the caller resolved, and a server bound only to
+            # 127.0.0.1 refuses the same request addressed to localhost.
+            f"--ServerApp.ip={self._host}",
             f"--ServerApp.root_dir={workdir}",
         ]
 
