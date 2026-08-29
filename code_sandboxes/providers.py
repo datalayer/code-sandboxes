@@ -22,7 +22,7 @@ Datalayer ships ``ai-agents-env``, and only the variant knows its own.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -359,6 +359,7 @@ def available_providers(
 
 def provider_catalog(
     secrets: Mapping[str, str] | None = None,
+    names: Iterable[str] | None = None,
 ) -> list[dict]:
     """Every provider as plain data, for a service to serve.
 
@@ -367,9 +368,24 @@ def provider_catalog(
     the registry as JSON, not as dataclasses holding callables. Environments
     are read only for providers that are enabled: asking an unusable provider
     what it ships is a call that fails.
+
+    Args:
+        secrets: Where to read credentials from, as in `environments`.
+        names: The providers to describe, by name; every one of them by
+            default. Filtering here rather than in the caller is what makes
+            it cheap — a name left out is never asked what it ships, and
+            asking is a network call. The operator serves only the external
+            providers and must not ask the `datalayer` one, whose listing
+            calls the platform's own environments endpoint: the operator
+            answers that endpoint, so describing the full catalog to throw
+            most of it away had the operator calling itself through the
+            runtimes gateway until every request in the cycle timed out.
     """
+    wanted = None if names is None else {normalize_variant(n) for n in names}
     catalog: list[dict] = []
     for provider in PROVIDERS:
+        if wanted is not None and provider.name not in wanted:
+            continue
         enabled = provider.is_available(secrets)
         catalog.append(
             {
