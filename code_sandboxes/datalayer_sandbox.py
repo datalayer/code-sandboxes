@@ -142,6 +142,56 @@ class DatalayerSandbox(Sandbox):
         self._end_at: Optional[float] = None
 
     @property
+    def server_url(self) -> Optional[str]:
+        """The runtime's Jupyter ingress, once it is running.
+
+        Published because a sandbox is not only something the agent executes
+        in — it is a kernel a *person* may want to look at. The notebook and
+        document surfaces in a browser build their own connection to the same
+        server, and without an address here they had nothing to build it from:
+        the runtime would start, appear in the Datalayer console, and leave the
+        editors beside the chat connected to nothing.
+
+        Named `server_url` to match `JupyterServerSandbox`, so whatever reads
+        one reads the other. `_server_url` is the same value under the name
+        older callers probe for.
+        """
+        runtime = self._runtime
+        return getattr(runtime, "ingress", None) if runtime else None
+
+    @property
+    def _server_url(self) -> Optional[str]:
+        """Alias of {@link server_url}, for callers that probe the private name."""
+        return self.server_url
+
+    @property
+    def jupyter_token(self) -> Optional[str]:
+        """The token that ingress wants.
+
+        Useless apart from the URL and dangerous to confuse with the API key:
+        `self._token` authenticates *this process* to Datalayer, and handing it
+        to a browser as a Jupyter token would both fail and leak a credential.
+        This is the runtime's own, minted for it.
+        """
+        runtime = self._runtime
+        return getattr(runtime, "jupyter_token", None) if runtime else None
+
+    @property
+    def kernel_id(self) -> Optional[str]:
+        """The kernel the agent is executing in, once there is one.
+
+        Read from the runtime's model rather than kept here: the runtime owns
+        the kernel's lifetime and replaces the id when it restarts, and a copy
+        would go stale exactly when it mattered — a surface reconnecting to a
+        kernel that no longer exists.
+        """
+        runtime = self._runtime
+        if runtime is None:
+            return None
+        model = getattr(runtime, "model", None)
+        return getattr(model, "kernel_id", None) if model else None
+
+    @property
     def client(self):
         """Get the Datalayer client instance."""
         return self._client

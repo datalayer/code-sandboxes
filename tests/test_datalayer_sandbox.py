@@ -212,3 +212,76 @@ def test_from_id_and_list_all_adopt_a_runtime_the_same_way(one_runtime):
     assert from_iteration._info.name == directly._info.name
     assert from_iteration._info.status == directly._info.status
     assert from_iteration._started == directly._started
+
+
+class _FakeModel:
+    """The part of a runtime's model these properties read."""
+
+    def __init__(self, kernel_id=None):
+        self.kernel_id = kernel_id
+
+
+class _FakeRuntime:
+    """A runtime, as `AgentClient.create_runtime` hands one back."""
+
+    def __init__(self, ingress=None, jupyter_token=None, kernel_id=None):
+        self.ingress = ingress
+        self.jupyter_token = jupyter_token
+        self.model = _FakeModel(kernel_id)
+
+
+class TestDatalayerSandboxIngress:
+    """The sandbox publishes where its kernel lives.
+
+    A Datalayer runtime is not only somewhere the agent executes — it is a
+    kernel a person may want to look at. The notebook and document surfaces in
+    a browser build their own connection to the same server, and until these
+    properties existed there was no address to build it from: the runtime
+    started, appeared in the console, and left the editors connected to
+    nothing.
+    """
+
+    def test_reports_nothing_before_it_starts(self):
+        sandbox = DatalayerSandbox(token="api-key")
+        assert sandbox.server_url is None
+        assert sandbox.jupyter_token is None
+        assert sandbox.kernel_id is None
+
+    def test_publishes_the_runtime_ingress(self):
+        sandbox = DatalayerSandbox(token="api-key")
+        sandbox._runtime = _FakeRuntime(
+            ingress="https://runtime.example/api/jupyter-server",
+            jupyter_token="jupyter-secret",
+            kernel_id="kernel-1",
+        )
+
+        assert sandbox.server_url == "https://runtime.example/api/jupyter-server"
+        # Same value under the name older callers probe for.
+        assert sandbox._server_url == sandbox.server_url
+        assert sandbox.kernel_id == "kernel-1"
+
+    def test_never_offers_the_api_key_as_a_jupyter_token(self):
+        """The distinction this exists to keep.
+
+        `_token` authenticates this process to Datalayer. Serving it as a
+        Jupyter token would fail the connection and leak a credential in the
+        same breath.
+        """
+        sandbox = DatalayerSandbox(token="api-key")
+        sandbox._runtime = _FakeRuntime(
+            ingress="https://runtime.example",
+            jupyter_token="jupyter-secret",
+        )
+
+        assert sandbox.jupyter_token == "jupyter-secret"
+        assert sandbox.jupyter_token != sandbox._token
+
+    def test_follows_the_runtime_rather_than_copying_it(self):
+        """A restarted runtime gets a new kernel; a copy would go stale."""
+        sandbox = DatalayerSandbox(token="api-key")
+        runtime = _FakeRuntime(ingress="https://runtime.example", kernel_id="k1")
+        sandbox._runtime = runtime
+
+        assert sandbox.kernel_id == "k1"
+        runtime.model.kernel_id = "k2"
+        assert sandbox.kernel_id == "k2"
