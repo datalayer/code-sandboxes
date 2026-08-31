@@ -561,9 +561,34 @@ def test_capabilities_agree_with_the_contents_matrix(harness):
     else:
         assert not capabilities.bucket_mount
         assert not capabilities.local_bridge_mount.supported
+    # A Pod's — and a provider sandbox's — volumes are fixed when it is
+    # created. Only Datalayer lifts that, through the mount gateway, and only
+    # for a runtime that carries it: everywhere else the mounts live in
+    # `CreationTimeMounts` and a caller has to know that before it asks.
+    assert not capabilities.hot_attach
     # The client answers with the same, before anything is started.
     assert _client(harness).content_capabilities() == capabilities
     assert not harness.sandbox.is_started
+
+
+def test_hot_attach_is_reported_by_the_runtime_not_assumed_of_the_cluster(harness):
+    """The gateway is a property of the pod, not of the deployment.
+
+    A runtime taken from a pool built before the gateway shipped cannot take a
+    mount however new the cluster is, so the answer comes off the Runtime
+    record. Assuming the cluster would tell a caller to attach to a pod that
+    will never receive it.
+    """
+    if harness.provider != "datalayer":
+        pytest.skip("only the Datalayer adapter has a runtime record to read")
+
+    assert not harness.sandbox.content_capabilities().hot_attach
+
+    harness.sandbox._runtime = type("R", (), {"mount_gateway": True})()
+    assert harness.sandbox.content_capabilities().hot_attach
+
+    harness.sandbox._runtime = type("R", (), {"mount_gateway": False})()
+    assert not harness.sandbox.content_capabilities().hot_attach
 
 
 # --- The client delivery -----------------------------------------------------

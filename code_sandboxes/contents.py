@@ -77,6 +77,7 @@ __all__ = [
     "ContentCapabilities",
     "ContentManifest",
     "CreationTimeMounts",
+    "HOT_ATTACH_UNSUPPORTED",
     "LocalBridgeCapability",
     "LocalBridgeSpec",
     "ManifestLocation",
@@ -150,6 +151,10 @@ FUSE_UNAVAILABLE = "FUSE_UNAVAILABLE"
 #: A local bridge answered `ready` without a mount behind it. Never reported
 #: as a mount: a copy is not a bridge, and this is what catches one.
 LOCAL_BRIDGE_NOT_A_MOUNT = "LOCAL_BRIDGE_NOT_A_MOUNT"
+#: The sandbox is already running and this provider cannot mount into one.
+#: Every provider here fixes its mounts when the sandbox is created; on
+#: Datalayer the mount gateway lifts that, and nowhere else does.
+HOT_ATTACH_UNSUPPORTED = "HOT_ATTACH_UNSUPPORTED"
 
 #: The environment feature that means the bridge filesystem can run: fusepy
 #: and `/dev/fuse` inside the sandbox.
@@ -455,6 +460,13 @@ class ContentCapabilities(BaseModel):
     which is refused. `materialize` is fetching files into the sandbox from
     signed URLs. `client` is the sandbox reaching Contents itself, which
     every provider with a network can do.
+
+    `hot_attach` is whether a source can be mounted into a sandbox that is
+    already running. Daytona, E2B and Modal all keep their mounts in
+    `CreationTimeMounts` because their sandboxes take them at creation and
+    never after; on Datalayer the mount gateway binds a folder into a pod that
+    is already running, and this is how a caller finds out which of the two it
+    is talking to before it asks.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -464,6 +476,7 @@ class ContentCapabilities(BaseModel):
     bucket_mount: bool = False
     materialize: bool = False
     client: bool = True
+    hot_attach: bool = False
     local_bridge_mount: LocalBridgeCapability = Field(default_factory=LocalBridgeCapability)
     filesystem_primitives: list[str] = Field(default_factory=lambda: list(FILESYSTEM_PRIMITIVES))
 

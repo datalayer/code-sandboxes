@@ -577,6 +577,23 @@ class DatalayerSandbox(Sandbox):
     # bucket, a person's own folder through Clouder's CSI — before the pod
     # starts. What is left to do here is to LOOK: is the path there, or not.
 
+    def _supports_hot_attach(self) -> bool:
+        """Whether this runtime takes a mount while it runs.
+
+        A Pod's volumes are fixed when it is created, so this is a property of
+        the pod rather than of the cluster: a runtime taken from a pool built
+        before the mount gateway shipped cannot take one however new the
+        deployment is. The Runtime record says, and a record that does not say
+        is a runtime that does not.
+        """
+        runtime = self._runtime
+        if runtime is None:
+            return False
+        reported = getattr(runtime, "mount_gateway", None)
+        if reported is None and isinstance(getattr(runtime, "raw", None), dict):
+            reported = runtime.raw.get("mount_gateway")
+        return bool(reported)
+
     def content_capabilities(self) -> ContentCapabilities:
         return ContentCapabilities(
             provider="datalayer",
@@ -584,6 +601,11 @@ class DatalayerSandbox(Sandbox):
             bucket_mount=True,
             materialize=True,
             client=True,
+            # The mount gateway: the Operator writes a mount set on a running
+            # pod and a node agent binds it in. It is a deployment choice —
+            # the gateway is off by default — so the Runtime says whether it
+            # has it rather than this adapter assuming a cluster has it.
+            hot_attach=self._supports_hot_attach(),
             local_bridge_mount=LocalBridgeCapability(
                 supported=True,
                 required_features=["clouder-csi"],
