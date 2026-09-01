@@ -12,6 +12,7 @@ else entirely.
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 
 import pytest
 
@@ -23,6 +24,44 @@ from code_sandboxes.models import SandboxConfig
 #: pydantic's class-based config. Neither is what these tests are about, and
 #: the suite turns warnings into errors.
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
+
+
+def test_execute_preserves_native_jupyter_mime_bundles():
+    """A rendered image must not collapse to its ``text/plain`` fallback."""
+
+    class Runtime:
+        def execute(self, code, timeout):
+            return SimpleNamespace(
+                execute_response=[
+                    {
+                        "output_type": "display_data",
+                        "data": {
+                            "image/png": "iVBORw0KGgo=",
+                            "text/plain": "<IPython.core.display.Image object>",
+                        },
+                        "metadata": {"image/png": {"width": 500}},
+                    }
+                ],
+                # These legacy fields must not replace or duplicate the
+                # native output above.
+                result="<IPython.core.display.Image object>",
+                stdout="",
+                stderr="",
+                error=None,
+            )
+
+    sandbox = DatalayerSandbox(SandboxConfig())
+    sandbox._runtime = Runtime()
+    sandbox._started = True
+
+    execution = sandbox.run_code("display(image)")
+
+    assert len(execution.results) == 1
+    assert execution.results[0].data == {
+        "image/png": "iVBORw0KGgo=",
+        "text/plain": "<IPython.core.display.Image object>",
+    }
+    assert execution.results[0].extra == {"image/png": {"width": 500}}
 
 
 def test_every_service_the_sdk_knows_about_points_at_the_one_origin():

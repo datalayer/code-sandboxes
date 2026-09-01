@@ -202,6 +202,35 @@ class CodeExecutionOutcome:
                 "traceback": getattr(code_error, "traceback", None) or "",
             }
 
+        if code_error_dict is not None:
+            """
+            The traceback, as a Jupyter output rather than only as a string.
+
+            The exception was captured into ``code_error`` and flattened into
+            the one-line ``error`` message below, and that was the whole of
+            what a caller received: ``outputs`` carried the results and never
+            the failure. So anything rendering these outputs had a traceback
+            available nowhere and had to invent a stand-in — a single
+            ``KeyError: 'east'`` line, where a notebook would have shown the
+            frames.
+
+            ``nbformat`` already specifies this shape, and the renderers on
+            the other side already know it: an ``error`` output is what turns
+            a red line into a real cell error with its stack.
+            """
+            traceback_text = code_error_dict["traceback"]
+            outputs.append(
+                {
+                    "output_type": "error",
+                    "ename": code_error_dict["name"],
+                    "evalue": code_error_dict["value"],
+                    # A list of lines, per nbformat — and the ANSI escapes are
+                    # left in: that colouring is the kernel's own, and the
+                    # renderers convert it.
+                    "traceback": traceback_text.splitlines(),
+                }
+            )
+
         exit_code = getattr(execution, "exit_code", None)
 
         error: str | None = None

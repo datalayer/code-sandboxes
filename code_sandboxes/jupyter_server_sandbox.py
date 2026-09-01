@@ -10,6 +10,7 @@ one) and uses ``jupyter-kernel-client`` to execute code in a persistent kernel.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import os
@@ -23,6 +24,7 @@ import time
 import uuid
 from collections import deque
 from pathlib import Path
+from typing import AsyncIterator, Union
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 import requests
@@ -708,6 +710,82 @@ class JupyterServerSandbox(Sandbox):
             completed_at=time.time(),
             interrupted=was_interrupted,
         )
+
+    async def run_code_streaming_async(
+        self,
+        code: str,
+        language: str = "python",
+        context: Context | None = None,
+        envs: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> AsyncIterator[Union[OutputMessage, Result, CodeError]]:
+        """Yield each output as the kernel produces it.
+
+        The base implementation is streaming in shape only: it awaits the whole
+        execution and then replays what it collected, so a cell that prints for
+        three seconds delivered everything in one burst at the end. Nothing
+        downstream could stream, however well it was written — the A2UI surface
+        above this was emitting correct incremental messages, all of them
+        microseconds apart, after the run had finished.
+
+        Nothing new has to be observed to fix that. `run_code` already accepts
+        `on_stdout`, `on_stderr`, `on_result` and `on_error`, and already calls
+        them from its IOPub hook *while the messages are arriving* — the
+        information was live and only the return value was not. This turns
+        those callbacks into an async iterator.
+
+        The bridge is a queue, because `execute_interactive` blocks: the
+        execution runs on a worker thread and the callbacks hand items across
+        with `call_soon_threadsafe`, which is the only safe way to touch an
+        asyncio primitive from another thread. The generator then drains the
+        queue as items land, rather than waiting on the thread.
+        """
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[Union[OutputMessage, Result, CodeError, None]] = (
+            asyncio.Queue()
+        )
+
+        def emit(item: Union[OutputMessage, Result, CodeError]) -> None:
+            # Called on the execution thread; hop to the loop's thread before
+            # touching the queue.
+            loop.call_soon_threadsafe(queue.put_nowait, item)
+
+        def execute() -> ExecutionResult:
+            try:
+                return self.run_code(
+                    code=code,
+                    language=language,
+                    context=context,
+                    on_stdout=emit,
+                    on_stderr=emit,
+                    on_result=emit,
+                    on_error=emit,
+                    envs=envs,
+                    timeout=timeout,
+                )
+            finally:
+                # The sentinel closes the generator whatever happened, so a
+                # raising execution cannot leave a consumer awaiting forever.
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        execution_task = loop.run_in_executor(None, execute)
+
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield item
+
+        execution = await execution_task
+
+        # An infrastructure failure never reaches the callbacks — it is the
+        # reason there were none — so it is reported here, once, at the end.
+        if not execution.execution_ok and execution.execution_error:
+            yield CodeError(
+                name="SandboxExecutionError",
+                value=execution.execution_error,
+                traceback="",
+            )
 
     def _get_internal_variable(self, name: str, context: Context | None = None):
         if not self._started or self._client is None:

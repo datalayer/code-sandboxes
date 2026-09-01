@@ -741,8 +741,72 @@ class DatalayerSandbox(Sandbox):
 
         current_time = time.time()
 
-        # Process stdout
-        if hasattr(response, "stdout") and response.stdout:
+        # AgentClient returns the kernel's native notebook outputs in
+        # ``execute_response``.  Read that shape first: reducing it to the
+        # legacy ``stdout`` / ``result`` convenience properties discards MIME
+        # bundles, so an image becomes only ``<IPython...Image object>`` by the
+        # time it reaches a notebook output renderer.
+        raw_outputs = getattr(response, "execute_response", None)
+        if isinstance(raw_outputs, list):
+            # ``execute_file`` historically wrapped each cell's output list in
+            # one more list; accepting both shapes keeps the adapter faithful
+            # for code and file execution.
+            jupyter_outputs = [
+                output
+                for group in raw_outputs
+                for output in (group if isinstance(group, list) else [group])
+                if isinstance(output, dict)
+            ]
+        else:
+            jupyter_outputs = []
+
+        for output in jupyter_outputs:
+            output_type = output.get("output_type")
+            if output_type == "stream":
+                text = output.get("text", "")
+                if isinstance(text, list):
+                    text = "".join(str(part) for part in text)
+                is_stderr = output.get("name") == "stderr"
+                sink = stderr_messages if is_stderr else stdout_messages
+                handler = on_stderr if is_stderr else on_stdout
+                for line in str(text).splitlines():
+                    message = OutputMessage(
+                        line=line,
+                        timestamp=current_time,
+                        error=is_stderr,
+                    )
+                    sink.append(message)
+                    if handler:
+                        handler(message)
+            elif output_type in ("display_data", "execute_result"):
+                result = Result(
+                    data=output.get("data", {}),
+                    is_main_result=output_type == "execute_result",
+                    extra=output.get("metadata", {}),
+                )
+                results.append(result)
+                if on_result:
+                    on_result(result)
+            elif output_type == "error":
+                ename = output.get("ename", "Error")
+                evalue = output.get("evalue", "")
+                if ename == "SystemExit":
+                    try:
+                        exit_code = int(evalue) if evalue else 0
+                    except (ValueError, TypeError):
+                        exit_code = 1 if evalue else 0
+                else:
+                    code_error = CodeError(
+                        name=ename,
+                        value=evalue,
+                        traceback="\n".join(output.get("traceback", [])),
+                    )
+                    if on_error:
+                        on_error(code_error)
+
+        # Older SDK responses expose split convenience fields instead. Use
+        # those only when no native Jupyter outputs were available.
+        if not jupyter_outputs and hasattr(response, "stdout") and response.stdout:
             for line in response.stdout.splitlines():
                 msg = OutputMessage(line=line, timestamp=current_time, error=False)
                 stdout_messages.append(msg)
@@ -750,7 +814,7 @@ class DatalayerSandbox(Sandbox):
                     on_stdout(msg)
 
         # Process stderr
-        if hasattr(response, "stderr") and response.stderr:
+        if not jupyter_outputs and hasattr(response, "stderr") and response.stderr:
             for line in response.stderr.splitlines():
                 msg = OutputMessage(line=line, timestamp=current_time, error=True)
                 stderr_messages.append(msg)
@@ -758,7 +822,7 @@ class DatalayerSandbox(Sandbox):
                     on_stderr(msg)
 
         # Process results
-        if hasattr(response, "result") and response.result is not None:
+        if not jupyter_outputs and hasattr(response, "result") and response.result is not None:
             result = Result(
                 data={"text/plain": str(response.result)},
                 is_main_result=True,
@@ -768,7 +832,7 @@ class DatalayerSandbox(Sandbox):
                 on_result(result)
 
         # Process display data (rich output)
-        if hasattr(response, "display_data") and response.display_data:
+        if not jupyter_outputs and hasattr(response, "display_data") and response.display_data:
             for display in response.display_data:
                 result = Result(
                     data=display.get("data", {}),
@@ -780,7 +844,7 @@ class DatalayerSandbox(Sandbox):
                     on_result(result)
 
         # Process errors (code exceptions)
-        if hasattr(response, "error") and response.error:
+        if not jupyter_outputs and hasattr(response, "error") and response.error:
             ename = response.error.get("ename", "Error")
             evalue = response.error.get("evalue", "")
 
