@@ -216,6 +216,7 @@ class OutputMessage(BaseModel):
         line: The content of the output line.
         timestamp: Unix timestamp when the output was produced.
         error: Whether this is an error output (stderr).
+        terminated: Whether the chunk this came from ended with a newline.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -223,6 +224,40 @@ class OutputMessage(BaseModel):
     line: str
     timestamp: float = 0.0
     error: bool = False
+    #: Whether the kernel's chunk ended with a newline.
+    #:
+    #: `print(".", end="")` sends a chunk with no terminator, and a notebook
+    #: puts the next one beside it — which is how a progress line of dots is
+    #: written. Splitting output into "lines" and rejoining them with newlines
+    #: throws that away and then invents it back, turning `......` into six
+    #: lines of one dot.
+    #:
+    #: Defaults to True, which is what every producer that does not know about
+    #: this meant: one message, one line.
+    terminated: bool = True
+
+
+def _joined(messages: list[OutputMessage]) -> str:
+    """Reassemble output messages into the text the kernel actually wrote.
+
+    This was `"\n".join(...)`, which is right only when every message was a
+    whole line. A chunk written with `end=""` is not, and joining those with
+    newlines produced output no kernel ever emitted: six dots printed side by
+    side came back as six lines.
+
+    A message that does not say otherwise is terminated, so every producer
+    that predates the flag reassembles exactly as it did before — including
+    the absence of a trailing newline, which callers compare against.
+    """
+    if not messages:
+        return ""
+    parts: list[str] = []
+    for message in messages:
+        parts.append(message.line)
+        if message.terminated:
+            parts.append("\n")
+    text = "".join(parts)
+    return text[:-1] if text.endswith("\n") else text
 
 
 class Logs(BaseModel):
@@ -241,12 +276,12 @@ class Logs(BaseModel):
     @property
     def stdout_text(self) -> str:
         """Get stdout as a single string."""
-        return "\n".join(msg.line for msg in self.stdout)
+        return _joined(self.stdout)
 
     @property
     def stderr_text(self) -> str:
         """Get stderr as a single string."""
-        return "\n".join(msg.line for msg in self.stderr)
+        return _joined(self.stderr)
 
 
 class Result(BaseModel):

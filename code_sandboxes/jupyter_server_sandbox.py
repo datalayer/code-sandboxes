@@ -607,12 +607,29 @@ class JupyterServerSandbox(Sandbox):
         exit_code: int | None = None
 
         def consume_stream(content: dict, timestamp: float) -> None:
-            """One stream message: its text, split into lines, to stdout or stderr."""
+            """One stream message, kept as the kernel wrote it.
+
+            `splitlines()` was losing the one fact that distinguishes a
+            finished line from a chunk written with `end=""`. A loop printing
+            dots side by side arrived as six separate lines, because the
+            terminator was discarded here and reinvented when the messages
+            were joined — output no kernel had produced.
+
+            `keepends=True` preserves it, and each message says whether its own
+            chunk ended. The dots then reassemble as a notebook shows them: on
+            one line, growing.
+            """
             is_stderr = content.get("name") == "stderr"
             sink = stderr_messages if is_stderr else stdout_messages
             handler = on_stderr if is_stderr else on_stdout
-            for line in content.get("text", "").splitlines():
-                msg = OutputMessage(line=line, timestamp=timestamp, error=is_stderr)
+            for part in content.get("text", "").splitlines(keepends=True):
+                terminated = part.endswith("\n")
+                msg = OutputMessage(
+                    line=part.rstrip("\n"),
+                    timestamp=timestamp,
+                    error=is_stderr,
+                    terminated=terminated,
+                )
                 sink.append(msg)
                 if handler:
                     handler(msg)
