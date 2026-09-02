@@ -32,14 +32,20 @@ from typing import Any, Protocol, runtime_checkable
 from code_sandboxes.exceptions import SandboxError
 
 
-class SandboxOperationNotSupported(SandboxError):
-    """The provider cannot do this, and said so rather than half-doing it."""
+class SandboxOperationNotSupported(SandboxError):  # noqa: N818
+    """The provider cannot do this, and said so rather than half-doing it.
+
+    N818 wants an `Error` suffix. This is exported, caught by name in code
+    outside this package, and reads correctly where it is used —
+    `except SandboxOperationNotSupported` says what happened. Renaming a
+    public exception to satisfy a naming rule breaks every importer for no
+    gain, so the rule is waived here rather than obeyed.
+    """
 
     def __init__(self, operation: str, variant: str = "") -> None:
         where = f" by the {variant} sandbox" if variant else ""
         super().__init__(
-            f"{operation!r} is not supported{where}. "
-            "Ask `supports()` before committing to it."
+            f"{operation!r} is not supported{where}. " "Ask `supports()` before committing to it."
         )
         self.operation = operation
         self.variant = variant

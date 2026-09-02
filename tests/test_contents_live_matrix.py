@@ -17,7 +17,6 @@ and record the run against the plan's Milestone 8 box.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import uuid
 
@@ -47,8 +46,12 @@ def _skip_unless_available(name: str) -> None:
         pytest.skip("set CODE_SANDBOXES_LIVE=1 to run against the real providers")
     provider = get_provider(name)
     if provider is None or not provider.is_available(os.environ):
-        missing = ", ".join(sorted({v for r in (provider.requirements if provider else ()) for v in r.env_vars}))
-        pytest.skip(f"{name}: credentials not in the environment ({missing or 'no requirements known'})")
+        missing = ", ".join(
+            sorted({v for r in (provider.requirements if provider else ()) for v in r.env_vars})
+        )
+        pytest.skip(
+            f"{name}: credentials not in the environment ({missing or 'no requirements known'})"
+        )
 
 
 def _manifest(provider: str, sandbox_uid: str, mount_path: str) -> ContentManifest:
@@ -83,16 +86,24 @@ def _manifest(provider: str, sandbox_uid: str, mount_path: str) -> ContentManife
 def test_the_matrix_against_a_live_provider(provider: str) -> None:
     _skip_unless_available(provider)
     sandbox_uid = f"live-{uuid.uuid4().hex[:12]}"
-    mount_path = "/tmp/contents-live"
+    # A path inside the sandbox this test creates, not on the machine running
+    # it: S108 is about insecure local temp files and has nothing to say about
+    # where a remote container mounts something.
+    mount_path = "/tmp/contents-live"  # noqa: S108
     client = CodeSandboxClient.create(variant=provider)
     try:
         prepared = client.attach(_manifest(provider, sandbox_uid, mount_path))
-        assert {item.uid: item.status for item in prepared} == {"att-client": "ready", "att-files": "ready"}
+        assert {item.uid: item.status for item in prepared} == {
+            "att-client": "ready",
+            "att-files": "ready",
+        }
 
         # The file is there, and is the file.
-        digest = client.run_command(
-            f"python3 -c \"import hashlib;print(hashlib.sha256(open('{mount_path}/LICENSE','rb').read()).hexdigest())\""
+        digest_of = (
+            "import hashlib;"
+            f"print(hashlib.sha256(open('{mount_path}/LICENSE','rb').read()).hexdigest())"
         )
+        digest = client.run_command(f'python3 -c "{digest_of}"')
         assert len(str(digest).strip().splitlines()[-1]) == 64
 
         # The manifest inside says what was attached, and carries no token.
@@ -104,7 +115,10 @@ def test_the_matrix_against_a_live_provider(provider: str) -> None:
         # Restart, reconcile: the same answer, nothing done twice.
         client.restart()
         again = client.reconcile_contents(_manifest(provider, sandbox_uid, mount_path))
-        assert {item.uid: item.status for item in again} == {"att-client": "ready", "att-files": "ready"}
+        assert {item.uid: item.status for item in again} == {
+            "att-client": "ready",
+            "att-files": "ready",
+        }
 
         # Detach removes what was materialized and nothing else.
         client.detach("att-files")

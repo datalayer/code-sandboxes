@@ -203,7 +203,7 @@ def test_the_sandbox_id_is_the_runtimes_uid(one_runtime):
     only ever this one.
     """
     assert DatalayerSandbox.from_id("sb-01arz").object_id == "01UID"
-    assert list(DatalayerSandbox.list_all())[0].object_id == "01UID"
+    assert next(iter(DatalayerSandbox.list_all())).object_id == "01UID"
 
 
 def test_a_runtime_name_is_one_request_and_a_uid_falls_back_to_a_scan(one_runtime):
@@ -244,7 +244,7 @@ def test_a_lookup_that_cannot_be_made_says_what_is_missing(monkeypatch):
 def test_from_id_and_list_all_adopt_a_runtime_the_same_way(one_runtime):
     """Two adoptions that drifted is how `from_id` comes to return something
     that behaves unlike what iteration yields."""
-    from_iteration = list(DatalayerSandbox.list_all())[0]
+    from_iteration = next(iter(DatalayerSandbox.list_all()))
     directly = DatalayerSandbox.from_id("sb-01arz")
 
     assert from_iteration.object_id == directly.object_id

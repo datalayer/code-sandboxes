@@ -23,7 +23,10 @@ from __future__ import annotations
 
 import pytest
 
-from code_sandboxes import providers as P
+# `P` because this file compares the module's constants against the catalog
+# built from them, and both names appear on nearly every line; spelling the
+# module out twice per assertion would bury what is being compared.
+from code_sandboxes import providers as P  # noqa: N812
 from code_sandboxes.providers import provider_catalog
 
 
@@ -44,9 +47,7 @@ def asked(monkeypatch):
             seen.append(name)
             return []
 
-        return dataclasses.replace(
-            provider, needs_credentials=False, list_environments=listing
-        )
+        return dataclasses.replace(provider, needs_credentials=False, list_environments=listing)
 
     monkeypatch.setattr(P, "PROVIDERS", tuple(watched(p) for p in P.PROVIDERS))
     return seen

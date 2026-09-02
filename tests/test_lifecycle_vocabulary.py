@@ -65,7 +65,7 @@ class TestVariants:
 
         try:
             module = importlib.import_module(module_name)
-        except Exception as error:  # noqa: BLE001
+        except Exception as error:
             pytest.skip(f"{module_name} needs an optional dependency: {error}")
 
         variant = getattr(module, class_name)
@@ -168,9 +168,7 @@ class TestTheRuntimeUrls:
     def test_a_trailing_slash_on_the_base_changes_nothing(self) -> None:
         from code_sandboxes.lifecycle import runtime_url
 
-        assert runtime_url(self.BASE, "runtime-1") == runtime_url(
-            self.BASE + "/", "runtime-1"
-        )
+        assert runtime_url(self.BASE, "runtime-1") == runtime_url(self.BASE + "/", "runtime-1")
 
     def test_the_urls_match_what_the_vocabulary_documents(self) -> None:
         from code_sandboxes.lifecycle import (

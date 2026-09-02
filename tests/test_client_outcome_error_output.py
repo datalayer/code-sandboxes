@@ -64,7 +64,5 @@ def test_the_one_line_message_is_still_there() -> None:
 
 
 def test_a_clean_run_appends_nothing() -> None:
-    outcome = CodeExecutionOutcome.from_execution_result(
-        _execution(code_error=None, success=True)
-    )
+    outcome = CodeExecutionOutcome.from_execution_result(_execution(code_error=None, success=True))
     assert not [o for o in outcome.outputs if o.get("output_type") == "error"]

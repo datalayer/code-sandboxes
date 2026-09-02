@@ -23,8 +23,8 @@ import threading
 import time
 import uuid
 from collections import deque
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator, Union
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 import requests
@@ -735,7 +735,7 @@ class JupyterServerSandbox(Sandbox):
         context: Context | None = None,
         envs: dict[str, str] | None = None,
         timeout: float | None = None,
-    ) -> AsyncIterator[Union[OutputMessage, Result, CodeError]]:
+    ) -> AsyncIterator[OutputMessage | Result | CodeError]:
         """Yield each output as the kernel produces it.
 
         The base implementation is streaming in shape only: it awaits the whole
@@ -758,11 +758,9 @@ class JupyterServerSandbox(Sandbox):
         queue as items land, rather than waiting on the thread.
         """
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[Union[OutputMessage, Result, CodeError, None]] = (
-            asyncio.Queue()
-        )
+        queue: asyncio.Queue[OutputMessage | Result | CodeError | None] = asyncio.Queue()
 
-        def emit(item: Union[OutputMessage, Result, CodeError]) -> None:
+        def emit(item: OutputMessage | Result | CodeError) -> None:
             # Called on the execution thread; hop to the loop's thread before
             # touching the queue.
             loop.call_soon_threadsafe(queue.put_nowait, item)

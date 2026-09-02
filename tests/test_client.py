@@ -249,9 +249,7 @@ class TestTheOutcomeKeepsWhatItIsGiven:
         from code_sandboxes import CodeExecutionOutcome
 
         outcome = CodeExecutionOutcome.from_execution_result(
-            self._result(
-                **{"text/html": "<table/>", "text/plain": "   a  b"}
-            )
+            self._result(**{"text/html": "<table/>", "text/plain": "   a  b"})
         )
 
         assert set(outcome.outputs[0]["data"]) == {"text/html", "text/plain"}
@@ -259,9 +257,7 @@ class TestTheOutcomeKeepsWhatItIsGiven:
     def test_the_shape_is_jupyter_s_own(self):
         from code_sandboxes import CodeExecutionOutcome
 
-        outcome = CodeExecutionOutcome.from_execution_result(
-            self._result(**{"text/plain": "42"})
-        )
+        outcome = CodeExecutionOutcome.from_execution_result(self._result(**{"text/plain": "42"}))
 
         # So a consumer that already reads notebook outputs needs no second
         # reader for these.
@@ -274,9 +270,7 @@ class TestTheOutcomeKeepsWhatItIsGiven:
         from code_sandboxes.models import ExecutionResult, Logs, Result
 
         outcome = CodeExecutionOutcome.from_execution_result(
-            ExecutionResult(
-                results=[Result(data={})], logs=Logs(), execution_ok=True
-            )
+            ExecutionResult(results=[Result(data={})], logs=Logs(), execution_ok=True)
         )
 
         assert outcome.outputs == []

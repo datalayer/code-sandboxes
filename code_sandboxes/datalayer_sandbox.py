@@ -58,29 +58,15 @@ from .models import (
 def _urls_for_run(run_url: str):
     """Datalayer service URLs for a deployment served from one origin.
 
-    A run addresses every service under a single host, each on its own path
-    prefix, so one URL is enough to reach all of them. `DatalayerURLs` has no
-    constructor for that shape — it takes the services one by one — so they are
-    filled in here rather than in the SDK.
-
-    Which services those are is read off the SDK rather than written down
-    here. A list copied from it goes stale the moment a URL is renamed there,
-    and it went stale exactly that way: `mcp_server_url` became
-    `jupyter_mcp_server_url` and every execution died on the unexpected
-    keyword, far from the rename that caused it. Asking the signature means a
-    new service is picked up for free and a renamed one cannot break this.
+    Kept as a name here because callers have it; the shape now lives with the
+    type it builds, as `DatalayerURLs.from_single_origin`. It moved because
+    two services outside this package had come to import it — one of them by
+    this private name — which made a helper about `datalayer_core` URLs into a
+    dependency on a **provider adapter**.
     """
-    import inspect
-
     from datalayer_core.utils.urls import DatalayerURLs
 
-    base = (run_url or "").rstrip("/")
-    services = [
-        name
-        for name in inspect.signature(DatalayerURLs.from_environment).parameters
-        if name.endswith("_url")
-    ]
-    return DatalayerURLs.from_environment(**dict.fromkeys(services, base))
+    return DatalayerURLs.from_single_origin(run_url)
 
 
 class DatalayerSandbox(Sandbox):
@@ -263,11 +249,11 @@ class DatalayerSandbox(Sandbox):
         """
         try:
             return client.get_runtime(sandbox_id)
-        except Exception:  # noqa: BLE001 - not a name; try it as a uid
+        except Exception:
             pass
         try:
             runtimes = client.list_runtimes()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
         for runtime in runtimes:
             if sandbox_id in (runtime.uid, runtime.runtime_name):

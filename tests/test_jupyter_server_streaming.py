@@ -27,7 +27,7 @@ from code_sandboxes.models import CodeError, ExecutionResult, Logs, OutputMessag
 class _SlowSandbox(JupyterServerSandbox):
     """A sandbox whose `run_code` emits over time, like a real kernel."""
 
-    def __init__(self, *, fail: bool = False) -> None:  # noqa: D107
+    def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
 
     def run_code(  # type: ignore[override]
@@ -45,9 +45,7 @@ class _SlowSandbox(JupyterServerSandbox):
         for index in range(3):
             time.sleep(0.15)
             if on_stdout:
-                on_stdout(
-                    OutputMessage(line=f"tick {index}", timestamp=time.time(), error=False)
-                )
+                on_stdout(OutputMessage(line=f"tick {index}", timestamp=time.time(), error=False))
         if on_result:
             on_result(Result(data={"text/plain": "42"}, is_main_result=True, extra={}))
         if self.fail:

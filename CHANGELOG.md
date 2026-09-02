@@ -12,8 +12,7 @@
   providers it serves and pay for only those. Added under 1.3.1 without a
   version bump, which is what broke the operator: its image installs this
   package unpinned, PyPI's newest was 1.3.0, and the two-argument call landed
-  on a one-argument function — `TypeError: provider_catalog() takes from 0 to 1
-  positional arguments but 2 were given`, and `datalayer envs ls` answered 500.
+  on a one-argument function — `TypeError: provider_catalog() takes from 0 to 1 positional arguments but 2 were given`, and `datalayer envs ls` answered 500.
   A new public parameter is a feature; released as 1.4.0 so a dependant can ask
   for it.
 
