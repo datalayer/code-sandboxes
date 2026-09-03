@@ -26,7 +26,28 @@ from code_sandboxes import CodeSandboxClient
 from code_sandboxes.contents import ContentManifest
 from code_sandboxes.providers import get_provider
 
-pytestmark = pytest.mark.live
+
+# `pytestmark` is a *list*: assigning the filterwarnings mark on its own
+# replaced the `live` mark this module already carried, and `-m live` then
+# deselected every test — a run that reported `4 deselected` and nothing else.
+pytestmark = [
+    pytest.mark.live,
+    # The client's own deprecations — pydantic's class-based config in its
+    # models, the platformdirs migration in its paths — are raised in *this*
+    # process by importing and starting the client, and this project promotes
+    # warnings to errors. A row whose subject is what happens inside a sandbox
+    # died twice on notices about the laptop running the test.
+    pytest.mark.filterwarnings("ignore::pydantic.warnings.PydanticDeprecatedSince20"),
+    pytest.mark.filterwarnings(
+    # The client's own paths module warns about a platformdirs migration on
+    # first use, and this project promotes warnings to errors. That warning is
+    # the client's, raised in *this* process, and it failed the `datalayer`
+    # row of a matrix whose subject is what happens inside the sandbox — a
+    # real sandbox was created and the row died on a deprecation notice about
+    # where a config file lives on the laptop running the test.
+    "ignore:Datalayer is migrating its paths:DeprecationWarning"
+),
+]
 
 PROVIDERS = ("datalayer", "daytona", "e2b", "modal")
 
@@ -104,7 +125,15 @@ def test_the_matrix_against_a_live_provider(provider: str) -> None:
             f"print(hashlib.sha256(open('{mount_path}/LICENSE','rb').read()).hexdigest())"
         )
         digest = client.run_command(f'python3 -c "{digest_of}"')
-        assert len(str(digest).strip().splitlines()[-1]) == 64
+        # `run_command` answers a `CommandResult`; the digest is its stdout.
+        # This read `str(digest)`, which is the object's repr —
+        # `CommandResult(exit_code=0, stdout_len=65, ...)`, 55 characters —
+        # so the assertion failed identically on every live provider, and
+        # this matrix had never once passed against a real sandbox. The
+        # sandboxes were created, attached and read correctly the whole time;
+        # the test was measuring the wrong string.
+        assert digest.exit_code == 0, digest.stderr
+        assert len(digest.stdout.strip().splitlines()[-1]) == 64
 
         # The manifest inside says what was attached, and carries no token.
         location = client.contents_location
@@ -124,6 +153,8 @@ def test_the_matrix_against_a_live_provider(provider: str) -> None:
         client.detach("att-files")
         assert client.attachment_status("att-files") is None
         gone = client.run_command(f"test -e {mount_path}/LICENSE && echo present || echo absent")
-        assert "absent" in str(gone)
+        # Same mistake as the digest above, second occurrence: the answer is
+        # in `.stdout`, and `str()` of the result is its repr.
+        assert "absent" in gone.stdout, gone
     finally:
         client.close()

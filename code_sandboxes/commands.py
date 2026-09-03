@@ -4,6 +4,7 @@
 
 """Command execution for sandboxes."""
 
+import json
 import time
 from collections.abc import Iterator
 from contextlib import suppress
@@ -12,6 +13,12 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .base import Sandbox
+
+
+#: Frames the JSON a `run()` prints from inside the sandbox, so the result can
+#: be picked out of stdout that the command itself may also have written to.
+_ENVELOPE_START = "<<code-sandboxes:command-result>>"
+_ENVELOPE_END = "<</code-sandboxes:command-result>>"
 
 
 @dataclass
@@ -246,6 +253,8 @@ except Exception as e:
         'stdout': '',
         'stderr': str(e),
     }}
+import json as __cmd_json__
+print({_ENVELOPE_START!r} + __cmd_json__.dumps(__cmd_output__) + {_ENVELOPE_END!r})
 """
 
         execution = self._sandbox.run_code(code, timeout=timeout)
@@ -258,12 +267,28 @@ except Exception as e:
                 duration=time.time() - start_time,
             )
 
-        try:
-            result = self._sandbox.get_variable("__cmd_output__")
+        # The result travels back on **stdout**, framed, rather than through a
+        # variable read. Every provider returns the output of the code it ran;
+        # not every provider can read a variable out of its kernel afterwards
+        # — Modal cannot, and answered every `run_command` with `exit_code=-1`
+        # and a message about session variables. The live matrix, run for the
+        # first time, failed on it for every command it sent there.
+        printed = "".join(message.line for message in execution.logs.stdout)
+        start = printed.rfind(_ENVELOPE_START)
+        end = printed.rfind(_ENVELOPE_END)
+        if start < 0 or end < start:
             return CommandResult(
-                exit_code=result["exit_code"],
-                stdout=result["stdout"],
-                stderr=result["stderr"],
+                exit_code=-1,
+                stdout=printed,
+                stderr="the command ran but its result envelope was not found in the output",
+                duration=time.time() - start_time,
+            )
+        try:
+            result = json.loads(printed[start + len(_ENVELOPE_START):end])
+            return CommandResult(
+                exit_code=int(result["exit_code"]),
+                stdout=str(result["stdout"]),
+                stderr=str(result["stderr"]),
                 duration=time.time() - start_time,
             )
         except Exception as e:

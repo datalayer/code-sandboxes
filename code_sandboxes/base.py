@@ -973,7 +973,49 @@ class Sandbox(ABC):
             from .exceptions import VariableNotFoundError
 
             raise VariableNotFoundError(name)
-        return self._get_internal_variable("__result__", context)
+        try:
+            return self._get_internal_variable("__result__", context)
+        except NotImplementedError:
+            # A provider that cannot read a variable out of its session —
+            # Modal — can still *print* one. Every read in the filesystem and
+            # command layers came through here, so on such a provider every
+            # `read_file`, `list_files` and `run_command` raised, and the live
+            # matrix's Modal row could never have passed. Stdout is the one
+            # channel every provider returns; the value travels as JSON
+            # between markers so the kernel's own output cannot be mistaken
+            # for it.
+            return self._read_variable_via_stdout("__result__", context)
+
+    _STDOUT_START = "<<code-sandboxes:variable>>"
+    _STDOUT_END = "<</code-sandboxes:variable>>"
+
+    def _read_variable_via_stdout(self, name: str, context: Context | None = None) -> Any:
+        """Read `name` by having the kernel print it, framed, as JSON.
+
+        Values that JSON cannot carry (bytes, arbitrary objects) are returned
+        as their `repr`, which is what the printing fallback can honestly
+        offer; callers that need bytes across this path encode them first,
+        as the filesystem layer already does.
+        """
+        import json as _json
+
+        code = (
+            "import json as __sb_json__\n"
+            "try:\n"
+            f"    __sb_value__ = __sb_json__.dumps({name})\n"
+            "except TypeError:\n"
+            f"    __sb_value__ = __sb_json__.dumps(repr({name}))\n"
+            f"print({self._STDOUT_START!r} + __sb_value__ + {self._STDOUT_END!r})\n"
+        )
+        execution = self.run_code(code, context=context)
+        printed = "".join(message.line for message in execution.logs.stdout)
+        start = printed.rfind(self._STDOUT_START)
+        end = printed.rfind(self._STDOUT_END)
+        if start < 0 or end < start:
+            from .exceptions import VariableNotFoundError
+
+            raise VariableNotFoundError(name)
+        return _json.loads(printed[start + len(self._STDOUT_START):end])
 
     def set_variable(self, name: str, value: Any, context: Context | None = None) -> None:
         """Set a variable in the sandbox.

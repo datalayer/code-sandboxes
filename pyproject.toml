@@ -92,6 +92,11 @@ filterwarnings = [
   "module:make_current is deprecated:DeprecationWarning",
   "module:clear_current is deprecated:DeprecationWarning",
   "module:Jupyter is migrating its paths to use standard platformdirs:DeprecationWarning",
+  # The Datalayer client emits the same migration warning under its own name,
+  # so the line above never matched it, and with `error` in force the first
+  # use of the client in a test became an exception. It took the live matrix
+  # against a real Datalayer sandbox down before the sandbox was reached.
+  "module:Datalayer is migrating its paths to use standard platformdirs:DeprecationWarning",
 ]
 
 [tool.mypy]
