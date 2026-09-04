@@ -45,7 +45,6 @@ import argparse
 import errno
 import json
 import logging
-from functools import partial
 import os
 import shutil
 import stat as stat_module
@@ -54,6 +53,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
+from functools import partial
 from typing import Any, Protocol
 
 logger = logging.getLogger("datalayer.bridge_mount")
