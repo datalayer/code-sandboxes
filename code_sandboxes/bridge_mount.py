@@ -45,6 +45,7 @@ import argparse
 import errno
 import json
 import logging
+from functools import partial
 import os
 import shutil
 import stat as stat_module
@@ -429,11 +430,23 @@ class BridgeOperations(Operations):
     module's behalf.
     """
 
-    def __init__(self, tunnel: BridgeTunnel, *, mode: str = "ro"):
+    def __init__(
+        self,
+        tunnel: BridgeTunnel,
+        *,
+        mode: str = "ro",
+        uid: int | None = None,
+        gid: int | None = None,
+    ):
         self.tunnel = tunnel
         self.read_only = mode != "rw"
-        self.uid = os.getuid() if hasattr(os, "getuid") else 0
-        self.gid = os.getgid() if hasattr(os, "getgid") else 0
+        # Whose the files look like. Inside a sandbox the mounter *is* the
+        # reader, so its own ids are right. On a node agent the mounter is
+        # root and the reader is the sandbox's user in another namespace, so
+        # the agent says which ids to report — otherwise every file comes
+        # back owned by root and the sandbox cannot write to its own folder.
+        self.uid = uid if uid is not None else (os.getuid() if hasattr(os, "getuid") else 0)
+        self.gid = gid if gid is not None else (os.getgid() if hasattr(os, "getgid") else 0)
 
     # -- plumbing ----------------------------------------------------------
 
@@ -703,16 +716,30 @@ def connect_relay(
     protocol, which `datalayer_common.content_bridge.BridgeFileSystemClient`
     speaks over the `send` and `recv` of :class:`_RelayFrames`.
     """
+    # The protocol lives in `datalayer_core`; `datalayer_common.content_bridge`
+    # is a re-export of it. Asking for the re-export first asked every place
+    # this runs — a sandbox, and the node agent — to install a *services*
+    # package (FastAPI, OpenTelemetry, OpenFGA) for one module that was
+    # already there, and the node agent, which has core and not common,
+    # failed every local mount with a message written for a sandbox.
     try:
-        from datalayer_common.content_bridge import (
+        from datalayer_core.contents_bridge_protocol import (
             BridgeFileSystemClient,
             BridgeProtocolError,
             SecureChannel,
         )
-    except ImportError as error:
-        raise BridgeUnavailableError(
-            "datalayer_common.content_bridge is not installed in the sandbox"
-        ) from error
+    except ImportError:
+        try:
+            from datalayer_common.content_bridge import (  # type: ignore[no-redef]
+                BridgeFileSystemClient,
+                BridgeProtocolError,
+                SecureChannel,
+            )
+        except ImportError as error:
+            raise BridgeUnavailableError(
+                "the bridge frame protocol is not installed here: it comes with "
+                "datalayer-core, and `code_sandboxes[bridge]` asks for it"
+            ) from error
 
     socket = _open_websocket(relay_url)
     transport = _RelayFrames(socket)
@@ -758,7 +785,9 @@ def relay_connector(bridge_uid: str | None = None, session_key: str | None = Non
 Mounter = Callable[[BridgeOperations, str, str], None]
 
 
-def mount_with_fuse(operations: BridgeOperations, mount_path: str, mode: str) -> None:
+def mount_with_fuse(
+    operations: BridgeOperations, mount_path: str, mode: str, *, allow_other: bool = False
+) -> None:
     """The real thing: fusepy, in the foreground, with no caching anywhere.
 
     `direct_io` keeps reads and writes out of the page cache, the zero
@@ -780,6 +809,14 @@ def mount_with_fuse(operations: BridgeOperations, mount_path: str, mode: str) ->
     }
     if mode != "rw":
         options["ro"] = True
+    if allow_other:
+        # A FUSE mount is the mounting user's alone unless it says otherwise.
+        # Inside a sandbox that is the right default; on a node agent the
+        # mount is made by root and read by the sandbox's user, who without
+        # this is answered `Permission denied` for the folder they asked for.
+        # It needs `user_allow_other` in `/etc/fuse.conf`, which the node
+        # agent's image sets.
+        options["allow_other"] = True
     _FUSE(operations, mount_path, **options)
 
 
@@ -839,6 +876,9 @@ def run_bridge_mount(
     report: Callable[[Mapping[str, Any]], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
     backoff: tuple[float, float] = DEFAULT_BACKOFF,
+    allow_other: bool = False,
+    uid: int | None = None,
+    gid: int | None = None,
 ) -> int:
     """Connect, say so, mount, and stay until the mount is gone.
 
@@ -857,8 +897,10 @@ def run_bridge_mount(
     if mode not in ("ro", "rw"):
         say({"status": STATUS_FAILED, "error": INVALID_MODE, "detail": f"mode {mode!r}"})
         return 2
-    mounter = mount or mount_with_fuse
-    if mounter is mount_with_fuse:
+    mounter = mount or (
+        partial(mount_with_fuse, allow_other=True) if allow_other else mount_with_fuse
+    )
+    if mount is None:
         reason = fuse_unavailable_reason()
         if reason:
             say({"status": STATUS_FAILED, "error": FUSE_UNAVAILABLE, "detail": reason})
@@ -920,7 +962,7 @@ def run_bridge_mount(
     )
     mounted.set()
     try:
-        mounter(BridgeOperations(tunnel, mode=mode), mount_path, mode)
+        mounter(BridgeOperations(tunnel, mode=mode, uid=uid, gid=gid), mount_path, mode)
     finally:
         ended = tunnel.state
         tunnel.close()
@@ -957,6 +999,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--session-key-file", default=None)
     parser.add_argument("--status-file", default=None)
     parser.add_argument("--probe", action="store_true", help="answer the fuse probe and exit")
+    parser.add_argument(
+        "--allow-other",
+        action="store_true",
+        help="let other users reach the mount; a node agent mounts for a sandbox user",
+    )
+    parser.add_argument("--uid", type=int, default=None, help="Report files as owned by this uid.")
+    parser.add_argument("--gid", type=int, default=None, help="Report files as owned by this gid.")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
     logging.basicConfig(
@@ -975,6 +1024,9 @@ def main(argv: list[str] | None = None) -> int:
         bridge_uid=args.bridge_uid,
         session_key=_read_session_key(args),
         status_file=args.status_file,
+        allow_other=args.allow_other,
+        uid=args.uid,
+        gid=args.gid,
     )
 
 

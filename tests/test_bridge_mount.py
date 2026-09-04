@@ -656,13 +656,20 @@ class _Socket:
         self.closed = True
 
 
-def _protocol_module(monkeypatch, *, established: list):
-    """`datalayer_common.content_bridge`, faked: a client that records its
-    transport and channel, a channel that records the handshake."""
+def _protocol_module(monkeypatch, *, established: list, name: str = "datalayer_core.contents_bridge_protocol"):
+    """The frame protocol, faked: a client that records its transport and
+    channel, a channel that records the handshake.
+
+    Named for `datalayer_core`, where the protocol lives. The mounter asked
+    `datalayer_common` for it first, which made a *services* package —
+    FastAPI, OpenTelemetry, OpenFGA — a dependency of every place a bridge
+    is mounted, and left the node agent, which has core and not common,
+    failing every local mount.
+    """
     import sys
     import types
 
-    module = types.ModuleType("datalayer_common.content_bridge")
+    module = types.ModuleType(name)
 
     class SecureChannel:
         def __init__(self, *, role, bridge_uid, session_key=b""):
@@ -687,7 +694,7 @@ def _protocol_module(monkeypatch, *, established: list):
     module.SecureChannel = SecureChannel
     module.BridgeFileSystemClient = BridgeFileSystemClient
     module.BridgeProtocolError = BridgeProtocolError
-    monkeypatch.setitem(sys.modules, "datalayer_common.content_bridge", module)
+    monkeypatch.setitem(sys.modules, name, module)
     return module
 
 
@@ -820,3 +827,61 @@ def test_the_command_line_carries_the_bridge_uid_and_reads_the_session_key_from_
     assert seen["mount_token"] == "mount-token"
     assert seen["bridge_uid"] == "br-1"
     assert seen["session_key"] == "ab" * 32
+
+
+def test_the_protocol_comes_from_core_and_the_old_path_still_answers(monkeypatch):
+    """`datalayer_common.content_bridge` re-exports core's protocol. Core is
+    asked first; a deployment that only has the re-export still works."""
+    import sys
+
+    established: list = []
+    _protocol_module(monkeypatch, established=established, name="datalayer_common.content_bridge")
+    monkeypatch.setitem(sys.modules, "datalayer_core.contents_bridge_protocol", None)
+    socket = _Socket(answers=[b"client-public-key"])
+    monkeypatch.setattr(bm, "_open_websocket", lambda url: socket)
+
+    client = bm.connect_relay(
+        "wss://relay.test/bridges/01B", mount_token="tok", bridge_uid="01B", session_key="00" * 32
+    )
+
+    assert client.rmdir("x") == ("rmdir", "x")
+    assert established, "the channel was never established"
+
+
+def test_neither_path_present_names_what_installs_it(monkeypatch):
+    import sys
+
+    for name in ("datalayer_core.contents_bridge_protocol", "datalayer_common.content_bridge"):
+        monkeypatch.setitem(sys.modules, name, None)
+    monkeypatch.setattr(bm, "_open_websocket", lambda url: _Socket(answers=[]))
+
+    with pytest.raises(bm.BridgeUnavailableError, match=r"datalayer-core"):
+        bm.connect_relay("wss://relay.test/bridges/01B", mount_token="tok")
+
+
+def test_a_node_agents_mount_is_reachable_by_the_sandbox_user(monkeypatch):
+    """Audit 57: a FUSE mount belongs to the user who made it.
+
+    Inside a sandbox the mounter is the reader and the default is right. On
+    a node agent root mounts and the sandbox's `jovyan` reads, in another
+    namespace: without `allow_other` the folder answered `Permission denied`
+    to the person who asked for it, and without the ids every file came back
+    owned by root and unwritable.
+    """
+    seen: dict = {}
+    monkeypatch.setattr(bm, "_FUSE", lambda ops, path, **options: seen.update(options=options, ops=ops))
+
+    bm.mount_with_fuse(bm.BridgeOperations(object(), mode="rw", uid=1000, gid=100), "/m", "rw", allow_other=True)
+
+    assert seen["options"]["allow_other"] is True
+    assert (seen["ops"].uid, seen["ops"].gid) == (1000, 100)
+
+
+def test_inside_a_sandbox_the_mount_stays_the_mounters_own(monkeypatch):
+    seen: dict = {}
+    monkeypatch.setattr(bm, "_FUSE", lambda ops, path, **options: seen.update(options))
+
+    bm.mount_with_fuse(bm.BridgeOperations(object(), mode="ro"), "/m", "ro")
+
+    assert "allow_other" not in seen
+    assert seen["ro"] is True

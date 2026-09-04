@@ -38,7 +38,8 @@ code-sandboxes = "code_sandboxes.cli:main"
 # What the sandbox-side bridge filesystem (`code_sandboxes.bridge_mount`)
 # needs where it RUNS — inside a sandbox image that exposes /dev/fuse. The
 # host side needs none of it.
-bridge = ["fusepy>=3.0", "websockets>=12"]
+# `datalayer-core` carries the frame protocol both ends speak.
+bridge = ["datalayer-core>=1.1.65", "fusepy>=3.0", "websockets>=12"]
 cloudflare = ["httpx>=0.27"]
 coreweave = ["cwsandbox>=1.6"]
 datalayer = ["agent_runtimes>=1.0.16"]
