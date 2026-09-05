@@ -637,11 +637,24 @@ def test_the_command_line_takes_the_token_from_a_file_never_argv(tmp_path, monke
 
 
 class _Socket:
-    """One websocket, faked: what was sent, and what the relay answers."""
+    """One websocket, faked: what was sent, and what the relay answers.
 
-    def __init__(self, answers=()):
+    A real relay opens with two text frames — `accepted`, then `paired` once
+    the other end is there — and forwards binary only after that. This double
+    answered straight into the binary, so it could not tell a mount that waits
+    for the pairing from one that does not, and every test here passed while
+    the ordering bug of audit 70 was live. It sends what the relay sends now;
+    `opening=()` is for a test that wants the wire empty.
+    """
+
+    def __init__(self, answers=(), opening=None):
         self.sent: list = []
-        self.answers = list(answers)
+        if opening is None:
+            opening = (
+                json.dumps({"event": "accepted", "role": "mount"}),
+                json.dumps({"event": "paired"}),
+            )
+        self.answers = [*opening, *answers]
         self.closed = False
 
     def send(self, frame):
@@ -954,3 +967,62 @@ def test_a_binary_frame_before_the_pairing_is_from_a_pairing_that_is_over():
     frames = bm._RelayFrames(relay)
     frames.wait_paired()
     assert frames.recv() == b"y" * 32
+
+
+class _DroppingRelay:
+    """The relay's forwarding rule, which is what the ordering bug was about.
+
+    A binary frame is delivered to the peer **only if the peer is already
+    connected**; before the pairing it is dropped, silently. `delivered` is
+    what the other end actually received — the only list that decides whether
+    a mount works.
+    """
+
+    def __init__(self, script):
+        self._script = list(script)
+        self.delivered: list = []
+        self._paired = False
+
+    def send(self, frame):
+        if isinstance(frame, str):
+            return  # The relay's own vocabulary, not the peer's.
+        if self._paired:
+            self.delivered.append(frame)
+
+    def recv(self):
+        if not self._script:
+            raise ConnectionResetError("the relay closed the connection")
+        frame = self._script.pop(0)
+        if isinstance(frame, str) and '"paired"' in frame:
+            self._paired = True
+        return frame
+
+    def close(self):
+        pass
+
+
+def test_the_hello_reaches_the_client_when_this_end_connects_first(monkeypatch):
+    """The ordering that used to decide it, with the relay's rule modelled.
+
+    The mount connects first and the client arrives a moment later, which is
+    what a relay restart produces. Sending the hello on connect put it on the
+    wire while there was no peer, so the relay dropped it and the client never
+    got one; waiting for `paired` is what makes it arrive. Asserting on
+    `delivered` rather than on what was written keeps the difference visible —
+    the old code sent the hello too, it just went nowhere.
+    """
+    established: list = []
+    _protocol_module(monkeypatch, established=established)
+    relay = _DroppingRelay([
+        json.dumps({"event": "accepted", "role": "mount"}),
+        json.dumps({"event": "paired"}),
+        b"client-public-key",
+    ])
+    monkeypatch.setattr(bm, "_open_websocket", lambda url: relay)
+
+    bm.connect_relay(
+        "wss://relay.test/bridges/br-1", "mount-token", bridge_uid="br-1", session_key="ab" * 32
+    )
+
+    assert relay.delivered == [b"mount-public-key"]
+    assert established == [("mount", "br-1", "ab" * 32, b"client-public-key")]
