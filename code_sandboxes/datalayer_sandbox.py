@@ -440,6 +440,18 @@ class DatalayerSandbox(Sandbox):
                     time_reservation=time_reservation,
                 )
 
+            # The runtime's own uid: what Runtimes' routes and a grantee's
+            # `use_sandbox` name it by. The uuid drawn at construction is a
+            # placeholder for a sandbox that does not exist yet, and until
+            # 2026-09-05 it stayed after the runtime did — so a worker sharing
+            # "the sandbox it launched" named Runtimes a uuid nothing had
+            # heard of, and the owner was told only the owner may share it.
+            self._sandbox_id = (
+                getattr(self._runtime, "uid", None)
+                or getattr(self._runtime, "runtime_name", None)
+                or self._sandbox_id
+            )
+
             # Start the runtime
             if hasattr(self._runtime, "start"):
                 self._runtime.start()

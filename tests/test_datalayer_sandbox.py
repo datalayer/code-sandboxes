@@ -324,3 +324,28 @@ class TestDatalayerSandboxIngress:
         assert sandbox.kernel_id == "k1"
         runtime.model.kernel_id = "k2"
         assert sandbox.kernel_id == "k2"
+
+
+def test_a_launched_sandbox_is_named_by_its_runtimes_uid(monkeypatch):
+    """The uuid drawn at construction is a placeholder for a sandbox that
+    does not exist yet. It stayed after the runtime did, so a worker sharing
+    "the sandbox it launched" named Runtimes a uuid nothing had heard of."""
+
+    class _Launched(_Runtime):
+        def start(self) -> None:
+            return None
+
+    class _Launcher:
+        def create_runtime(self, **kwargs):
+            return _Launched(uid="01LAUNCHED", runtime_name="01launched", name=kwargs.get("name", ""))
+
+    import agent_runtimes.client as client_module
+
+    monkeypatch.setattr(client_module, "AgentClient", lambda **kwargs: _Launcher())
+    monkeypatch.setattr(DatalayerSandbox, "create_context", lambda self, name: name)
+    sandbox = DatalayerSandbox(SandboxConfig())
+    placeholder = sandbox._sandbox_id
+    sandbox.start()
+
+    assert sandbox._sandbox_id == "01LAUNCHED" != placeholder
+    assert sandbox._info.id == "01LAUNCHED"
