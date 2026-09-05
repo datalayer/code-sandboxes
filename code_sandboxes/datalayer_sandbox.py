@@ -238,7 +238,45 @@ class DatalayerSandbox(Sandbox):
         runtime = cls._find_runtime(client, sandbox_id)
         if runtime is None:
             raise SandboxNotFoundError(sandbox_id)
-        return cls._adopt(runtime, token=token, run_url=run_url, **kwargs)
+        return cls._adopt(runtime, connect=True, token=token, run_url=run_url, **kwargs)
+
+    def _connect(self) -> None:
+        """Open the runtime's kernel client, if it has none yet.
+
+        **Adopting a runtime is not connecting to it.** `_adopt` marks the
+        sandbox started because the *sandbox* is running — it is, somebody
+        else launched it — and until this existed that was the whole of it:
+        `agent_runtimes` kept `model.sandbox_client` at `None`, and the first
+        execution answered `Kernel client is not started. Call start() first`,
+        or, through the MCP worker, no output and no error at all. A tool that
+        fails silently cannot be told apart from a program that printed
+        nothing, which is why this is a connection made rather than a flag
+        set.
+
+        `RuntimeService.start()` on a runtime that already has an ingress and
+        a token attaches to the Jupyter server it is already running and
+        creates nothing; the branch that would create a runtime is reached
+        only when there is no ingress to attach to.
+        """
+        runtime = self._runtime
+        if runtime is None:
+            return
+        # Only a runtime that *says* it has no client, and that offers a way
+        # to open one. A runtime exposing neither is not something this can
+        # reason about, and starting it on a guess is how a working object
+        # gets broken by a repair.
+        unknown = object()
+        if getattr(runtime, "sandbox_client", unknown) is not None:
+            return
+        if not callable(getattr(runtime, "start", None)):
+            return
+        try:
+            runtime.start()
+        except Exception as error:
+            raise SandboxConnectionError(
+                f"Sandbox '{self._sandbox_id}' is running, and its kernel could not "
+                f"be reached: {error}"
+            ) from error
 
     @staticmethod
     def _find_runtime(client, sandbox_id: str):
@@ -265,6 +303,7 @@ class DatalayerSandbox(Sandbox):
         cls,
         runtime,
         *,
+        connect: bool = False,
         token: Optional[str] = None,
         run_url: Optional[str] = None,
         **kwargs,
@@ -274,12 +313,19 @@ class DatalayerSandbox(Sandbox):
         Shared with :meth:`list_all` so the two cannot drift — one adopting a
         runtime differently from the other is how `from_id` would come to
         return something that behaves unlike what iteration yields.
+
+        `connect` opens the kernel client as well, which is what makes the
+        sandbox *usable* rather than merely described. `list_all` does not:
+        listing thirty runtimes must not open thirty kernel connections, and
+        `run` connects on demand.
         """
         sandbox = cls(token=token, run_url=run_url, **kwargs)
         sandbox._client = getattr(runtime, "_client", None) or sandbox._client
         sandbox._runtime = runtime
         sandbox._sandbox_id = runtime.uid or runtime.runtime_name or str(uuid.uuid4())
         sandbox._started = True
+        if connect:
+            sandbox._connect()
         sandbox._info = SandboxInfo(
             id=sandbox._sandbox_id,
             variant="datalayer",
@@ -705,6 +751,10 @@ class DatalayerSandbox(Sandbox):
         """
         if not self._started or not self._runtime:
             raise SandboxNotStartedError()
+        # A sandbox taken from `list_all` has never opened a kernel client.
+        # Here rather than there, so a listing costs one request and not one
+        # connection per runtime in it.
+        self._connect()
 
         started_at = time.time()
 

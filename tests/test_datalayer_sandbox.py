@@ -17,7 +17,11 @@ from types import SimpleNamespace
 import pytest
 
 from code_sandboxes.datalayer_sandbox import DatalayerSandbox, _urls_for_run
-from code_sandboxes.exceptions import SandboxConfigurationError, SandboxNotFoundError
+from code_sandboxes.exceptions import (
+    SandboxConfigurationError,
+    SandboxConnectionError,
+    SandboxNotFoundError,
+)
 from code_sandboxes.models import SandboxConfig
 
 #: Importing the SDK warns — about its coming move to platformdirs, about
@@ -133,12 +137,32 @@ def test_a_backend_that_cannot_be_imported_says_what_actually_failed(monkeypatch
 
 
 class _Runtime:
-    """The shape `AgentClient` answers with, as far as this class reads it."""
+    """The shape `AgentClient` answers with, as far as this class reads it.
 
-    def __init__(self, uid: str, runtime_name: str, name: str = "notebook") -> None:
+    `sandbox_client` is the whole point: `agent_runtimes` leaves it `None`
+    until `start()` is called, and every execution asks for it by name.
+    """
+
+    def __init__(
+        self, uid: str, runtime_name: str, name: str = "notebook", explode: bool = False
+    ) -> None:
         self.uid = uid
         self.runtime_name = runtime_name
         self.name = name
+        self.sandbox_client = None
+        self.starts = 0
+        self._explode = explode
+
+    def start(self) -> None:
+        self.starts += 1
+        if self._explode:
+            raise RuntimeError("the ingress refused")
+        self.sandbox_client = object()
+
+    def execute(self, code, timeout=None):
+        if self.sandbox_client is None:
+            raise RuntimeError("Kernel client is not started. Call `start()` first.")
+        return {"outputs": []}
 
 
 class _Client:
@@ -349,3 +373,67 @@ def test_a_launched_sandbox_is_named_by_its_runtimes_uid(monkeypatch):
 
     assert sandbox._sandbox_id == "01LAUNCHED" != placeholder
     assert sandbox._info.id == "01LAUNCHED"
+
+
+# ---------------------------------------------------------------------------
+# Adopting a runtime is not connecting to it
+# ---------------------------------------------------------------------------
+
+
+def test_from_id_opens_the_kernel_client(one_runtime):
+    """Not merely sets a flag.
+
+    `_adopt` marked the sandbox started because the sandbox *is* running, and
+    left `agent_runtimes` with no `sandbox_client`. The first execution then
+    answered `Kernel client is not started` — and through the MCP worker, no
+    output and no error at all, which is indistinguishable from code that
+    printed nothing. Measured on prod1 on 2026-09-05.
+    """
+    sandbox = DatalayerSandbox.from_id("sb-01arz")
+
+    assert sandbox._runtime.sandbox_client is not None
+    assert sandbox._runtime.starts == 1
+
+
+def test_a_runtime_that_cannot_be_reached_says_so(monkeypatch):
+    """Rather than answering an object whose first execution fails elsewhere,
+    with a message about whatever it touched first."""
+    import agent_runtimes.client as client_module
+
+    client = _Client([_Runtime(uid="01UID", runtime_name="sb-01arz", explode=True)])
+    monkeypatch.setattr(client_module, "AgentClient", lambda **kwargs: client)
+
+    with pytest.raises(SandboxConnectionError) as raised:
+        DatalayerSandbox.from_id("sb-01arz")
+    assert "sb-01arz" in str(raised.value) or "01UID" in str(raised.value)
+    assert "the ingress refused" in str(raised.value)
+
+
+def test_listing_runtimes_opens_no_kernel_connections(one_runtime):
+    """Thirty runtimes must not be thirty kernel connections. A listing
+    describes; `run` connects."""
+    listed = list(DatalayerSandbox.list_all())
+
+    assert len(listed) == 1
+    assert listed[0]._runtime.starts == 0
+    assert listed[0]._runtime.sandbox_client is None
+
+
+def test_a_listed_sandbox_connects_when_it_is_first_run(one_runtime):
+    """Which is what makes the lazy listing safe rather than a defect
+    deferred."""
+    sandbox = next(iter(DatalayerSandbox.list_all()))
+
+    result = sandbox.run_code("print(6*7)")
+
+    assert sandbox._runtime.starts == 1
+    assert result.execution_ok, result.execution_error
+
+
+def test_connecting_twice_is_connecting_once(one_runtime):
+    """Every execution calls it, so it has to be free after the first."""
+    sandbox = DatalayerSandbox.from_id("sb-01arz")
+    sandbox.run_code("print(1)")
+    sandbox.run_code("print(2)")
+
+    assert sandbox._runtime.starts == 1
