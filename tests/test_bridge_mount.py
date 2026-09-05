@@ -885,3 +885,72 @@ def test_inside_a_sandbox_the_mount_stays_the_mounters_own(monkeypatch):
 
     assert "allow_other" not in seen
     assert seen["ro"] is True
+
+
+# --- The pairing, and the ordering that decided whether a mount worked -------
+
+
+class _Relay:
+    """One websocket to the relay, scripted: what it hands back, in order.
+
+    Frames this end sends are kept, so a test can say what went onto the wire
+    and — the point of these two — *when*.
+    """
+
+    def __init__(self, script):
+        self._script = list(script)
+        self.sent: list = []
+
+    def send(self, frame):
+        self.sent.append(frame)
+
+    def recv(self):
+        if not self._script:
+            raise ConnectionResetError("the relay closed the connection")
+        return self._script.pop(0)
+
+
+def test_the_mount_sends_its_hello_only_after_the_pairing():
+    """Found on r1 (audit 70). A relay forwards a binary frame only to a peer
+    that is already connected; one sent before the pairing is dropped.
+
+    This end used to send its hello the moment it connected, so whether a
+    Local Mount worked came down to which end arrived first. Mount second and
+    the client was there to hear it. Mount first — which is what a relay
+    restart produces, the mount retrying in a loop while the person's client
+    is still starting — and the hello went nowhere. The client then waited for
+    a hello that would never be sent again, and read this end's first sealed
+    request as one: `the peer's hello is not an X25519 public key`, over and
+    over, reconnecting into the same race each time.
+    """
+    relay = _Relay([
+        json.dumps({"event": "accepted", "role": "mount"}),
+        json.dumps({"event": "paired"}),
+        b"x" * 32,
+    ])
+    frames = bm._RelayFrames(relay)
+    frames.wait_paired()
+    # Nothing has been sent by `wait_paired` itself, and the frame after the
+    # pairing is the peer's — the events were consumed, not returned as data.
+    assert relay.sent == []
+    assert frames.recv() == b"x" * 32
+
+
+def test_waiting_for_the_pairing_still_ends_on_a_terminal_announcement():
+    """A bridge revoked while this end waits must end, not wait forever."""
+    relay = _Relay([json.dumps({"state": "revoked"})])
+    with pytest.raises(bm.BridgeRefusedError) as ended:
+        bm._RelayFrames(relay).wait_paired()
+    assert ended.value.state == "revoked"
+
+
+def test_a_binary_frame_before_the_pairing_is_from_a_pairing_that_is_over():
+    """Left over from the previous peer; it is not this pairing's hello."""
+    relay = _Relay([
+        b"stale",
+        json.dumps({"event": "paired"}),
+        b"y" * 32,
+    ])
+    frames = bm._RelayFrames(relay)
+    frames.wait_paired()
+    assert frames.recv() == b"y" * 32

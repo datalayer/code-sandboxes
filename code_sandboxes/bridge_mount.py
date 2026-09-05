@@ -684,19 +684,54 @@ class _RelayFrames:
 
     def recv(self) -> bytes:
         while True:
-            try:
-                frame = self._socket.recv()
-            except Exception as error:
-                state = refusal_state(str(getattr(error, "reason", "") or error))
-                if state:
-                    raise BridgeRefusedError(state, str(error)) from error
-                raise ConnectionError(str(error)) from error
+            frame = self._read()
             if isinstance(frame, str):
-                state = control_state(frame)
-                if state in TERMINAL_STATES:
-                    raise BridgeRefusedError(state, frame)
                 continue
             return frame
+
+    def wait_paired(self) -> None:
+        """Block until the relay says the other end is there.
+
+        The relay forwards a binary frame only to a peer that is **already
+        connected**; one sent before the pairing is dropped, silently and by
+        design. Sending the hello on connect therefore worked or not depending
+        on which end arrived first: mount second, and the client was there to
+        receive it; mount first, and its hello went nowhere, the client kept
+        waiting for a hello that would never come again, and read this end's
+        first sealed request as one — `the peer's hello is not an X25519
+        public key`, which killed the relay connection and reconnected into
+        the same race.
+
+        Nothing in the failure pointed at ordering, because both ends were
+        behaving: the loser was whoever connected first. So this waits for
+        `paired`, which is the relay saying there is now someone to hear it.
+        """
+        while True:
+            frame = self._read()
+            if not isinstance(frame, str):
+                # Binary before the pairing is from a pairing that is over.
+                continue
+            try:
+                event = json.loads(frame).get("event")
+            except ValueError:
+                continue
+            if event == "paired":
+                return
+
+    def _read(self) -> Any:
+        """One frame, with the relay's terminal announcements raised."""
+        try:
+            frame = self._socket.recv()
+        except Exception as error:
+            state = refusal_state(str(getattr(error, "reason", "") or error))
+            if state:
+                raise BridgeRefusedError(state, str(error)) from error
+            raise ConnectionError(str(error)) from error
+        if isinstance(frame, str):
+            state = control_state(frame)
+            if state in TERMINAL_STATES:
+                raise BridgeRefusedError(state, frame)
+        return frame
 
 
 def connect_relay(
@@ -752,6 +787,8 @@ def connect_relay(
                     "a session key was given without the bridge uid it belongs to"
                 )
             channel = SecureChannel(role="mount", bridge_uid=bridge_uid, session_key=session_key)
+            # After the pairing, never before it: see `wait_paired`.
+            transport.wait_paired()
             transport.send(channel.hello())
             channel.establish(transport.recv())
     except BridgeRefusedError:
