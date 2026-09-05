@@ -17,9 +17,24 @@ if TYPE_CHECKING:
     from .filesystem import SandboxFileHandle
 
 from .base import Sandbox
+from .contents import (
+    FILESYSTEM_PRIMITIVES,
+    LOCAL_BRIDGE_MOUNT,
+    MOUNT_MISSING,
+    MOUNT_PATH_MISSING,
+    ContentAttachmentSpec,
+    ContentCapabilities,
+    LocalBridgeCapability,
+    PreparedAttachment,
+    not_ready,
+    path_exists,
+    path_is_mountpoint,
+    ready,
+)
 from .exceptions import (
     SandboxConfigurationError,
     SandboxConnectionError,
+    SandboxNotFoundError,
     SandboxNotStartedError,
     SandboxSnapshotError,
 )
@@ -43,29 +58,15 @@ from .models import (
 def _urls_for_run(run_url: str):
     """Datalayer service URLs for a deployment served from one origin.
 
-    A run addresses every service under a single host, each on its own path
-    prefix, so one URL is enough to reach all of them. `DatalayerURLs` has no
-    constructor for that shape — it takes the services one by one — so they are
-    filled in here rather than in the SDK.
-
-    Which services those are is read off the SDK rather than written down
-    here. A list copied from it goes stale the moment a URL is renamed there,
-    and it went stale exactly that way: `mcp_server_url` became
-    `jupyter_mcp_server_url` and every execution died on the unexpected
-    keyword, far from the rename that caused it. Asking the signature means a
-    new service is picked up for free and a renamed one cannot break this.
+    Kept as a name here because callers have it; the shape now lives with the
+    type it builds, as `DatalayerURLs.from_single_origin`. It moved because
+    two services outside this package had come to import it — one of them by
+    this private name — which made a helper about `datalayer_core` URLs into a
+    dependency on a **provider adapter**.
     """
-    import inspect
-
     from datalayer_core.utils.urls import DatalayerURLs
 
-    base = (run_url or "").rstrip("/")
-    services = [
-        name
-        for name in inspect.signature(DatalayerURLs.from_environment).parameters
-        if name.endswith("_url")
-    ]
-    return DatalayerURLs.from_environment(**dict.fromkeys(services, base))
+    return DatalayerURLs.from_single_origin(run_url)
 
 
 class DatalayerSandbox(Sandbox):
@@ -127,6 +128,56 @@ class DatalayerSandbox(Sandbox):
         self._end_at: Optional[float] = None
 
     @property
+    def server_url(self) -> Optional[str]:
+        """The runtime's Jupyter ingress, once it is running.
+
+        Published because a sandbox is not only something the agent executes
+        in — it is a kernel a *person* may want to look at. The notebook and
+        document surfaces in a browser build their own connection to the same
+        server, and without an address here they had nothing to build it from:
+        the runtime would start, appear in the Datalayer console, and leave the
+        editors beside the chat connected to nothing.
+
+        Named `server_url` to match `JupyterServerSandbox`, so whatever reads
+        one reads the other. `_server_url` is the same value under the name
+        older callers probe for.
+        """
+        runtime = self._runtime
+        return getattr(runtime, "ingress", None) if runtime else None
+
+    @property
+    def _server_url(self) -> Optional[str]:
+        """Alias of {@link server_url}, for callers that probe the private name."""
+        return self.server_url
+
+    @property
+    def jupyter_token(self) -> Optional[str]:
+        """The token that ingress wants.
+
+        Useless apart from the URL and dangerous to confuse with the API key:
+        `self._token` authenticates *this process* to Datalayer, and handing it
+        to a browser as a Jupyter token would both fail and leak a credential.
+        This is the runtime's own, minted for it.
+        """
+        runtime = self._runtime
+        return getattr(runtime, "jupyter_token", None) if runtime else None
+
+    @property
+    def kernel_id(self) -> Optional[str]:
+        """The kernel the agent is executing in, once there is one.
+
+        Read from the runtime's model rather than kept here: the runtime owns
+        the kernel's lifetime and replaces the id when it restarts, and a copy
+        would go stale exactly when it mattered — a surface reconnecting to a
+        kernel that no longer exists.
+        """
+        runtime = self._runtime
+        if runtime is None:
+            return None
+        model = getattr(runtime, "model", None)
+        return getattr(model, "kernel_id", None) if model else None
+
+    @property
     def client(self):
         """Get the Datalayer client instance."""
         return self._client
@@ -142,23 +193,104 @@ class DatalayerSandbox(Sandbox):
         return self._sandbox_id
 
     @classmethod
-    def from_id(cls, sandbox_id: str, **kwargs) -> "DatalayerSandbox":
-        """Retrieve an existing sandbox by its ID.
+    def from_id(
+        cls,
+        sandbox_id: str,
+        token: Optional[str] = None,
+        run_url: Optional[str] = None,
+        **kwargs,
+    ) -> "DatalayerSandbox":
+        """Retrieve an existing sandbox by its id, connected.
 
-        Similar to Modal's Sandbox.from_id() method.
+        What :meth:`list_all` does for every runtime, this does for one. It
+        used to return an unconnected object with a comment saying it "would
+        need agent-runtimes support" — which was there all along, and meant
+        every caller wanting an existing runtime wrote the same four lines.
 
-        Args:
-            sandbox_id: The unique identifier of the sandbox.
-            **kwargs: Additional arguments (token, run_url).
+        `sandbox_id` is either the Runtimes `runtime_name` or the runtime's
+        `uid`. Both, because `list_all` hands out the uid and `AgentClient`
+        looks up by name: a `from_id` that took only one of them would refuse
+        the very id this class had just given the caller.
 
-        Returns:
-            A DatalayerSandbox instance connected to the existing runtime.
+        Raises:
+            SandboxNotFoundError: when no such runtime exists, or when the
+                lookup cannot be made at all. Answering an object that is not
+                connected — the old behaviour — is worse than an error: every
+                call on it fails later, somewhere else, with a message about
+                whatever it touched first rather than about the wrong id.
         """
-        # Create a new sandbox instance with the existing ID
-        sandbox = cls(**kwargs)
-        sandbox._sandbox_id = sandbox_id
-        # Connect to existing runtime - this would need runtime lookup
-        # For now, this is a placeholder that would need agent-runtimes support
+        try:
+            import datalayer_core.utils.urls  # noqa: F401 - availability check
+            from agent_runtimes.client import AgentClient
+        except ImportError as error:
+            raise SandboxNotFoundError(
+                sandbox_id,
+                f"Cannot look up sandbox '{sandbox_id}': the Datalayer client "
+                f"is not installed. Install code-sandboxes with the "
+                f"[datalayer] extra.",
+            ) from error
+
+        if run_url:
+            client = AgentClient(urls=_urls_for_run(run_url), api_key=token)
+        else:
+            client = AgentClient(api_key=token)
+
+        runtime = cls._find_runtime(client, sandbox_id)
+        if runtime is None:
+            raise SandboxNotFoundError(sandbox_id)
+        return cls._adopt(runtime, token=token, run_url=run_url, **kwargs)
+
+    @staticmethod
+    def _find_runtime(client, sandbox_id: str):
+        """The runtime this id names, by name and then by uid.
+
+        By name first because it is one request; the scan is the fallback for
+        a uid, which is what `list_all` hands out.
+        """
+        try:
+            return client.get_runtime(sandbox_id)
+        except Exception:
+            pass
+        try:
+            runtimes = client.list_runtimes()
+        except Exception:
+            return None
+        for runtime in runtimes:
+            if sandbox_id in (runtime.uid, runtime.runtime_name):
+                return runtime
+        return None
+
+    @classmethod
+    def _adopt(
+        cls,
+        runtime,
+        *,
+        token: Optional[str] = None,
+        run_url: Optional[str] = None,
+        **kwargs,
+    ) -> "DatalayerSandbox":
+        """A sandbox around a runtime that is already running.
+
+        Shared with :meth:`list_all` so the two cannot drift — one adopting a
+        runtime differently from the other is how `from_id` would come to
+        return something that behaves unlike what iteration yields.
+        """
+        sandbox = cls(token=token, run_url=run_url, **kwargs)
+        sandbox._client = getattr(runtime, "_client", None) or sandbox._client
+        sandbox._runtime = runtime
+        sandbox._sandbox_id = runtime.uid or runtime.runtime_name or str(uuid.uuid4())
+        sandbox._started = True
+        sandbox._info = SandboxInfo(
+            id=sandbox._sandbox_id,
+            variant="datalayer",
+            status=SandboxStatus.RUNNING,
+            created_at=time.time(),
+            name=runtime.name,
+            metadata={
+                "network_policy": sandbox.config.network_policy,
+                "allowed_hosts": sandbox.config.allowed_hosts,
+            },
+        )
         return sandbox
 
     @classmethod
@@ -196,22 +328,8 @@ class DatalayerSandbox(Sandbox):
             runtimes = client.list_runtimes()
 
             for runtime in runtimes:
-                sandbox = cls(token=token, run_url=run_url)
+                sandbox = cls._adopt(runtime, token=token, run_url=run_url)
                 sandbox._client = client
-                sandbox._runtime = runtime
-                sandbox._sandbox_id = runtime.uid or str(uuid.uuid4())
-                sandbox._started = True
-                sandbox._info = SandboxInfo(
-                    id=sandbox._sandbox_id,
-                    variant="datalayer",
-                    status=SandboxStatus.RUNNING,
-                    created_at=time.time(),
-                    name=runtime.name,
-                    metadata={
-                        "network_policy": sandbox.config.network_policy,
-                        "allowed_hosts": sandbox.config.allowed_hosts,
-                    },
-                )
                 yield sandbox
         except Exception:
             return
@@ -321,6 +439,18 @@ class DatalayerSandbox(Sandbox):
                     environment=environment,
                     time_reservation=time_reservation,
                 )
+
+            # The runtime's own uid: what Runtimes' routes and a grantee's
+            # `use_sandbox` name it by. The uuid drawn at construction is a
+            # placeholder for a sandbox that does not exist yet, and until
+            # 2026-09-05 it stayed after the runtime did — so a worker sharing
+            # "the sandbox it launched" named Runtimes a uuid nothing had
+            # heard of, and the owner was told only the owner may share it.
+            self._sandbox_id = (
+                getattr(self._runtime, "uid", None)
+                or getattr(self._runtime, "runtime_name", None)
+                or self._sandbox_id
+            )
 
             # Start the runtime
             if hasattr(self._runtime, "start"):
@@ -438,6 +568,98 @@ class DatalayerSandbox(Sandbox):
         """Keep tool calling on the client side for remote sandboxes."""
         return
 
+    # -- Contents attachments ---------------------------------------------
+    #
+    # On Datalayer the mounts are not this adapter's to make: the Operator
+    # reads them off the pod's annotation and mounts them — a volume, a
+    # bucket, a person's own folder through Clouder's CSI — before the pod
+    # starts. What is left to do here is to LOOK: is the path there, or not.
+
+    def _supports_hot_attach(self) -> bool:
+        """Whether this runtime takes a mount while it runs.
+
+        A Pod's volumes are fixed when it is created, so this is a property of
+        the pod rather than of the cluster: a runtime taken from a pool built
+        before the mount gateway shipped cannot take one however new the
+        deployment is. The Runtime record says, and a record that does not say
+        is a runtime that does not.
+        """
+        runtime = self._runtime
+        if runtime is None:
+            return False
+        reported = getattr(runtime, "mount_gateway", None)
+        if reported is None and isinstance(getattr(runtime, "raw", None), dict):
+            reported = runtime.raw.get("mount_gateway")
+        return bool(reported)
+
+    def content_capabilities(self) -> ContentCapabilities:
+        return ContentCapabilities(
+            provider="datalayer",
+            mount=True,
+            bucket_mount=True,
+            materialize=True,
+            client=True,
+            # The mount gateway: the Operator writes a mount set on a running
+            # pod and a node agent binds it in. It is a deployment choice —
+            # the gateway is off by default — so the Runtime says whether it
+            # has it rather than this adapter assuming a cluster has it.
+            hot_attach=self._supports_hot_attach(),
+            local_bridge_mount=LocalBridgeCapability(
+                supported=True,
+                required_features=["clouder-csi"],
+                allowed_roots=[],
+                read_only=True,
+                read_write=True,
+                reconnect=True,
+                cleanup=True,
+            ),
+            filesystem_primitives=list(FILESYSTEM_PRIMITIVES),
+        )
+
+    def _prepare_mount(self, spec: ContentAttachmentSpec, *, reconcile: bool) -> PreparedAttachment:
+        del reconcile
+        return self._operator_mount(spec, capability="mount")
+
+    def _prepare_local_bridge(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        """The Operator rendered a CSI volume for the bridge; is it mounted?
+
+        A mountpoint, not merely a path: the CSI driver binds the bridge
+        filesystem into the pod, and a directory that is there without a
+        mount behind it is an empty directory the image happened to have —
+        or a copy something else made — and neither is the person's folder.
+        """
+        del reconcile
+        mount_path = spec.mount_path or (spec.bridge.mount_path if spec.bridge else None)
+        if not mount_path:
+            return not_ready(spec, MOUNT_PATH_MISSING, "a local bridge needs a mount_path")
+        if path_exists(self, mount_path) and path_is_mountpoint(self, mount_path):
+            return ready(spec, capabilities=[LOCAL_BRIDGE_MOUNT])
+        return not_ready(
+            spec,
+            MOUNT_MISSING,
+            f"{mount_path} is not a mountpoint in the runtime: the Operator renders a "
+            "local bridge as a CSI volume the node driver mounts before the pod "
+            "starts, and this one is not mounted",
+        )
+
+    def _operator_mount(
+        self, spec: ContentAttachmentSpec, *, capability: str
+    ) -> PreparedAttachment:
+        """Ready when the Operator's mount is there; otherwise, say it is not."""
+        if not spec.mount_path:
+            return not_ready(spec, MOUNT_PATH_MISSING, "a mount needs a mount_path")
+        if path_exists(self, spec.mount_path):
+            return ready(spec, capabilities=[capability])
+        return not_ready(
+            spec,
+            MOUNT_MISSING,
+            f"{spec.mount_path} is not mounted in the runtime: the Operator makes "
+            "mounts from the pod annotation before the pod starts, and this one "
+            "was not made",
+        )
+
     def poll(self) -> Optional[int]:
         """Check if the sandbox has finished running.
 
@@ -517,8 +739,72 @@ class DatalayerSandbox(Sandbox):
 
         current_time = time.time()
 
-        # Process stdout
-        if hasattr(response, "stdout") and response.stdout:
+        # AgentClient returns the kernel's native notebook outputs in
+        # ``execute_response``.  Read that shape first: reducing it to the
+        # legacy ``stdout`` / ``result`` convenience properties discards MIME
+        # bundles, so an image becomes only ``<IPython...Image object>`` by the
+        # time it reaches a notebook output renderer.
+        raw_outputs = getattr(response, "execute_response", None)
+        if isinstance(raw_outputs, list):
+            # ``execute_file`` historically wrapped each cell's output list in
+            # one more list; accepting both shapes keeps the adapter faithful
+            # for code and file execution.
+            jupyter_outputs = [
+                output
+                for group in raw_outputs
+                for output in (group if isinstance(group, list) else [group])
+                if isinstance(output, dict)
+            ]
+        else:
+            jupyter_outputs = []
+
+        for output in jupyter_outputs:
+            output_type = output.get("output_type")
+            if output_type == "stream":
+                text = output.get("text", "")
+                if isinstance(text, list):
+                    text = "".join(str(part) for part in text)
+                is_stderr = output.get("name") == "stderr"
+                sink = stderr_messages if is_stderr else stdout_messages
+                handler = on_stderr if is_stderr else on_stdout
+                for line in str(text).splitlines():
+                    message = OutputMessage(
+                        line=line,
+                        timestamp=current_time,
+                        error=is_stderr,
+                    )
+                    sink.append(message)
+                    if handler:
+                        handler(message)
+            elif output_type in ("display_data", "execute_result"):
+                result = Result(
+                    data=output.get("data", {}),
+                    is_main_result=output_type == "execute_result",
+                    extra=output.get("metadata", {}),
+                )
+                results.append(result)
+                if on_result:
+                    on_result(result)
+            elif output_type == "error":
+                ename = output.get("ename", "Error")
+                evalue = output.get("evalue", "")
+                if ename == "SystemExit":
+                    try:
+                        exit_code = int(evalue) if evalue else 0
+                    except (ValueError, TypeError):
+                        exit_code = 1 if evalue else 0
+                else:
+                    code_error = CodeError(
+                        name=ename,
+                        value=evalue,
+                        traceback="\n".join(output.get("traceback", [])),
+                    )
+                    if on_error:
+                        on_error(code_error)
+
+        # Older SDK responses expose split convenience fields instead. Use
+        # those only when no native Jupyter outputs were available.
+        if not jupyter_outputs and hasattr(response, "stdout") and response.stdout:
             for line in response.stdout.splitlines():
                 msg = OutputMessage(line=line, timestamp=current_time, error=False)
                 stdout_messages.append(msg)
@@ -526,7 +812,7 @@ class DatalayerSandbox(Sandbox):
                     on_stdout(msg)
 
         # Process stderr
-        if hasattr(response, "stderr") and response.stderr:
+        if not jupyter_outputs and hasattr(response, "stderr") and response.stderr:
             for line in response.stderr.splitlines():
                 msg = OutputMessage(line=line, timestamp=current_time, error=True)
                 stderr_messages.append(msg)
@@ -534,7 +820,7 @@ class DatalayerSandbox(Sandbox):
                     on_stderr(msg)
 
         # Process results
-        if hasattr(response, "result") and response.result is not None:
+        if not jupyter_outputs and hasattr(response, "result") and response.result is not None:
             result = Result(
                 data={"text/plain": str(response.result)},
                 is_main_result=True,
@@ -544,7 +830,7 @@ class DatalayerSandbox(Sandbox):
                 on_result(result)
 
         # Process display data (rich output)
-        if hasattr(response, "display_data") and response.display_data:
+        if not jupyter_outputs and hasattr(response, "display_data") and response.display_data:
             for display in response.display_data:
                 result = Result(
                     data=display.get("data", {}),
@@ -556,7 +842,7 @@ class DatalayerSandbox(Sandbox):
                     on_result(result)
 
         # Process errors (code exceptions)
-        if hasattr(response, "error") and response.error:
+        if not jupyter_outputs and hasattr(response, "error") and response.error:
             ename = response.error.get("ename", "Error")
             evalue = response.error.get("evalue", "")
 

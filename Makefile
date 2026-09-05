@@ -32,6 +32,10 @@ build:
 test:
 	pytest -q
 
+## The Contents provider matrix against the real providers (skips those without credentials).
+live-matrix:
+	CODE_SANDBOXES_LIVE=1 pytest -q -m live tests/test_contents_live_matrix.py
+
 clean: ## clean
 	git clean -fdx
 

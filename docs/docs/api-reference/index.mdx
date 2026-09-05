@@ -295,6 +295,89 @@ client.stop()
 
 ---
 
+## Contents attachments
+
+The Datalayer Contents service writes down what a sandbox is to be given as a
+`ContentManifest`; the sandbox honours it and answers with one
+`PreparedAttachment` per attachment, whichever provider is underneath. The
+models are importable from `code_sandboxes`.
+
+### Models
+
+| Model | What it is |
+|-------|------------|
+| `ContentManifest` | `contract_version`, `sandbox_uid`, `sandbox_provider`, `generated_at`, `attachments`, and the sandbox's own short-lived credentials to Contents: `contents_url`, `token` |
+| `ContentAttachmentSpec` | One attachment: `uid`, `source_uid`, `revision_uid`, `mode` (`ro`/`rw`), `mount_path`, `delivery` (`mount`, `local-bridge`, `materialize`, `client`, `environment`), `required`, `access_mode`, `provider_resource_id`, `filesystem_primitives`, `materialize` |
+| `MaterializeEntry` | One file to fetch: `source_url` (signed), `path` (absolute or under `mount_path`), `sha256`, `size` |
+| `PreparedAttachment` | `uid`, `status` (`ready`, `degraded`, `failed`), `mount_path`, `provider_resource_id`, `capabilities`, `detail`, `error_code` |
+| `ContentCapabilities` | `provider`, `mount`, `bucket_mount`, `materialize`, `client`, `local_bridge_mount` (a `LocalBridgeCapability`), `filesystem_primitives` |
+| `ContentAttachmentError` | Raised by `attach()` for a required attachment that is not ready: `uid`, `code`, `attachments` |
+
+A `degraded` attachment is an optional one that could not be honoured; a
+`failed` one is required. The `error_code` is one of `DELIVERY_UNSUPPORTED`,
+`MOUNT_NEEDS_RESTART`, `MOUNT_MISSING`, `MOUNT_PATH_MISSING`,
+`CREDENTIAL_DELIVERY_UNSUPPORTED`, `CHECKSUM_MISMATCH`, `FETCH_FAILED`.
+
+### `CodeSandboxClient` methods
+
+```python
+def content_capabilities() -> ContentCapabilities
+def attach(manifest: ContentManifest) -> list[PreparedAttachment]
+def prepare_contents(manifest: ContentManifest) -> list[PreparedAttachment]
+def reconcile_contents(manifest: ContentManifest) -> list[PreparedAttachment]
+def attachment_status(uid: str) -> PreparedAttachment | None
+def detach(uid: str) -> None
+contents_location -> ManifestLocation | None
+```
+
+`prepare_contents` configures a sandbox that has not started (the environment,
+and the mounts a provider only makes at creation), starts it, writes the
+manifest inside, then prepares every attachment. `attach` is the same and
+raises `ContentAttachmentError` when a required attachment is not `ready` —
+leaving the sandbox running. `reconcile_contents` re-checks and repairs after
+a restart: a mount that is there is ready, a materialized file with the right
+digest is not fetched again, and no mount is ever made twice. Every method is
+safe to call again.
+
+Inside the sandbox the manifest is written to `/etc/datalayer/contents.json`,
+or `~/.datalayer/contents.json` when `/etc` cannot be written, and the
+environment is set — at creation where the provider takes it (Daytona, E2B,
+Modal) and in the kernel everywhere: `DATALAYER_CONTENTS_MANIFEST`,
+`DATALAYER_CONTENTS_URL`, `DATALAYER_CONTENTS_TOKEN`,
+`DATALAYER_CONTENTS_TOKEN_FILE`. The token never goes into the JSON; it is
+written to `contents.token` with mode `0600`.
+
+### `Sandbox` hooks
+
+```python
+def content_capabilities() -> ContentCapabilities
+def configure_contents(manifest: ContentManifest) -> None   # before creation
+def prepare_contents(manifest: ContentManifest) -> list[PreparedAttachment]
+def reconcile_contents(manifest: ContentManifest) -> list[PreparedAttachment]
+def attachment_status(uid: str) -> PreparedAttachment | None
+def remove_attachment(uid: str) -> None
+```
+
+None of them is abstract. The base answers `client` only; an adapter overrides
+`content_capabilities`, `configure_contents` and the small `_prepare_mount` /
+`_prepare_local_bridge` / `_forget_mount` hooks rather than the walk over the
+manifest.
+
+### What each provider honours
+
+| Provider | Volume mount (`provider_resource_id`) | Shared filesystem | Bucket mount | Local bridge | Materialize |
+| --- | --- | --- | --- | --- | --- |
+| `datalayer` | made by the Operator before the pod starts; checked for | same | same | Clouder CSI | fetched inside the sandbox |
+| `daytona` | `VolumeMount` at creation; `MOUNT_NEEDS_RESTART` on a running sandbox | `DELIVERY_UNSUPPORTED` | `DELIVERY_UNSUPPORTED` | no | fetched inside the sandbox |
+| `e2b` | `volume_mounts` at creation; `MOUNT_NEEDS_RESTART` on a running sandbox | `DELIVERY_UNSUPPORTED` | `DELIVERY_UNSUPPORTED` | no | fetched inside the sandbox |
+| `modal` | `volumes={path: Volume.from_name(id)}` at creation; `MOUNT_NEEDS_RESTART` on a running sandbox | `DELIVERY_UNSUPPORTED` | `CREDENTIAL_DELIVERY_UNSUPPORTED` — a `CloudBucketMount` needs the bucket credential handed to Modal | no | fetched inside the sandbox |
+| others | `DELIVERY_UNSUPPORTED` | same | same | no | `DELIVERY_UNSUPPORTED` |
+
+Materialized files are fetched by the sandbox itself from the signed URLs,
+so the bytes never pass through the host; each is written beside its
+destination and moved into place once its digest checks out. `detach` removes
+materialized files and forgets a mount request; it never deletes a volume.
+
 ## Kaggle and Colab Clients
 
 Code Sandboxes owns the provider-specific clients used by its managed notebook

@@ -49,6 +49,14 @@ from typing import Any, Callable, Union
 
 from .base import Sandbox
 from .commands import CommandResult
+from .contents import (
+    ContentAttachmentError,
+    ContentCapabilities,
+    ContentManifest,
+    ManifestLocation,
+    PreparedAttachment,
+    install_manifest,
+)
 from .filesystem import FileInfo, SandboxFilesystem
 from .models import (
     CodeError,
@@ -132,6 +140,11 @@ class CodeExecutionOutcome:
         stderr: Combined standard error text.
         results: Textual representation of rich results (display data / return
             values) produced by the execution.
+        outputs: The same rich results as Jupyter outputs, mime bundles intact.
+            `results` keeps only `text/plain`, which is enough to print and not
+            enough to draw: a figure, an HTML table and a `repr` all arrive as
+            one string. Anything that renders — the A2UI converter, a notebook
+            panel — reads this instead.
         error: Human-readable error message when ``success`` is False, otherwise
             ``None``.
         execution_error: Infrastructure failure detail when ``execution_ok`` is
@@ -148,6 +161,7 @@ class CodeExecutionOutcome:
     stdout: str = ""
     stderr: str = ""
     results: list[str] = field(default_factory=list)
+    outputs: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
     execution_error: str | None = None
     code_error: dict[str, str] | None = None
@@ -158,10 +172,26 @@ class CodeExecutionOutcome:
     def from_execution_result(cls, execution: ExecutionResult) -> CodeExecutionOutcome:
         """Build a normalized outcome from a raw :class:`ExecutionResult`."""
         results: list[str] = []
+        outputs: list[dict[str, Any]] = []
         for result in execution.results:
             text = getattr(result, "text", None)
             if text:
                 results.append(text)
+            data = getattr(result, "data", None)
+            if isinstance(data, dict) and data:
+                # Jupyter's own shape, so a consumer that already knows how to
+                # read a notebook output does not need a second reader.
+                outputs.append(
+                    {
+                        "output_type": (
+                            "execute_result"
+                            if getattr(result, "is_main_result", False)
+                            else "display_data"
+                        ),
+                        "data": dict(data),
+                        "metadata": dict(getattr(result, "extra", None) or {}),
+                    }
+                )
 
         code_error_dict: dict[str, str] | None = None
         if execution.code_error is not None:
@@ -171,6 +201,35 @@ class CodeExecutionOutcome:
                 "value": getattr(code_error, "value", None) or "",
                 "traceback": getattr(code_error, "traceback", None) or "",
             }
+
+        if code_error_dict is not None:
+            """
+            The traceback, as a Jupyter output rather than only as a string.
+
+            The exception was captured into ``code_error`` and flattened into
+            the one-line ``error`` message below, and that was the whole of
+            what a caller received: ``outputs`` carried the results and never
+            the failure. So anything rendering these outputs had a traceback
+            available nowhere and had to invent a stand-in — a single
+            ``KeyError: 'east'`` line, where a notebook would have shown the
+            frames.
+
+            ``nbformat`` already specifies this shape, and the renderers on
+            the other side already know it: an ``error`` output is what turns
+            a red line into a real cell error with its stack.
+            """
+            traceback_text = code_error_dict["traceback"]
+            outputs.append(
+                {
+                    "output_type": "error",
+                    "ename": code_error_dict["name"],
+                    "evalue": code_error_dict["value"],
+                    # A list of lines, per nbformat — and the ANSI escapes are
+                    # left in: that colouring is the kernel's own, and the
+                    # renderers convert it.
+                    "traceback": traceback_text.splitlines(),
+                }
+            )
 
         exit_code = getattr(execution, "exit_code", None)
 
@@ -192,6 +251,7 @@ class CodeExecutionOutcome:
             stdout=execution.logs.stdout_text,
             stderr=execution.logs.stderr_text,
             results=results,
+            outputs=outputs,
             error=error,
             execution_error=execution.execution_error,
             code_error=code_error_dict,
@@ -220,6 +280,7 @@ class CodeSandboxClient:
         """
         self._sandbox = sandbox
         self._owns_sandbox = owns_sandbox
+        self._contents_location: ManifestLocation | None = None
 
     @classmethod
     def create(
@@ -523,22 +584,18 @@ class CodeSandboxClient:
         """One entry, or `FileNotFoundError` if the path names nothing."""
         return self.files.get_info(path)
 
-    def read_file(self, path: str, *, binary: bool = False) -> Union[str, bytes]:
+    def read_file(self, path: str, *, binary: bool = False) -> str | bytes:
         """Read a whole file; `binary` for anything that is not text."""
         return self.files.read_bytes(path) if binary else self.files.read(path)
 
-    def write_file(
-        self, path: str, content: Union[str, bytes], *, make_dirs: bool = True
-    ) -> None:
+    def write_file(self, path: str, content: str | bytes, *, make_dirs: bool = True) -> None:
         """Write a whole file, creating the directories above it by default."""
         if isinstance(content, bytes):
             self.files.write_bytes(path, content, make_dirs=make_dirs)
         else:
             self.files.write(path, content, make_dirs=make_dirs)
 
-    def stream_file(
-        self, path: str, *, chunk_size: int = 1024 * 1024
-    ) -> Iterator[bytes]:
+    def stream_file(self, path: str, *, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
         """Read a file in pieces, for something too big to hold at once.
 
         The pieces come from one read of the sandbox: the providers'
@@ -566,6 +623,85 @@ class CodeSandboxClient:
     def download_file(self, remote_path: str, local_path: str) -> None:
         """Take a file out of the sandbox."""
         self.files.download(remote_path, local_path)
+
+    # -- Contents attachments ---------------------------------------------
+    #
+    # The Contents service hands over a manifest; the sandbox is given what
+    # it names. The client's part is the order of things — configure before
+    # the sandbox exists, start, install the manifest inside, then prepare —
+    # and the one strict verb, `attach`, that refuses to pretend a required
+    # attachment is there when it is not.
+
+    @property
+    def contents_location(self) -> ManifestLocation | None:
+        """Where the manifest was last written inside the sandbox, if it was."""
+        return self._contents_location
+
+    def content_capabilities(self) -> ContentCapabilities:
+        """What the wrapped sandbox's provider can do with an attachment."""
+        return self._sandbox.content_capabilities()
+
+    def prepare_contents(self, manifest: ContentManifest) -> list[PreparedAttachment]:
+        """Give the sandbox what the manifest names, and say what became of it.
+
+        A sandbox not yet started is configured first — the environment, and
+        the mounts a provider only makes at creation — then started, then
+        given the manifest file and the credentials to Contents, and only
+        then are the attachments prepared. Nothing here raises for an
+        attachment that could not be honoured; :meth:`attach` does.
+        """
+        self._stage_contents(manifest)
+        return self._sandbox.prepare_contents(manifest)
+
+    def reconcile_contents(self, manifest: ContentManifest) -> list[PreparedAttachment]:
+        """Re-check every attachment and repair what is missing.
+
+        After a restart, a reconnect, or a manifest that grew: the same as
+        :meth:`prepare_contents`, minus the work already done.
+        """
+        self._stage_contents(manifest)
+        return self._sandbox.reconcile_contents(manifest)
+
+    def attach(self, manifest: ContentManifest) -> list[PreparedAttachment]:
+        """Prepare the manifest and insist that every required attachment is ready.
+
+        Raises:
+            ContentAttachmentError: naming the first required attachment that
+                is not ready and why, with the whole list on `attachments`.
+                The sandbox is LEFT RUNNING — whether a sandbox without its
+                data is still worth having is the caller's call.
+        """
+        prepared = self.prepare_contents(manifest)
+        for result in prepared:
+            spec = manifest.attachment(result.uid)
+            if spec is not None and spec.required and result.status != "ready":
+                raise ContentAttachmentError(
+                    result.uid,
+                    result.error_code or "ATTACHMENT_NOT_READY",
+                    f"Content attachment {result.uid} is {result.status}"
+                    + (f": {result.detail}" if result.detail else ""),
+                    attachments=prepared,
+                )
+        return prepared
+
+    def attachment_status(self, uid: str) -> PreparedAttachment | None:
+        """What the last prepare or reconcile said of one attachment."""
+        return self._sandbox.attachment_status(uid)
+
+    def detach(self, uid: str) -> None:
+        """Take away what one attachment delivered; the source is untouched."""
+        self._sandbox.remove_attachment(uid)
+
+    def _stage_contents(self, manifest: ContentManifest) -> None:
+        """Configure, start, and put the manifest inside — in that order.
+
+        Configured every time, running or not: the configuration is what the
+        provider is handed at the NEXT creation — a restart — and it must say
+        what this manifest says, not what an earlier one did.
+        """
+        self._sandbox.configure_contents(manifest)
+        self.start()
+        self._contents_location = install_manifest(self._sandbox, manifest)
 
     def __enter__(self) -> CodeSandboxClient:
         self.start()

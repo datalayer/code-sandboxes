@@ -213,3 +213,64 @@ def test_stop_without_shutdown_disconnects_backend_and_clears_started():
     assert client.is_started is False
     client.start()
     assert client.is_started is True
+
+
+class TestTheOutcomeKeepsWhatItIsGiven:
+    """`results` is enough to print; `outputs` is what it takes to draw.
+
+    The outcome calls itself a faithful superset of the raw result. It was not:
+    every representation but `text/plain` was dropped on the way through, so a
+    figure reached its callers as the string `<Figure size 640x480>` and a
+    renderer downstream had nothing to render.
+    """
+
+    @staticmethod
+    def _result(**data):
+        from code_sandboxes.models import ExecutionResult, Logs, Result
+
+        return ExecutionResult(
+            results=[Result(data=data, is_main_result=True)],
+            logs=Logs(),
+            execution_ok=True,
+        )
+
+    def test_an_image_survives_as_an_image(self):
+        from code_sandboxes import CodeExecutionOutcome
+
+        outcome = CodeExecutionOutcome.from_execution_result(
+            self._result(**{"image/png": "iVBORw0KGgo=", "text/plain": "<Figure>"})
+        )
+
+        assert outcome.outputs[0]["data"]["image/png"] == "iVBORw0KGgo="
+        # And the text stays where it always was, for callers that only print.
+        assert outcome.results == ["<Figure>"]
+
+    def test_every_representation_of_one_value_is_kept(self):
+        from code_sandboxes import CodeExecutionOutcome
+
+        outcome = CodeExecutionOutcome.from_execution_result(
+            self._result(**{"text/html": "<table/>", "text/plain": "   a  b"})
+        )
+
+        assert set(outcome.outputs[0]["data"]) == {"text/html", "text/plain"}
+
+    def test_the_shape_is_jupyter_s_own(self):
+        from code_sandboxes import CodeExecutionOutcome
+
+        outcome = CodeExecutionOutcome.from_execution_result(self._result(**{"text/plain": "42"}))
+
+        # So a consumer that already reads notebook outputs needs no second
+        # reader for these.
+        output = outcome.outputs[0]
+        assert output["output_type"] == "execute_result"
+        assert set(output) == {"output_type", "data", "metadata"}
+
+    def test_a_result_with_no_data_adds_no_output(self):
+        from code_sandboxes import CodeExecutionOutcome
+        from code_sandboxes.models import ExecutionResult, Logs, Result
+
+        outcome = CodeExecutionOutcome.from_execution_result(
+            ExecutionResult(results=[Result(data={})], logs=Logs(), execution_ok=True)
+        )
+
+        assert outcome.outputs == []

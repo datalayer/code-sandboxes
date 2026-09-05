@@ -773,7 +773,7 @@ class DatalayerSandboxManager(SandboxManager):
             name=getattr(runtime, "name", "") or "",
             metadata={
                 "environment": getattr(runtime, "environment_name", "") or "",
-                "pod": getattr(runtime, "pod_name", "") or "",
+                "pod": getattr(runtime, "runtime_name", "") or "",
             },
         )
 

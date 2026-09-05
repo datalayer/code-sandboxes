@@ -35,6 +35,11 @@ code-sandbox = "code_sandboxes.cli:main"
 code-sandboxes = "code_sandboxes.cli:main"
 
 [project.optional-dependencies]
+# What the sandbox-side bridge filesystem (`code_sandboxes.bridge_mount`)
+# needs where it RUNS — inside a sandbox image that exposes /dev/fuse. The
+# host side needs none of it.
+# `datalayer-core` carries the frame protocol both ends speak.
+bridge = ["datalayer-core>=1.1.65", "fusepy>=3.0", "websockets>=12"]
 cloudflare = ["httpx>=0.27"]
 coreweave = ["cwsandbox>=1.6"]
 datalayer = ["agent_runtimes>=1.0.16"]
@@ -77,6 +82,10 @@ path = "code_sandboxes/__version__.py"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+  "live: runs against the real sandbox providers; needs CODE_SANDBOXES_LIVE=1 and credentials",
+]
+addopts = "-m 'not live'"
 filterwarnings = [
   "error",
   "ignore::pytest.PytestUnraisableExceptionWarning",
@@ -84,6 +93,11 @@ filterwarnings = [
   "module:make_current is deprecated:DeprecationWarning",
   "module:clear_current is deprecated:DeprecationWarning",
   "module:Jupyter is migrating its paths to use standard platformdirs:DeprecationWarning",
+  # The Datalayer client emits the same migration warning under its own name,
+  # so the line above never matched it, and with `error` in force the first
+  # use of the client in a test became an exception. It took the live matrix
+  # against a real Datalayer sandbox down before the sandbox was reached.
+  "module:Datalayer is migrating its paths to use standard platformdirs:DeprecationWarning",
 ]
 
 [tool.mypy]

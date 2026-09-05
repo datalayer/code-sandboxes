@@ -62,6 +62,15 @@ Style usage:
 """
 
 from .base import Sandbox
+from .builds import (
+    ENVIRONMENT_CONTENTS_MANIFEST,
+    BuildEntry,
+    BuiltArtifact,
+    EnvironmentBuild,
+    build_artifact,
+    dockerfile_fragment,
+    installed_environment_contents,
+)
 from .client import CodeExecutionOutcome, CodeSandboxClient, execution_result_to_reply
 from .cloudflare_sandbox import CloudflareSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
@@ -74,6 +83,16 @@ from .console import (
     show_code,
     show_examples,
     show_result,
+)
+from .contents import (
+    ContentAttachmentError,
+    ContentAttachmentSpec,
+    ContentCapabilities,
+    ContentManifest,
+    LocalBridgeCapability,
+    ManifestLocation,
+    MaterializeEntry,
+    PreparedAttachment,
 )
 from .coreweave_sandbox import CoreWeaveSandbox
 from .datalayer_sandbox import DatalayerSandbox
@@ -88,6 +107,7 @@ from .exceptions import (
     SandboxConnectionError,
     SandboxError,
     SandboxExecutionError,
+    SandboxNotFoundError,
     SandboxNotStartedError,
     SandboxQuotaExceededError,
     SandboxResourceError,
@@ -113,6 +133,23 @@ from .jupyter_server_sandbox import JupyterServerSandbox
 from .kaggle import KAGGLE_API_TOKEN_ENV, KaggleKernelClient, parse_kaggle_channels_url
 from .kaggle_execute import KaggleExecutionResult, KaggleKernelExecutor
 from .kaggle_sandbox import KaggleSandbox
+from .lifecycle import (
+    INSTANCE_OPERATIONS,
+    LIFECYCLE_OPERATIONS,
+    MANAGER_OPERATIONS,
+    RUNTIMES_API_PREFIX,
+    SandboxLifecycle,
+    SandboxManagerLifecycle,
+    SandboxOperationNotSupported,
+    runtime_checkpoints_url,
+    runtime_pause_url,
+    runtime_resume_url,
+    runtime_url,
+    runtimes_url,
+    sandbox_snapshot_url,
+    sandbox_snapshots_url,
+    unsupported,
+)
 from .manage import (
     SandboxManagementError,
     SandboxManager,
@@ -155,14 +192,25 @@ from .providers import (
 #: Everything this package exports, in one sorted list — the groups it
 #: used to be split into stopped matching what they sat above.
 __all__ = [
+    "ENVIRONMENT_CONTENTS_MANIFEST",
     "EXIT_COMMANDS",
+    "INSTANCE_OPERATIONS",
     "KAGGLE_API_TOKEN_ENV",
+    "LIFECYCLE_OPERATIONS",
+    "MANAGER_OPERATIONS",
     "PROVIDERS",
+    "RUNTIMES_API_PREFIX",
+    "BuildEntry",
+    "BuiltArtifact",
     "CloudflareSandbox",
     "CodeError",
     "CodeExecutionOutcome",
     "CodeSandboxClient",
     "CommandResult",
+    "ContentAttachmentError",
+    "ContentAttachmentSpec",
+    "ContentCapabilities",
+    "ContentManifest",
     "Context",
     "ContextNotFoundError",
     "CoreWeaveSandbox",
@@ -170,6 +218,7 @@ __all__ = [
     "DaytonaSandbox",
     "DockerSandbox",
     "E2BSandbox",
+    "EnvironmentBuild",
     "EvalSandbox",
     "ExecutionResult",
     "FileInfo",
@@ -187,12 +236,16 @@ __all__ = [
     "KaggleKernelClient",
     "KaggleKernelExecutor",
     "KaggleSandbox",
+    "LocalBridgeCapability",
     "Logs",
     "MIMEType",
+    "ManifestLocation",
+    "MaterializeEntry",
     "ModalSandbox",
     "MontySandbox",
     "OutputHandler",
     "OutputMessage",
+    "PreparedAttachment",
     "ProcessHandle",
     "ProviderRequirement",
     "ResourceConfig",
@@ -209,9 +262,13 @@ __all__ = [
     "SandboxFileHandle",
     "SandboxFilesystem",
     "SandboxInfo",
+    "SandboxLifecycle",
     "SandboxManagementError",
     "SandboxManager",
+    "SandboxManagerLifecycle",
+    "SandboxNotFoundError",
     "SandboxNotStartedError",
+    "SandboxOperationNotSupported",
     "SandboxProvider",
     "SandboxQuotaExceededError",
     "SandboxResourceError",
@@ -223,10 +280,13 @@ __all__ = [
     "TunnelInfo",
     "VariableNotFoundError",
     "available_providers",
+    "build_artifact",
+    "dockerfile_fragment",
     "example_code",
     "execution_result_to_reply",
     "get_manager",
     "get_provider",
+    "installed_environment_contents",
     "manageable_variants",
     "normalize_variant",
     "parse_google_colab_channels_url",
@@ -234,8 +294,16 @@ __all__ = [
     "provider_ingress_execution",
     "repl_prompt",
     "run_repl",
+    "runtime_checkpoints_url",
+    "runtime_pause_url",
+    "runtime_resume_url",
+    "runtime_url",
+    "runtimes_url",
+    "sandbox_snapshot_url",
+    "sandbox_snapshots_url",
     "show_and_run",
     "show_code",
     "show_examples",
     "show_result",
+    "unsupported",
 ]

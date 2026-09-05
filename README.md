@@ -190,6 +190,57 @@ with GoogleColabKernelClient.from_channels_url(channels_url) as kernel:
 See the [complete Google Colab guide](https://code-sandboxes.datalayer.tech/providers/google-colab) for
 proxy authentication, explicit connection values, and channels URL retrieval.
 
+## Contents attachments
+
+The Datalayer Contents service decides what a sandbox is given — a volume, a
+home folder, a dataset revision, a bucket — and writes it down as a manifest.
+The client honours it the same way on every provider, and answers honestly
+where a provider cannot:
+
+```python
+from code_sandboxes import CodeSandboxClient, ContentAttachmentError, ContentManifest
+
+manifest = ContentManifest.model_validate(contents_api.attachment_manifest(sandbox_uid))
+client = CodeSandboxClient.create(variant="daytona")
+
+print(client.content_capabilities())     # mount, bucket_mount, materialize, client, ...
+try:
+    prepared = client.attach(manifest)   # configure, start, install the manifest, prepare
+except ContentAttachmentError as error:  # a REQUIRED attachment is not ready
+    print(error.uid, error.code)         # e.g. "MOUNT_NEEDS_RESTART"; the sandbox keeps running
+
+client.reconcile_contents(manifest)      # after a restart: re-check, repair, never duplicate
+client.attachment_status("attachment-1")
+client.detach("attachment-1")            # removes what was delivered, never the source
+```
+
+Inside the sandbox the manifest is `/etc/datalayer/contents.json` (or
+`~/.datalayer/contents.json` when `/etc` cannot be written) and the
+environment names it: `DATALAYER_CONTENTS_MANIFEST`, `DATALAYER_CONTENTS_URL`,
+`DATALAYER_CONTENTS_TOKEN` and `DATALAYER_CONTENTS_TOKEN_FILE`. The token is
+the short-lived sandbox credential, kept out of the JSON in a file only the
+owner can read.
+
+| Provider    | Volume mount    | Shared filesystem | Bucket mount                               | Local bridge            | Materialize | Client |
+| ----------- | --------------- | ----------------- | ------------------------------------------ | ----------------------- | ----------- | ------ |
+| `datalayer` | by the Operator | by the Operator   | by the Operator                            | Clouder CSI             | yes         | yes    |
+| `daytona`   | at creation     | no                | no                                         | per environment: `fuse` | yes         | yes    |
+| `e2b`       | at creation     | no                | no                                         | per environment: `fuse` | yes         | yes    |
+| `modal`     | at creation     | no                | refused: a credential would leave Contents | per environment: `fuse` | yes         | yes    |
+| others      | no              | no                | no                                         | no                      | no          | yes    |
+
+A local bridge — a person's own folder, mounted over the bridge relay — is
+supported per environment, never per provider: only an environment whose
+metadata declares the `fuse` feature (fusepy and `/dev/fuse` in the sandbox)
+starts the bridge filesystem (`code_sandboxes.bridge_mount`) inside the
+sandbox, and none of the stock Daytona, E2B or Modal environments declares
+it. Everywhere else a `local-bridge` attachment is refused with
+`LOCAL_BRIDGE_UNSUPPORTED` and Synchronize is offered instead — a copy is
+never reported as a mount. Install the sandbox side with
+`pip install "code-sandboxes[bridge]"` in an image that exposes `/dev/fuse`.
+
+See the [API reference](https://code-sandboxes.datalayer.tech/api-reference#contents-attachments).
+
 ## Manage Sandboxes (CRUD)
 
 Every variant answers the same verbs — create, list, get, update, delete —

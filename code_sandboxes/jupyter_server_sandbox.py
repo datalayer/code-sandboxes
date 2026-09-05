@@ -10,6 +10,7 @@ one) and uses ``jupyter-kernel-client`` to execute code in a persistent kernel.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import os
@@ -22,6 +23,7 @@ import threading
 import time
 import uuid
 from collections import deque
+from collections.abc import AsyncIterator
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse, urlunparse
 
@@ -238,6 +240,22 @@ class JupyterServerSandbox(Sandbox):
             f"--ServerApp.port={port}",
             "--ServerApp.port_retries=0",
             "--ServerApp.allow_origin=*",
+            # A browser on another origin is a first-class client here: the
+            # notebook and document editors of the workspace connect to this
+            # server directly from a page served by the dev server or the SaaS.
+            #
+            # `allow_origin` alone is not enough for that. Starting a kernel is
+            # a POST, and Jupyter's XSRF check rejects a cross-origin write
+            # *before* the CORS headers are attached — so the browser reports a
+            # missing `Access-Control-Allow-Origin` on a 403 and neither half of
+            # the message names the real cause. Requests still have to carry the
+            # token above; this only stops the cookie-based defence from
+            # refusing a client that was never going to send a cookie.
+            "--ServerApp.disable_check_xsrf=True",
+            # Answer on both loopback names. The URL handed to the browser is
+            # whatever the caller resolved, and a server bound only to
+            # 127.0.0.1 refuses the same request addressed to localhost.
+            f"--ServerApp.ip={self._host}",
             f"--ServerApp.root_dir={workdir}",
         ]
 
@@ -589,12 +607,29 @@ class JupyterServerSandbox(Sandbox):
         exit_code: int | None = None
 
         def consume_stream(content: dict, timestamp: float) -> None:
-            """One stream message: its text, split into lines, to stdout or stderr."""
+            """One stream message, kept as the kernel wrote it.
+
+            `splitlines()` was losing the one fact that distinguishes a
+            finished line from a chunk written with `end=""`. A loop printing
+            dots side by side arrived as six separate lines, because the
+            terminator was discarded here and reinvented when the messages
+            were joined — output no kernel had produced.
+
+            `keepends=True` preserves it, and each message says whether its own
+            chunk ended. The dots then reassemble as a notebook shows them: on
+            one line, growing.
+            """
             is_stderr = content.get("name") == "stderr"
             sink = stderr_messages if is_stderr else stdout_messages
             handler = on_stderr if is_stderr else on_stdout
-            for line in content.get("text", "").splitlines():
-                msg = OutputMessage(line=line, timestamp=timestamp, error=is_stderr)
+            for part in content.get("text", "").splitlines(keepends=True):
+                terminated = part.endswith("\n")
+                msg = OutputMessage(
+                    line=part.rstrip("\n"),
+                    timestamp=timestamp,
+                    error=is_stderr,
+                    terminated=terminated,
+                )
                 sink.append(msg)
                 if handler:
                     handler(msg)
@@ -692,6 +727,80 @@ class JupyterServerSandbox(Sandbox):
             completed_at=time.time(),
             interrupted=was_interrupted,
         )
+
+    async def run_code_streaming_async(
+        self,
+        code: str,
+        language: str = "python",
+        context: Context | None = None,
+        envs: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> AsyncIterator[OutputMessage | Result | CodeError]:
+        """Yield each output as the kernel produces it.
+
+        The base implementation is streaming in shape only: it awaits the whole
+        execution and then replays what it collected, so a cell that prints for
+        three seconds delivered everything in one burst at the end. Nothing
+        downstream could stream, however well it was written — the A2UI surface
+        above this was emitting correct incremental messages, all of them
+        microseconds apart, after the run had finished.
+
+        Nothing new has to be observed to fix that. `run_code` already accepts
+        `on_stdout`, `on_stderr`, `on_result` and `on_error`, and already calls
+        them from its IOPub hook *while the messages are arriving* — the
+        information was live and only the return value was not. This turns
+        those callbacks into an async iterator.
+
+        The bridge is a queue, because `execute_interactive` blocks: the
+        execution runs on a worker thread and the callbacks hand items across
+        with `call_soon_threadsafe`, which is the only safe way to touch an
+        asyncio primitive from another thread. The generator then drains the
+        queue as items land, rather than waiting on the thread.
+        """
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[OutputMessage | Result | CodeError | None] = asyncio.Queue()
+
+        def emit(item: OutputMessage | Result | CodeError) -> None:
+            # Called on the execution thread; hop to the loop's thread before
+            # touching the queue.
+            loop.call_soon_threadsafe(queue.put_nowait, item)
+
+        def execute() -> ExecutionResult:
+            try:
+                return self.run_code(
+                    code=code,
+                    language=language,
+                    context=context,
+                    on_stdout=emit,
+                    on_stderr=emit,
+                    on_result=emit,
+                    on_error=emit,
+                    envs=envs,
+                    timeout=timeout,
+                )
+            finally:
+                # The sentinel closes the generator whatever happened, so a
+                # raising execution cannot leave a consumer awaiting forever.
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        execution_task = loop.run_in_executor(None, execute)
+
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield item
+
+        execution = await execution_task
+
+        # An infrastructure failure never reaches the callbacks — it is the
+        # reason there were none — so it is reported here, once, at the end.
+        if not execution.execution_ok and execution.execution_error:
+            yield CodeError(
+                name="SandboxExecutionError",
+                value=execution.execution_error,
+                traceback="",
+            )
 
     def _get_internal_variable(self, name: str, context: Context | None = None):
         if not self._started or self._client is None:

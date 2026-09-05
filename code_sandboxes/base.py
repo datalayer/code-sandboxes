@@ -13,6 +13,25 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any, Union
 
 from .commands import SandboxCommands
+from .contents import (
+    CONTENTS_ENVIRONMENT_NAMES,
+    FILESYSTEM_PRIMITIVES,
+    LOCAL_BRIDGE_MOUNT,
+    LOCAL_BRIDGE_NOT_A_MOUNT,
+    ContentAttachmentSpec,
+    ContentCapabilities,
+    ContentManifest,
+    LocalBridgeCapability,
+    PreparedAttachment,
+    contents_environment,
+    materialize,
+    not_ready,
+    path_is_mountpoint,
+    ready,
+    remove_materialized,
+    unsupported,
+)
+from .exceptions import SandboxNotStartedError
 from .filesystem import SandboxFilesystem
 from .interfaces import ISandboxClient
 from .models import (
@@ -119,6 +138,11 @@ class Sandbox(ABC):
         self._tool_caller: Any | None = None  # Tool caller function for MCP tools
         self._executing_event = threading.Event()  # Set while code is running
         self._interrupt_requested = threading.Event()  # Set to request interruption
+        #: What became of each Contents attachment at the last prepare or
+        #: reconcile, and the attachment it was — kept so `attachment_status`
+        #: can answer and `remove_attachment` knows what to take away.
+        self._attachments: dict[str, PreparedAttachment] = {}
+        self._attachment_specs: dict[str, ContentAttachmentSpec] = {}
 
     @property
     def info(self) -> SandboxInfo | None:
@@ -153,6 +177,208 @@ class Sandbox(ABC):
         raise NotImplementedError(
             f"{type(self).__name__} does not expose Jupyter over provider ingress"
         )
+
+    # -- Contents attachments ---------------------------------------------
+    #
+    # The Contents service says what a sandbox is to be given; these say how
+    # this provider honours it, in one vocabulary. Adapters override the
+    # small hooks — `content_capabilities`, `_prepare_mount`, `_forget_mount`
+    # — rather than the walk over the manifest, which is the same everywhere.
+    # Every one of them is safe to call again.
+
+    @property
+    def provider_name(self) -> str:
+        """The provider this sandbox runs on, as Contents names it.
+
+        The variant of a started sandbox; before it starts, the name the
+        class carries — `DaytonaSandbox` is `daytona` — so capabilities can
+        be asked for before anything is created.
+        """
+        if self._info is not None and self._info.variant:
+            return self._info.variant
+        name = type(self).__name__
+        if name.endswith("Sandbox"):
+            name = name[: -len("Sandbox")]
+        return name.lower()
+
+    def content_capabilities(self) -> ContentCapabilities:
+        """What this provider can do with a Contents attachment.
+
+        The base answer is the least any provider offers: the sandbox can
+        reach Contents itself (`client`), and this package's filesystem
+        works over its kernel. Nothing is mounted, nothing is fetched.
+        """
+        return ContentCapabilities(
+            provider=self.provider_name,
+            mount=False,
+            bucket_mount=False,
+            materialize=False,
+            client=True,
+            local_bridge_mount=LocalBridgeCapability(supported=False),
+            filesystem_primitives=list(FILESYSTEM_PRIMITIVES),
+        )
+
+    def configure_contents(self, manifest: ContentManifest) -> None:
+        """What the sandbox must know BEFORE it is created.
+
+        The environment a Contents client inside reads goes into the
+        configuration, for the providers that take their environment at
+        creation. Adapters that mount only at creation record the mounts
+        here too. Harmless on a sandbox that is already running — the
+        variables are exported into the kernel again when the manifest is
+        installed.
+
+        Replaces rather than adds: a manifest without a token, after one
+        with, must leave the provider no token to hand to the next creation.
+        """
+        environment = contents_environment(manifest)
+        for name in CONTENTS_ENVIRONMENT_NAMES:
+            if name not in environment:
+                self.config.env_vars.pop(name, None)
+        self.config.env_vars.update(environment)
+
+    def prepare_contents(self, manifest: ContentManifest) -> list[PreparedAttachment]:
+        """Honour each attachment of the manifest, and say what became of it."""
+        return self._apply_contents(manifest, reconcile=False)
+
+    def reconcile_contents(self, manifest: ContentManifest) -> list[PreparedAttachment]:
+        """Re-check every attachment and repair what is missing.
+
+        The same walk as :meth:`prepare_contents`, minus the work already
+        done: a mount that is there is ready, a materialized file with the
+        right digest is not fetched again.
+        """
+        return self._apply_contents(manifest, reconcile=True)
+
+    def attachment_status(self, uid: str) -> PreparedAttachment | None:
+        """What the last prepare or reconcile said of this attachment."""
+        return self._attachments.get(uid)
+
+    def remove_attachment(self, uid: str) -> None:
+        """Detach: take away what was delivered, never the source.
+
+        Materialized files are removed where the sandbox is running; a mount
+        request is forgotten so the next start does not make it. A volume,
+        a bucket, a home folder — the thing attached — is left exactly as it
+        was, because detaching is not deleting.
+        """
+        spec = self._attachment_specs.pop(uid, None)
+        self._attachments.pop(uid, None)
+        if spec is None:
+            return
+        if spec.delivery in ("materialize", "environment") and spec.materialize and self._started:
+            remove_materialized(self, spec)
+        if spec.delivery == "local-bridge" and self._started:
+            self._release_local_bridge(spec)
+        self._forget_mount(spec)
+
+    def _apply_contents(
+        self, manifest: ContentManifest, *, reconcile: bool
+    ) -> list[PreparedAttachment]:
+        if not self._started:
+            raise SandboxNotStartedError()
+        prepared: list[PreparedAttachment] = []
+        for spec in manifest.attachments:
+            result = self._prepare_attachment(spec, reconcile=reconcile)
+            self._attachments[spec.uid] = result
+            self._attachment_specs[spec.uid] = spec
+            prepared.append(result)
+        return prepared
+
+    def _prepare_attachment(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        if spec.delivery == "client":
+            # The sandbox reaches Contents itself, with the manifest and the
+            # credentials installed beside it. Nothing to mount or fetch.
+            return ready(spec, capabilities=["client"])
+        if spec.delivery == "materialize":
+            return self._prepare_materialize(spec, reconcile=reconcile)
+        if spec.delivery == "environment":
+            return self._prepare_environment(spec, reconcile=reconcile)
+        if spec.delivery == "mount":
+            return self._prepare_mount(spec, reconcile=reconcile)
+        if spec.delivery == "local-bridge":
+            return self._honest_local_bridge(
+                spec, self._prepare_local_bridge(spec, reconcile=reconcile)
+            )
+        return unsupported(spec, self.provider_name)
+
+    def _honest_local_bridge(
+        self, spec: ContentAttachmentSpec, result: PreparedAttachment
+    ) -> PreparedAttachment:
+        """A local bridge is a mount or it is nothing.
+
+        Whatever an adapter answered, `ready` stands only if the answer
+        claims exactly the bridge capability and the path is a mountpoint in
+        the sandbox. A copy of the folder — materialized, synchronized,
+        fetched — is not a bridge, however faithfully it was made, and an
+        adapter that reported one as a mount is caught here rather than
+        believed.
+        """
+        if result.status != "ready":
+            return result
+        mount_path = spec.mount_path or (spec.bridge.mount_path if spec.bridge else None)
+        if result.capabilities != [LOCAL_BRIDGE_MOUNT]:
+            return not_ready(
+                spec,
+                LOCAL_BRIDGE_NOT_A_MOUNT,
+                f"a local bridge was reported ready with capabilities "
+                f"{result.capabilities!r}; only {LOCAL_BRIDGE_MOUNT!r} is a bridge, and "
+                "a copy is never reported as a mount",
+            )
+        if not mount_path or not path_is_mountpoint(self, mount_path):
+            return not_ready(
+                spec,
+                LOCAL_BRIDGE_NOT_A_MOUNT,
+                f"{mount_path or '?'} is not a mountpoint in the sandbox: whatever is "
+                "there is a copy, not the person's folder, and is not reported as a mount",
+            )
+        return result
+
+    def _prepare_mount(self, spec: ContentAttachmentSpec, *, reconcile: bool) -> PreparedAttachment:
+        """A `mount` attachment. Nothing mounts by default."""
+        del reconcile
+        return unsupported(spec, self.provider_name)
+
+    def _prepare_environment(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        """A content the sandbox's Environment brings, at its declared path.
+
+        Where the platform mounts it — Datalayer, whose Operator makes the
+        mount before the pod starts — the manifest carries no `materialize`
+        entries and the answer is the mount's. Everywhere else the entries
+        say how the declared path is honoured: a git checkout at its pinned
+        revision, or python access to a bucket. The path itself is the one
+        the Environment declared, on every provider.
+        """
+        if spec.materialize:
+            return self._prepare_materialize(spec, reconcile=reconcile)
+        return self._prepare_mount(spec, reconcile=reconcile)
+
+    def _prepare_local_bridge(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        """A person's own folder bridged in. Needs a driver; none by default."""
+        del reconcile
+        return unsupported(spec, self.provider_name)
+
+    def _prepare_materialize(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        """Fetch the files inside the sandbox, where the provider allows it."""
+        if not self.content_capabilities().materialize:
+            return unsupported(spec, self.provider_name)
+        return materialize(self, spec, reconcile=reconcile)
+
+    def _forget_mount(self, spec: ContentAttachmentSpec) -> None:
+        """Forget a mount request. Adapters that record mounts override this."""
+        del spec
+
+    def _release_local_bridge(self, spec: ContentAttachmentSpec) -> None:
+        """Take a local bridge down. Adapters that mount one themselves override this."""
+        del spec
 
     def interrupt(self) -> bool:
         """Request interruption of the currently running code.
@@ -501,6 +727,52 @@ class Sandbox(ABC):
         """Async context manager exit."""
         await self.stop_async()
 
+    # ------------------------------------------------------------------
+    # The converged lifecycle vocabulary. See `code_sandboxes.lifecycle`:
+    # one set of verbs, spelled the same way here and on the Runtimes API, so a
+    # caller written against either works with both.
+    # ------------------------------------------------------------------
+
+    #: Verbs this variant can actually do. A provider that can pause says so by
+    #: listing it; the base answers honestly for everyone else.
+    LIFECYCLE_SUPPORTED: tuple[str, ...] = (
+        "create",
+        "start",
+        "stop",
+        "execute",
+    )
+
+    def supports(self, operation: str) -> bool:
+        """Whether this sandbox can do a lifecycle verb at all.
+
+        Asked before committing rather than discovered by an exception:
+        "pause this and come back tomorrow" is a plan a caller makes, and it
+        deserves an answer before it makes it.
+        """
+        return operation in type(self).LIFECYCLE_SUPPORTED
+
+    def pause(self, **kwargs: Any) -> None:
+        """Suspend the sandbox, keeping its state.
+
+        Providers that can do it override this. The rest refuse in the same
+        words rather than each inventing their own failure.
+        """
+        from code_sandboxes.lifecycle import unsupported
+
+        raise unsupported("pause", getattr(self, "variant", "") or "")
+
+    def resume(self, **kwargs: Any) -> None:
+        """Bring a paused sandbox back with its state intact."""
+        from code_sandboxes.lifecycle import unsupported
+
+        raise unsupported("resume", getattr(self, "variant", "") or "")
+
+    def snapshot(self, name: str, **kwargs: Any) -> Any:
+        """Capture the sandbox's state under a name, without ending it."""
+        from code_sandboxes.lifecycle import unsupported
+
+        raise unsupported("snapshot", getattr(self, "variant", "") or "")
+
     @abstractmethod
     def start(self) -> None:
         """Start the sandbox.
@@ -701,7 +973,49 @@ class Sandbox(ABC):
             from .exceptions import VariableNotFoundError
 
             raise VariableNotFoundError(name)
-        return self._get_internal_variable("__result__", context)
+        try:
+            return self._get_internal_variable("__result__", context)
+        except NotImplementedError:
+            # A provider that cannot read a variable out of its session —
+            # Modal — can still *print* one. Every read in the filesystem and
+            # command layers came through here, so on such a provider every
+            # `read_file`, `list_files` and `run_command` raised, and the live
+            # matrix's Modal row could never have passed. Stdout is the one
+            # channel every provider returns; the value travels as JSON
+            # between markers so the kernel's own output cannot be mistaken
+            # for it.
+            return self._read_variable_via_stdout("__result__", context)
+
+    _STDOUT_START = "<<code-sandboxes:variable>>"
+    _STDOUT_END = "<</code-sandboxes:variable>>"
+
+    def _read_variable_via_stdout(self, name: str, context: Context | None = None) -> Any:
+        """Read `name` by having the kernel print it, framed, as JSON.
+
+        Values that JSON cannot carry (bytes, arbitrary objects) are returned
+        as their `repr`, which is what the printing fallback can honestly
+        offer; callers that need bytes across this path encode them first,
+        as the filesystem layer already does.
+        """
+        import json as _json
+
+        code = (
+            "import json as __sb_json__\n"
+            "try:\n"
+            f"    __sb_value__ = __sb_json__.dumps({name})\n"
+            "except TypeError:\n"
+            f"    __sb_value__ = __sb_json__.dumps(repr({name}))\n"
+            f"print({self._STDOUT_START!r} + __sb_value__ + {self._STDOUT_END!r})\n"
+        )
+        execution = self.run_code(code, context=context)
+        printed = "".join(message.line for message in execution.logs.stdout)
+        start = printed.rfind(self._STDOUT_START)
+        end = printed.rfind(self._STDOUT_END)
+        if start < 0 or end < start:
+            from .exceptions import VariableNotFoundError
+
+            raise VariableNotFoundError(name)
+        return _json.loads(printed[start + len(self._STDOUT_START):end])
 
     def set_variable(self, name: str, value: Any, context: Context | None = None) -> None:
         """Set a variable in the sandbox.

@@ -30,9 +30,7 @@ def client() -> CodeSandboxClient:
     sandbox.close()
 
 
-def test_a_file_written_through_the_client_is_read_back_through_it(
-    client, tmp_path: Path
-) -> None:
+def test_a_file_written_through_the_client_is_read_back_through_it(client, tmp_path: Path) -> None:
     target = tmp_path / "notes.txt"
     client.write_file(str(target), "hello from the sandbox\n")
 
@@ -69,9 +67,7 @@ def test_one_entry_can_be_asked_about_on_its_own(client, tmp_path: Path) -> None
     assert info.name == "report.csv"
 
 
-def test_a_path_that_names_nothing_is_an_error_not_an_empty_answer(
-    client, tmp_path: Path
-) -> None:
+def test_a_path_that_names_nothing_is_an_error_not_an_empty_answer(client, tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         client.stat_file(str(tmp_path / "absent.txt"))
     with pytest.raises(FileNotFoundError):
@@ -97,9 +93,7 @@ def test_an_empty_file_streams_as_nothing(client, tmp_path: Path) -> None:
     assert list(client.stream_file(str(target))) == []
 
 
-def test_a_directory_is_made_and_removed_through_the_client(
-    client, tmp_path: Path
-) -> None:
+def test_a_directory_is_made_and_removed_through_the_client(client, tmp_path: Path) -> None:
     folder = tmp_path / "scratch"
     client.make_directory(str(folder))
     assert folder.is_dir()

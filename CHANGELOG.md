@@ -8,6 +8,44 @@
 
 ## Unreleased
 
+- `provider_catalog` takes a `names` argument, so a caller can describe the
+  providers it serves and pay for only those. Added under 1.3.1 without a
+  version bump, which is what broke the operator: its image installs this
+  package unpinned, PyPI's newest was 1.3.0, and the two-argument call landed
+  on a one-argument function — `TypeError: provider_catalog() takes from 0 to 1 positional arguments but 2 were given`, and `datalayer envs ls` answered 500.
+  A new public parameter is a feature; released as 1.4.0 so a dependant can ask
+  for it.
+
+- `CodeExecutionOutcome` now carries `outputs`: the rich results as Jupyter
+  outputs, with their mime bundles intact. It called itself a faithful superset
+  of the raw `ExecutionResult` and was not — every representation but
+  `text/plain` was dropped on the way through, so a matplotlib figure reached
+  its callers as the string `<Figure size 640x480 with 1 Axes>` and anything
+  wanting to draw it had nothing to draw. `results` is unchanged, for callers
+  that only print.
+
+- Exported the lifecycle vocabulary from the package root, so a consumer writes
+  `from code_sandboxes import SandboxLifecycle` rather than reaching into
+  `code_sandboxes.lifecycle` — the import path is the part that cannot be
+  changed afterwards, which is why it moved before anything depended on it.
+
+  The vocabulary gained `update` (the Runtimes API's `PUT`) and split in two.
+  `SandboxLifecycle` is one sandbox — `start`, `stop`, `pause`, `resume`,
+  `snapshot`, `run_code`; `SandboxManagerLifecycle` is whoever hands them out —
+  `create`, `list`, `get`, `update`. They were one protocol that quietly
+  disagreed with `LIFECYCLE_OPERATIONS`, because `Sandbox.create` is a
+  classmethod and a client's `create` is not; `INSTANCE_OPERATIONS` and
+  `MANAGER_OPERATIONS` now say which verb belongs to which shape, and a test
+  holds them to covering every verb exactly once.
+
+  It also gained the URL builders — `runtimes_url`, `runtime_url`,
+  `runtime_pause_url`, `runtime_resume_url`, `sandbox_snapshots_url`,
+  `sandbox_snapshot_url`, `runtime_checkpoints_url` — so every Python caller of
+  the Runtimes API builds a path from one place instead of its own f-string.
+  `snapshot` is recorded against `POST /sandbox-snapshots`, which is the route
+  that exists; it had been documented as a sub-path of the runtime, which was
+  not.
+
 - Numbered the prompt's examples, and made one runnable by its number:
   `:examples` lists them `1.`, `2.`, … and `:examples:2` prints the second and
   then executes it, for a reader who wants the answer rather than the paste.

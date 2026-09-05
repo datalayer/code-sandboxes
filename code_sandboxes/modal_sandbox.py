@@ -26,6 +26,19 @@ import uuid
 from typing import Any
 
 from .base import Sandbox
+from .contents import (
+    CREDENTIAL_DELIVERY_UNSUPPORTED,
+    FILESYSTEM_PRIMITIVES,
+    ContentAttachmentSpec,
+    ContentCapabilities,
+    ContentManifest,
+    CreationTimeMounts,
+    PreparedAttachment,
+    environment_features,
+    local_bridge_capability,
+    prepare_local_bridge,
+    stop_bridge_mount,
+)
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
 from .jupyter_ingress import preparation_command, resolved_options, websocket_url
 from .models import (
@@ -157,6 +170,7 @@ class ModalSandbox(Sandbox):
         pip_packages: list[str] | None = None,
         python_version: str = DEFAULT_MODAL_PYTHON_VERSION,
         python_executable: str = "python",
+        features: list[str] | None = None,
         **kwargs,
     ):
         super().__init__(config)
@@ -165,12 +179,77 @@ class ModalSandbox(Sandbox):
         self._pip_packages = pip_packages or []
         self._python_version = python_version
         self._python_executable = python_executable
+        #: What the environment this sandbox runs in is known to allow, when
+        #: the caller passed it with the rest of the environment's metadata;
+        #: otherwise looked up by name in `list_environments()`.
+        self._features = list(features) if features is not None else None
         self._app = None
         self._sandbox = None
         self._sandbox_id = str(uuid.uuid4())
         self._execution_count = 0
         self._jupyter_endpoint: JupyterServerEndpoint | None = None
+        #: Volumes to mount, which Modal takes only when the sandbox is
+        #: created: `Sandbox.create(volumes={path: Volume.from_name(...)})`.
+        self._volume_mounts = CreationTimeMounts()
         self._extra_kwargs = kwargs
+
+    # -- Contents attachments ---------------------------------------------
+
+    def content_capabilities(self) -> ContentCapabilities:
+        # Modal CAN mount a bucket — `CloudBucketMount` — but only from a
+        # Modal secret holding the bucket's credentials, which would mean a
+        # credential leaving Contents for the provider. Refused, so it stays
+        # False here and a bucket mount is answered with why.
+        return ContentCapabilities(
+            provider="modal",
+            mount=True,
+            bucket_mount=False,
+            materialize=True,
+            client=True,
+            local_bridge_mount=local_bridge_capability(self._environment_features()),
+            filesystem_primitives=list(FILESYSTEM_PRIMITIVES),
+        )
+
+    def configure_contents(self, manifest: ContentManifest) -> None:
+        super().configure_contents(manifest)
+        self._volume_mounts.request_all(manifest)
+
+    def _prepare_mount(self, spec: ContentAttachmentSpec, *, reconcile: bool) -> PreparedAttachment:
+        del reconcile
+        return self._volume_mounts.prepare(
+            self, spec, provider="modal", bucket_code=CREDENTIAL_DELIVERY_UNSUPPORTED
+        )
+
+    def _forget_mount(self, spec: ContentAttachmentSpec) -> None:
+        self._volume_mounts.forget(spec)
+
+    def _environment_features(self) -> list[str]:
+        """The features of the environment this sandbox was created with."""
+        return environment_features(
+            type(self).list_environments(), self.config.environment, self._features
+        )
+
+    def _prepare_local_bridge(
+        self, spec: ContentAttachmentSpec, *, reconcile: bool
+    ) -> PreparedAttachment:
+        """Bridge a person's folder in, where the ENVIRONMENT can run the filesystem.
+
+        Per environment, never per provider: only an environment advertising
+        `fuse` starts the bridge mount inside the sandbox, and it is ready
+        only once the mount says it is connected. Everywhere else the answer
+        is a refusal that offers Synchronize — a copy, called a copy.
+        """
+        return prepare_local_bridge(
+            self,
+            spec,
+            provider="modal",
+            environment=self.config.environment,
+            features=self._environment_features(),
+            reconcile=reconcile,
+        )
+
+    def _release_local_bridge(self, spec: ContentAttachmentSpec) -> None:
+        stop_bridge_mount(self, spec)
 
     def prepare_jupyter_server(
         self, options: JupyterServerOptions | None = None
@@ -210,6 +289,12 @@ class ModalSandbox(Sandbox):
         are the two shapes worth naming — a plain container, and one with a
         GPU attached — so that choosing an environment is choosing between
         two named things, as it is with every other provider.
+
+        `features` is what each environment is known to allow beyond running
+        code. Neither declares `fuse`: a Modal sandbox does not expose
+        `/dev/fuse`, so no local folder is bridged into either as a
+        filesystem. An image built to expose FUSE with fusepy preinstalled
+        would carry it.
         """
         return [
             SandboxEnvironment(
@@ -219,7 +304,7 @@ class ModalSandbox(Sandbox):
                 owner="modal",
                 visibility="cloud",
                 burning_rate=0.0,
-                metadata={"variant": "modal", "gpu": None},
+                metadata={"variant": "modal", "gpu": None, "features": []},
             ),
             SandboxEnvironment(
                 name="modal-gpu",
@@ -231,7 +316,7 @@ class ModalSandbox(Sandbox):
                 gpu="T4",
                 gpu_count=1,
                 gpu_memory=gpu_memory("T4"),
-                metadata={"variant": "modal", "gpu": "T4"},
+                metadata={"variant": "modal", "gpu": "T4", "features": []},
             ),
         ]
 
@@ -267,8 +352,16 @@ class ModalSandbox(Sandbox):
             create_kwargs["gpu"] = _resolve_modal_gpu(self.config.gpu, modal)
         if secrets:
             create_kwargs["secrets"] = secrets
+        if self._volume_mounts.requested:
+            # `from_name` never creates: a volume Contents named that Modal
+            # does not have is Modal's error to raise, not ours to paper over.
+            create_kwargs["volumes"] = {
+                mount_path: modal.Volume.from_name(volume_id)
+                for mount_path, volume_id in self._volume_mounts.requested.items()
+            }
 
         self._sandbox = modal.Sandbox.create(**create_kwargs)
+        self._volume_mounts.created()
         self._start_driver()
 
         self._default_context = self.create_context("default")
@@ -374,6 +467,7 @@ class ModalSandbox(Sandbox):
             self._sandbox = None
         self._app = None
         self._jupyter_endpoint = None
+        self._volume_mounts.stopped()
         self._started = False
         if self._info:
             self._info.status = SandboxStatus.STOPPED
