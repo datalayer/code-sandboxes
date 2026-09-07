@@ -19,7 +19,8 @@ import logging
 import time
 import uuid
 
-from .base import Sandbox
+from .base import Sandbox, marks_execution
+from .jupyter_ingress import interrupt_kernel_client
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
 from .google_colab import GoogleColabKernelClient, parse_google_colab_channels_url
 from .interfaces import ISandboxClient
@@ -140,6 +141,17 @@ class GoogleColabSandbox(Sandbox):
         """Keep tool calling on the client side for Colab sandboxes."""
         return
 
+    def _do_interrupt(self) -> bool:
+        """Interrupt the Colab kernel, through the client that runs it.
+
+        There was no override here, so the base class's default ran: it sets
+        a flag, returns `True`, and stops nothing. This variant *does* read
+        that flag — but only after the fact, to label a result as
+        `interrupted`. Labelling a run is not stopping one: the notebook kept
+        executing, and the caller had been told the interrupt was delivered.
+        """
+        return interrupt_kernel_client(self._client, variant="Colab")
+
     def stop(self) -> None:
         if not self._started:
             return
@@ -154,6 +166,7 @@ class GoogleColabSandbox(Sandbox):
         if self._info:
             self._info.status = SandboxStatus.STOPPED
 
+    @marks_execution
     def run_code(  # noqa: C901
         self,
         code: str,

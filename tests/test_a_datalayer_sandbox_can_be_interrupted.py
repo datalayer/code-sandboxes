@@ -4,13 +4,16 @@
 """A sandbox that cannot be interrupted, and said it had been.
 
 `Sandbox.interrupt` sets a flag and calls `_do_interrupt`, whose default
-"simply sets the interrupt flag" and returns `True`. A variant is entitled to
-that default only if it *reads* the flag — `google_colab` and `kaggle` poll
-`_interrupt_requested` and interrupt cooperatively. `datalayer_sandbox` did
-neither: no override, no read. So on a Datalayer runtime the interrupt was
-delivered nowhere and reported success, and everything above believed it:
-`agent_runtimes`' `interrupt_kernel` delegates straight to it, and so does
-the interrupt `execute_cell` registers for `tasks/cancel`.
+"simply sets the interrupt flag" and returns `True`. `datalayer_sandbox` had
+no override, so on a Datalayer runtime the interrupt was delivered nowhere
+and reported success, and everything above believed it: `agent_runtimes`'
+`interrupt_kernel` delegates straight to it, and so does the interrupt
+`execute_cell` registers for `tasks/cancel`.
+
+This variant, in detail. The invariants that hold for the whole package —
+that no variant inherits the lying default, and that each marks the window
+its interrupt is reachable through — are in
+`test_every_variant_has_a_real_interrupt.py`.
 
 Measured on prod1 on 2026-09-07: a cell looping for two minutes, cancelled
 ten seconds in. `tasks/cancel` and `tasks/get` both answered `cancelled`,
@@ -51,50 +54,11 @@ def _sandbox(runtime):
     return made
 
 
-class TestEveryVariantCanBeInterrupted:
+class TestItHasOneAtAll:
     def test_datalayer_overrides_it_like_the_others(self):
         """The assertion that would have caught this: it is about the class,
         not about a call, because the default *succeeds* silently."""
         assert "_do_interrupt" in DatalayerSandbox.__dict__
-
-    def test_no_variant_quietly_acknowledges_an_interrupt(self):
-        """Held across the package, so the next variant added without one
-        fails here rather than on a runtime somebody is paying for.
-
-        A variant may either override `_do_interrupt` or consult the flag the
-        base sets; doing neither means `interrupt()` returns True having done
-        nothing. `docker` and `monty` do neither today — pinned rather than
-        hidden, so the set cannot grow silently and shrinks visibly when one
-        is fixed.
-        """
-        import importlib
-        import inspect
-        import pkgutil
-
-        import code_sandboxes
-        from code_sandboxes.base import Sandbox
-
-        deaf = set()
-        for module in pkgutil.iter_modules(code_sandboxes.__path__):
-            if not module.name.endswith("_sandbox"):
-                continue
-            loaded = importlib.import_module(f"code_sandboxes.{module.name}")
-            reads_flag = "_interrupt_requested" in inspect.getsource(loaded)
-            for name in dir(loaded):
-                value = getattr(loaded, name)
-                if (
-                    isinstance(value, type)
-                    and issubclass(value, Sandbox)
-                    and value is not Sandbox
-                    and value.__module__ == loaded.__name__
-                    and "_do_interrupt" not in value.__dict__
-                    and not reads_flag
-                ):
-                    deaf.add(f"{module.name}.{name}")
-
-        known = {"docker_sandbox.DockerSandbox", "monty_sandbox.MontySandbox"}
-        assert deaf - known == set(), f"new variants cannot be interrupted: {deaf - known}"
-        assert known - deaf == set(), f"fixed — drop from the pinned set: {known - deaf}"
 
 
 class TestWhatItDoes:
@@ -208,49 +172,3 @@ class TestTheInterruptIsReached:
 
         assert seen == [True], "the sandbox ran code without saying it was running"
         assert not sandbox._executing_event.is_set(), "the flag outlived the execution"
-
-    def test_every_variant_that_can_be_interrupted_says_when_it_runs(self):
-        """The pair, held together: implementing `_do_interrupt` while never
-        setting the event is a fix that changes nothing, and that is the
-        mistake this file exists to stop repeating."""
-        import importlib
-        import inspect
-        import pkgutil
-
-        import code_sandboxes
-        from code_sandboxes.base import Sandbox
-
-        mute = set()
-        for module in pkgutil.iter_modules(code_sandboxes.__path__):
-            if not module.name.endswith("_sandbox"):
-                continue
-            loaded = importlib.import_module(f"code_sandboxes.{module.name}")
-            source = inspect.getsource(loaded)
-            for name in dir(loaded):
-                value = getattr(loaded, name)
-                if (
-                    isinstance(value, type)
-                    and issubclass(value, Sandbox)
-                    and value is not Sandbox
-                    and value.__module__ == loaded.__name__
-                    and "_do_interrupt" in value.__dict__
-                    and "_executing_event.set()" not in source
-                ):
-                    mute.add(f"{module.name}.{name}")
-
-        # Not exemptions — the same unreachable interrupt, pinned. The gate in
-        # `Sandbox.interrupt` is held for every variant, so these five ask a
-        # provider to stop work and are refused before they can: each one has
-        # a written interrupt that nothing can call. Left as found rather than
-        # fixed blind, because none of them can be measured from here.
-        known = {
-            "cloudflare_sandbox.CloudflareSandbox",
-            "coreweave_sandbox.CoreWeaveSandbox",
-            "daytona_sandbox.DaytonaSandbox",
-            "e2b_sandbox.E2BSandbox",
-            "modal_sandbox.ModalSandbox",
-        }
-        assert mute - known == set(), (
-            f"these implement an interrupt nothing can reach: {mute - known}"
-        )
-        assert known - mute == set(), f"reachable now — drop from the pinned set: {known - mute}"

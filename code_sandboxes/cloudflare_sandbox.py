@@ -43,7 +43,7 @@ from collections.abc import Iterator
 from typing import Any
 from urllib.parse import quote
 
-from .base import Sandbox
+from .base import Sandbox, marks_execution
 from .exceptions import (
     SandboxConfigurationError,
     SandboxConnectionError,
@@ -370,6 +370,7 @@ class CloudflareSandbox(Sandbox):
         except Exception:
             return False
 
+    @marks_execution
     def run_code(
         self,
         code: str,

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import functools
 import threading
 import uuid
 from abc import ABC, abstractmethod
@@ -80,6 +81,49 @@ def generate_sandbox_name() -> str:
 #: provides it; the previous default, `python-cpu-env`, does not exist on
 #: current deployments.
 DEFAULT_ENVIRONMENT = "ai-agents-env"
+
+
+def marks_execution(run):
+    """Say, for the duration of the call, that this sandbox is running code.
+
+    `Sandbox.interrupt` refuses before it delegates::
+
+        if not self._executing_event.is_set():
+            return False
+        self._interrupt_requested.set()
+        return self._do_interrupt()
+
+    So a variant that never sets the event has an interrupt nothing can
+    reach, and an `is_executing` that is always False — every status and
+    every cancel decision above it silently wrong. `DatalayerSandbox` was in
+    exactly that state, and implementing `_do_interrupt` for it changed the
+    measurement on prod1 from 60.8 seconds to 60.5: a fix that reads as
+    complete and measures as nothing.
+
+    A decorator rather than a line in each body, because the window has to
+    close on *every* path out — including the several early `return
+    ExecutionResult(...)`s that each adapter uses for an infrastructure
+    failure — and a `finally` here cannot be forgotten in one branch of one
+    variant. It also gives the invariant something to test that is not a
+    grep for a line of source.
+
+    `_interrupt_requested` is cleared on the way in, so a stale request from
+    a previous call cannot stop this one, and deliberately *not* on the way
+    out: the cooperative variants read it after the run to report that the
+    execution was interrupted.
+    """
+
+    @functools.wraps(run)
+    def marked(self, *args, **kwargs):
+        self._interrupt_requested.clear()
+        self._executing_event.set()
+        try:
+            return run(self, *args, **kwargs)
+        finally:
+            self._executing_event.clear()
+
+    marked._marks_execution = True
+    return marked
 
 
 class Sandbox(ABC):

@@ -24,7 +24,7 @@ import uuid
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from typing import Any, Optional
 
-from .base import Sandbox
+from .base import Sandbox, marks_execution
 from .exceptions import SandboxNotStartedError
 from .models import (
     CodeError,
@@ -139,6 +139,7 @@ class EvalSandbox(Sandbox):
             self._execution_count[context.id] = 0
         return context
 
+    @marks_execution
     def run_code(
         self,
         code: str,

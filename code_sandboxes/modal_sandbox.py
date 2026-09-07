@@ -25,7 +25,7 @@ import time
 import uuid
 from typing import Any
 
-from .base import Sandbox
+from .base import Sandbox, marks_execution
 from .contents import (
     CREDENTIAL_DELIVERY_UNSUPPORTED,
     FILESYSTEM_PRIMITIVES,
@@ -472,6 +472,7 @@ class ModalSandbox(Sandbox):
         if self._info:
             self._info.status = SandboxStatus.STOPPED
 
+    @marks_execution
     def run_code(  # noqa: C901
         self,
         code: str,

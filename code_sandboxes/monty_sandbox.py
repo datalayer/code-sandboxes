@@ -25,7 +25,7 @@ import time
 import uuid
 from typing import Any
 
-from .base import Sandbox
+from .base import Sandbox, marks_execution
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
 from .models import (
     CodeError,
@@ -126,6 +126,25 @@ class MontySandbox(Sandbox):
         )
         self._started = True
 
+    def _do_interrupt(self) -> bool:
+        """Monty's REPL takes no interrupt; a timeout is the only stop.
+
+        `False` is the honest answer, and it is the point of writing this at
+        all. Without an override the base class's default ran — set a flag,
+        return `True` — so a caller that cancelled a long run here was told
+        the interrupt had been delivered while the interpreter went on.
+        Answering `False` lets the caller say "this could not be stopped"
+        instead of "this was stopped".
+
+        `MontyRepl.feed_run` executes the whole snippet in one blocking call.
+        It takes no limits (only `Monty.run` does) and its `print_callback`
+        is a `CollectStreams` object the interpreter writes into rather than
+        a callable it invokes, so there is no point at which a flag could be
+        read. If a later Monty exposes a step or callback hook, this is where
+        a cooperative interrupt goes.
+        """
+        return False
+
     def stop(self) -> None:
         if not self._started:
             return
@@ -142,6 +161,7 @@ class MontySandbox(Sandbox):
             return value.decode("utf-8", errors="replace")
         return str(value)
 
+    @marks_execution
     def run_code(  # noqa: C901
         self,
         code: str,

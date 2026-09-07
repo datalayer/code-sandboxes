@@ -15,9 +15,12 @@ import tempfile
 import time
 import uuid
 
+import logging
+
 import requests
 
-from .base import Sandbox
+from .base import Sandbox, marks_execution
+from .jupyter_ingress import interrupt_kernel_client
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
 from .interfaces import ISandboxClient
 from .models import (
@@ -33,6 +36,8 @@ from .models import (
     SandboxInfo,
     SandboxStatus,
 )
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_IMAGE = "code-sandboxes-jupyter:latest"
 DEFAULT_PORT = 8888
@@ -194,6 +199,18 @@ class DockerSandbox(Sandbox):
         """The underlying kernel client for this sandbox, if started."""
         return self._client
 
+    def _do_interrupt(self) -> bool:
+        """Interrupt the container's kernel, through the client that runs it.
+
+        This variant runs a Jupyter Server in a container and executes
+        through `jupyter-kernel-client`, so it can be interrupted — and it
+        had no `_do_interrupt` at all, so the base class's default ran: sets
+        a flag, returns `True`, stops nothing. A caller that cancelled a long
+        cell here was told the interrupt had been delivered while the
+        container went on computing.
+        """
+        return interrupt_kernel_client(self._client, variant="container's")
+
     def stop(self) -> None:
         if not self._started:
             return
@@ -225,6 +242,7 @@ class DockerSandbox(Sandbox):
         if self._info:
             self._info.status = SandboxStatus.STOPPED
 
+    @marks_execution
     def run_code(
         self,
         code: str,

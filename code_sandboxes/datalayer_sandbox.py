@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Optional
 if TYPE_CHECKING:
     from .filesystem import SandboxFileHandle
 
-from .base import Sandbox
+from .base import Sandbox, marks_execution
 from .contents import (
     FILESYSTEM_PRIMITIVES,
     LOCAL_BRIDGE_MOUNT,
@@ -761,6 +761,7 @@ class DatalayerSandbox(Sandbox):
             return None
         return 0
 
+    @marks_execution
     def run_code(
         self,
         code: str,
@@ -801,17 +802,9 @@ class DatalayerSandbox(Sandbox):
 
         started_at = time.time()
 
-        # **Say that code is running, because `interrupt()` will not act
-        # unless it can see that.** `Sandbox.interrupt` returns `False`
-        # before reaching `_do_interrupt` when `_executing_event` is clear,
-        # and this variant never set it — so `is_executing` was always False,
-        # every interrupt was refused at the door, and the refusal was
-        # reported as "no code was running" to a caller watching a cell run.
-        # Implementing `_do_interrupt` alone did not fix cancellation for
-        # exactly this reason: nothing ever called it.
+        # The execution window is `@marks_execution`'s, not this body's — see
+        # its docstring for why the interrupt is refused without one.
         execution_timeout = timeout or self.config.timeout
-        self._interrupt_requested.clear()
-        self._executing_event.set()
         try:
             # Set environment variables if provided
             if envs:
@@ -831,8 +824,6 @@ class DatalayerSandbox(Sandbox):
                 started_at=started_at,
                 completed_at=time.time(),
             )
-        finally:
-            self._executing_event.clear()
 
         # Parse the response
         stdout_messages: list[OutputMessage] = []

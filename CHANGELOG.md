@@ -8,6 +8,35 @@
 
 ## Unreleased
 
+- **Every variant has a real interrupt now, and can be reached to give it.**
+  `Sandbox.interrupt` is two gates — `_executing_event` must be set, then
+  `_do_interrupt` must answer — and seven variants failed one of them, each in
+  a way that looked like success:
+
+  - `docker`, `google_colab`, `kaggle` and `monty` had no `_do_interrupt`, so
+    the base default ran: set a flag, return `True`, stop nothing. `True` means
+    "the interrupt was delivered", and nothing had been. `google_colab` and
+    `kaggle` did read the flag, but only *after* the run, to label a finished
+    result as `interrupted` — labelling a run is not stopping one.
+  - `cloudflare`, `coreweave`, `daytona`, `e2b` and `modal` answered honestly
+    (`False`: this provider takes no interrupt) but never marked their execution
+    window, so `interrupt()` returned at the first gate and their answer was
+    never reached — and `is_executing` was always False, which every status
+    above them believed.
+
+  Docker, Colab and Kaggle now interrupt for real, delegating to the
+  `JupyterKernelClient` that already knows how to authenticate to their server
+  rather than rebuilding the request. Monty answers `False` with its reason:
+  `feed_run` executes a snippet in one blocking call with no limits and no
+  callable hook, so there is no point at which a flag could be read.
+
+  The execution window is `@marks_execution` on `run_code` rather than a line
+  in each body, because it has to close on *every* path out — including the
+  early `return ExecutionResult(...)` each adapter uses for an infrastructure
+  failure — and a `finally` in the decorator cannot be forgotten in one branch
+  of one variant. Both invariants are asserted across the package with no
+  pinned exceptions left.
+
 - A Datalayer sandbox says when it is running code, so an interrupt can reach
   it. `Sandbox.interrupt` refuses before it delegates — `if not
   self._executing_event.is_set(): return False` — and `run_code` never set that

@@ -28,7 +28,7 @@ import logging
 import time
 from typing import Any
 
-from .base import Sandbox
+from .base import Sandbox, marks_execution
 from .contents import (
     FILESYSTEM_PRIMITIVES,
     ContentAttachmentSpec,
@@ -471,6 +471,7 @@ class E2BSandbox(Sandbox):
             self._contexts[context.id] = existing
         return existing
 
+    @marks_execution
     def run_code(
         self,
         code: str,

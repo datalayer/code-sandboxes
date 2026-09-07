@@ -29,7 +29,7 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 
 import requests
 
-from .base import Sandbox
+from .base import Sandbox, marks_execution
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
 from .interfaces import ISandboxClient
 from .models import (
@@ -572,6 +572,7 @@ class JupyterServerSandbox(Sandbox):
             logger.warning(f"Failed to interrupt Jupyter kernel: {e}")
             return False
 
+    @marks_execution
     def run_code(  # noqa: C901
         self,
         code: str,

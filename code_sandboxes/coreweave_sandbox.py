@@ -31,7 +31,7 @@ import math
 import time
 from typing import Any
 
-from .base import Sandbox
+from .base import Sandbox, marks_execution
 from .exceptions import (
     SandboxConfigurationError,
     SandboxExecutionError,
@@ -521,6 +521,7 @@ class CoreWeaveSandbox(Sandbox):
         if self._info:
             self._info.status = SandboxStatus.STOPPED
 
+    @marks_execution
     def run_code(
         self,
         code: str,

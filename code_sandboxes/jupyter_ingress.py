@@ -6,10 +6,14 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 import shlex
+from typing import Any
 
 from .models import JupyterServerOptions
+
+logger = logging.getLogger(__name__)
 
 
 def resolved_options(options: JupyterServerOptions | None) -> JupyterServerOptions:
@@ -72,3 +76,29 @@ def websocket_url(http_url: str) -> str:
     if http_url.startswith("http://"):
         return "ws://" + http_url.removeprefix("http://")
     raise ValueError(f"Provider returned a non-HTTP ingress URL: {http_url!r}")
+
+
+def interrupt_kernel_client(client: Any, *, variant: str) -> bool:
+    """Interrupt the kernel a `JupyterKernelClient` is connected to.
+
+    Every Jupyter-backed variant reaches its kernel through a client that
+    already knows how to authenticate to that server — Colab's proxy token
+    header and query parameter, Kaggle's signed proxy URL, Docker's Jupyter
+    token. `JupyterKernelClient.interrupt` uses exactly that, so this
+    delegates rather than rebuilding the request: a second copy of the auth
+    is a second thing to keep in step with the first.
+
+    The client's `interrupt` answers `None` and raises when it fails, so this
+    turns it into the boolean `_do_interrupt` owes its caller. It never
+    raises: a cancel that could not reach the kernel is a cancel that failed,
+    and the caller decides what that means.
+    """
+    if client is None:
+        return False
+    try:
+        client.interrupt()
+    except Exception as error:  # noqa: BLE001 - a failed interrupt is an answer
+        logger.warning("The %s kernel could not be interrupted: %s", variant, error)
+        return False
+    return True
+
