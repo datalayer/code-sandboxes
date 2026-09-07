@@ -36,6 +36,10 @@ test:
 live-matrix:
 	CODE_SANDBOXES_LIVE=1 pytest -q -m live tests/test_contents_live_matrix.py
 
+## Lose a sandbox on each live provider and check the harness says so.
+kill-relaunch:
+	CODE_SANDBOXES_LIVE=1 pytest -q -m live tests/test_the_kill_relaunch_drill.py
+
 clean: ## clean
 	git clean -fdx
 
