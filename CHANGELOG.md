@@ -8,6 +8,26 @@
 
 ## Unreleased
 
+- `DatalayerSandbox` can be interrupted. It neither implemented `_do_interrupt`
+  nor read the flag the base class sets, so the default ran instead: it sets a
+  flag, returns `True`, and stops nothing. Everything above believed it —
+  `tasks/cancel` in the MCP gateway marks a task `cancelled` and calls the
+  interrupt `execute_cell` registered, which is this. Measured on prod1 on
+  2026-09-07: a two-minute cell cancelled ten seconds in answered `cancelled`
+  from both `tasks/cancel` and `tasks/get`, and the next `execute_code` on that
+  session took **60.8 seconds** and came back empty, where a free kernel answers
+  in about a second. The cell ran to completion on a runtime that went on being
+  billed. It now delegates to the runtime's own `sandbox_client` — the
+  jupyter-server client `run_code` already executes through, which interrupts
+  the kernel over the REST API — and answers whether the interrupt was
+  delivered, never raising: a cancel that cannot reach the kernel is a cancel
+  that failed, and the caller decides what that means.
+
+  `docker` and `monty` have the same hole and are pinned as known in
+  `tests/test_a_datalayer_sandbox_can_be_interrupted.py`, so the set cannot grow
+  quietly. (`google_colab` and `kaggle` are entitled to the default: they poll
+  `_interrupt_requested` and stop cooperatively.)
+
 - `provider_catalog` takes a `names` argument, so a caller can describe the
   providers it serves and pay for only those. Added under 1.3.1 without a
   version bump, which is what broke the operator: its image installs this

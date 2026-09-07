@@ -8,6 +8,7 @@ This sandbox uses the Datalayer platform for cloud-based code execution,
 providing full isolation and scalable compute resources.
 """
 
+import logging
 import time
 import uuid
 from collections.abc import Iterator
@@ -53,6 +54,9 @@ from .models import (
     SandboxStatus,
     SnapshotInfo,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _urls_for_run(run_url: str):
@@ -560,6 +564,45 @@ class DatalayerSandbox(Sandbox):
         self._started = False
         if self._info:
             self._info.status = SandboxStatus.STOPPED
+
+    def _do_interrupt(self) -> bool:
+        """Stop the code that is running, through the runtime's own client.
+
+        **This variant neither implemented it nor read the flag**, so the
+        base class's default ran instead: it sets a flag, returns `True`, and
+        stops nothing. (`google_colab` and `kaggle` are entitled to that
+        default — they poll `_interrupt_requested` and stop cooperatively.) Everything above believed it. `tasks/cancel` marks a
+        task `cancelled` and calls the interrupt registered by
+        `execute_cell`; the interrupt answered yes; the cell went on running
+        on a runtime that goes on being billed.
+
+        Measured on prod1 on 2026-09-07: a cell looping for two minutes,
+        cancelled ten seconds in, `tasks/cancel` and `tasks/get` both
+        answering `cancelled` — and the next `execute_code` on that session
+        took 60.8 seconds and came back empty, where a free kernel answers in
+        about a second.
+
+        A Datalayer runtime *is* a Jupyter server, and the runtime already
+        holds a client for it — the same one `run_code` executes through. So
+        this delegates rather than reaching for the ingress and the token
+        itself: one place knows how to talk to that kernel, and a second copy
+        here would be a second thing to keep in step with it.
+
+        Answers whether the interrupt was delivered, never raises: a cancel
+        that cannot reach the kernel is a cancel that failed, and the task
+        layer decides what to do about that.
+        """
+        client = getattr(self._runtime, "sandbox_client", None)
+        if client is None:
+            logger.warning(
+                "This sandbox has no runtime client, so nothing could be interrupted"
+            )
+            return False
+        try:
+            return bool(client.interrupt())
+        except Exception as error:  # noqa: BLE001 - a failed interrupt is an answer
+            logger.warning("The runtime's kernel could not be interrupted: %s", error)
+            return False
 
     def terminate(self) -> None:
         """Terminate the sandbox. Alias for stop()."""
