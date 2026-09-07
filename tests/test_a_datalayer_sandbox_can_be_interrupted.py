@@ -160,3 +160,97 @@ class TestTheChainReachesAKernel:
         from code_sandboxes.jupyter_server_sandbox import JupyterServerSandbox
 
         assert "_do_interrupt" in JupyterServerSandbox.__dict__
+
+class TestTheInterruptIsReached:
+    """`_do_interrupt` was necessary and not sufficient, which the first
+    measurement after deploying it said plainly: still 60.5 seconds.
+
+    `Sandbox.interrupt` refuses before it delegates::
+
+        if not self._executing_event.is_set():
+            return False
+        self._interrupt_requested.set()
+        return self._do_interrupt()
+
+    `DatalayerSandbox.run_code` never set that event, so `is_executing` was
+    always False and every interrupt was refused at the door — and reported
+    as "no code was running" to a caller watching a cell run. Two guards,
+    both needed: one that the door opens, one that what is behind it works.
+    """
+
+    def test_run_code_says_that_code_is_running(self):
+        import threading
+
+        from code_sandboxes.datalayer_sandbox import DatalayerSandbox
+
+        seen = []
+
+        class _Runtime:
+            sandbox_client = None
+
+            def execute(self, code, timeout=None):
+                seen.append(sandbox._executing_event.is_set())
+                raise RuntimeError("stop here; the flag is what is under test")
+
+        sandbox = DatalayerSandbox.__new__(DatalayerSandbox)
+        sandbox._started = True
+        sandbox._runtime = _Runtime()
+        sandbox._executing_event = threading.Event()
+        sandbox._interrupt_requested = threading.Event()
+        sandbox._connect = lambda: None
+        sandbox._sandbox_id = "sb_test"
+
+        class _Config:
+            timeout = 30
+
+        sandbox.config = _Config()
+        sandbox.run_code("print(1)")
+
+        assert seen == [True], "the sandbox ran code without saying it was running"
+        assert not sandbox._executing_event.is_set(), "the flag outlived the execution"
+
+    def test_every_variant_that_can_be_interrupted_says_when_it_runs(self):
+        """The pair, held together: implementing `_do_interrupt` while never
+        setting the event is a fix that changes nothing, and that is the
+        mistake this file exists to stop repeating."""
+        import importlib
+        import inspect
+        import pkgutil
+
+        import code_sandboxes
+        from code_sandboxes.base import Sandbox
+
+        mute = set()
+        for module in pkgutil.iter_modules(code_sandboxes.__path__):
+            if not module.name.endswith("_sandbox"):
+                continue
+            loaded = importlib.import_module(f"code_sandboxes.{module.name}")
+            source = inspect.getsource(loaded)
+            for name in dir(loaded):
+                value = getattr(loaded, name)
+                if (
+                    isinstance(value, type)
+                    and issubclass(value, Sandbox)
+                    and value is not Sandbox
+                    and value.__module__ == loaded.__name__
+                    and "_do_interrupt" in value.__dict__
+                    and "_executing_event.set()" not in source
+                ):
+                    mute.add(f"{module.name}.{name}")
+
+        # Not exemptions — the same unreachable interrupt, pinned. The gate in
+        # `Sandbox.interrupt` is held for every variant, so these five ask a
+        # provider to stop work and are refused before they can: each one has
+        # a written interrupt that nothing can call. Left as found rather than
+        # fixed blind, because none of them can be measured from here.
+        known = {
+            "cloudflare_sandbox.CloudflareSandbox",
+            "coreweave_sandbox.CoreWeaveSandbox",
+            "daytona_sandbox.DaytonaSandbox",
+            "e2b_sandbox.E2BSandbox",
+            "modal_sandbox.ModalSandbox",
+        }
+        assert mute - known == set(), (
+            f"these implement an interrupt nothing can reach: {mute - known}"
+        )
+        assert known - mute == set(), f"reachable now — drop from the pinned set: {known - mute}"

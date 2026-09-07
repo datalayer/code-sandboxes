@@ -801,14 +801,23 @@ class DatalayerSandbox(Sandbox):
 
         started_at = time.time()
 
-        # Set environment variables if provided
-        if envs:
-            env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
-            self._runtime.execute(env_code)
-
-        # Execute the code
+        # **Say that code is running, because `interrupt()` will not act
+        # unless it can see that.** `Sandbox.interrupt` returns `False`
+        # before reaching `_do_interrupt` when `_executing_event` is clear,
+        # and this variant never set it — so `is_executing` was always False,
+        # every interrupt was refused at the door, and the refusal was
+        # reported as "no code was running" to a caller watching a cell run.
+        # Implementing `_do_interrupt` alone did not fix cancellation for
+        # exactly this reason: nothing ever called it.
         execution_timeout = timeout or self.config.timeout
+        self._interrupt_requested.clear()
+        self._executing_event.set()
         try:
+            # Set environment variables if provided
+            if envs:
+                env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
+                self._runtime.execute(env_code)
+
             response = self._runtime.execute(code, timeout=execution_timeout)
         except Exception as e:
             # Infrastructure failure - couldn't execute the code
@@ -822,6 +831,8 @@ class DatalayerSandbox(Sandbox):
                 started_at=started_at,
                 completed_at=time.time(),
             )
+        finally:
+            self._executing_event.clear()
 
         # Parse the response
         stdout_messages: list[OutputMessage] = []

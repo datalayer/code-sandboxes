@@ -8,6 +8,24 @@
 
 ## Unreleased
 
+- A Datalayer sandbox says when it is running code, so an interrupt can reach
+  it. `Sandbox.interrupt` refuses before it delegates — `if not
+  self._executing_event.is_set(): return False` — and `run_code` never set that
+  event, so `is_executing` was always False, every interrupt was refused at the
+  door, and the refusal was reported as "no code was running" to a caller
+  watching a cell run.
+
+  This is the other half of the interrupt fix released in 1.4.4, and the
+  measurement said so: with `_do_interrupt` implemented and deployed, cancelling
+  a two-minute cell ten seconds in still left the kernel busy for **60.5
+  seconds**. Implementing the interrupt changed nothing while nothing could call
+  it. Both are needed, and the package's tests now hold them together.
+
+  Five variants — cloudflare, coreweave, daytona, e2b, modal — implement
+  `_do_interrupt` and never mark execution either, so their interrupts are
+  unreachable in the same way. Pinned as known rather than fixed blind, since
+  none can be measured from here.
+
 - `DatalayerSandbox` can be interrupted. It neither implemented `_do_interrupt`
   nor read the flag the base class sets, so the default ran instead: it sets a
   flag, returns `True`, and stops nothing. Everything above believed it —
