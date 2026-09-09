@@ -353,3 +353,27 @@ class TestAServerThatWillNotStart:
 
         assert "Timed out" in str(raised.value)
         assert "something looked wrong" in str(raised.value)
+
+
+def test_stop_forgets_the_temporary_workdir_it_removed(tmp_path: Path, monkeypatch):
+    """A stopped sandbox does not point its next start at a directory it deleted."""
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    sandbox = JupyterServerSandbox(config=SandboxConfig())
+
+    first = Path(sandbox._resolve_workdir())
+    assert first.is_dir()
+    assert sandbox._workdir_tmp == str(first)
+
+    # As after a run: started, nothing else to tear down.
+    sandbox._started = True
+    sandbox.stop()
+
+    assert not first.exists()
+    assert sandbox._workdir is None
+    assert sandbox._workdir_tmp is None
+
+    second = Path(sandbox._resolve_workdir())
+    assert second.is_dir()
+    assert second != first

@@ -541,11 +541,17 @@ class JupyterServerSandbox(Sandbox):
                 self._server_thread.join(timeout=5)
             self._server_thread = None
 
-        if self._workdir_tmp and os.path.isdir(self._workdir_tmp):
-            import shutil
+        if self._workdir_tmp:
+            if os.path.isdir(self._workdir_tmp):
+                import shutil
 
-            # `ignore_errors` already swallows what the tree throws.
-            shutil.rmtree(self._workdir_tmp, ignore_errors=True)
+                # `ignore_errors` already swallows what the tree throws.
+                shutil.rmtree(self._workdir_tmp, ignore_errors=True)
+            # The directory is gone, so forget it as the working directory
+            # too: a later start makes a fresh one instead of pointing the
+            # server at a path that no longer exists.
+            if self._workdir == self._workdir_tmp:
+                self._workdir = None
             self._workdir_tmp = None
 
         self._started = False
