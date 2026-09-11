@@ -1,0 +1,23 @@
+# Copyright (c) 2025-2026 Datalayer, Inc.
+#
+# BSD 3-Clause License
+#
+# Datalayer's protected constraints for sandbox-contract/v1 (PLAN_ENV.md, E1-04, E1-05).
+#
+# The kernel stack every Environment keeps. Resolution merges these over a user's
+# requirements, and the base channels carry this file at
+# /opt/datalayer/constraints/sandbox-contract-v1.txt.
+#
+# Pinned to what jupyter-python:0.2.0 (image sha256:818da879f549) carries, the image
+# datalayer/python-cpu:2026.09 is built on, as read from its installed distributions
+# on 2026-09-11. The channel image refuses to build when they differ.
+#
+# jupyter-server is the fork's slot. jupyter-python installs the fork
+# (datalayer-externals/jupyter-server@81b0571c, 2.12.0.dev0), and its next layer,
+# `pip install datalayer`, replaces it with PyPI's 2.21.0: the image's files match
+# that wheel's RECORD exactly. The pin is what the image runs.
+ipykernel==7.3.0
+jupyter-client==8.9.1
+jupyter-server==2.21.0
+jupyter-server-nbmodel==0.2.8
+datalayer==1.7.4
