@@ -790,12 +790,21 @@ class DatalayerSandboxManager(SandboxManager):
         return self._info(runtime) if runtime else None
 
     def delete(self, sandbox_id: str) -> bool:
+        """Stop the runtime; ``True`` when the platform says it stopped.
+
+        `AgentClient` calls this `stop_runtime`, after the lifecycle
+        vocabulary. The manager asked for a `terminate_runtime` the client has
+        never had and swallowed the AttributeError as "nothing deleted", so no
+        Datalayer sandbox could be deleted from either CLI. A failure now
+        carries its reason, as this module promises.
+        """
         client = self._get_client()
         try:
-            client.terminate_runtime(sandbox_id)
-        except Exception:
-            return False
-        return True
+            return bool(client.stop_runtime(sandbox_id))
+        except Exception as exc:
+            raise SandboxManagementError(
+                f"The platform did not stop runtime {sandbox_id}: {exc}"
+            ) from exc
 
     def update(
         self, sandbox_id: str, capabilities: list[str] | None = None, **_: Any
@@ -817,9 +826,32 @@ class DatalayerSandboxManager(SandboxManager):
         return info
 
     def create(self, **kwargs: Any) -> SandboxInfo:
-        from .datalayer_sandbox import DatalayerSandbox
+        """Start a runtime in the environment asked for, under the name given.
 
-        sandbox = DatalayerSandbox(token=self._token, run_url=self._run_url, **kwargs)
+        `DatalayerSandbox` reads the environment, the name and the GPU from its
+        `SandboxConfig`. Passed as keywords, they fell into its extra arguments,
+        so both CLIs started every runtime in `ai-agents-env` under a generated
+        name: asked for `python-cpu-env`, the platform claimed an agents pod.
+        `environment_name` is the `datalayer sandboxes create` spelling, and
+        `environment` the `code-sandboxes create` one.
+        """
+        from .datalayer_sandbox import DatalayerSandbox
+        from .models import SandboxConfig
+
+        config = kwargs.pop("config", None) or SandboxConfig()
+        environment_name = kwargs.pop("environment_name", None)
+        environment = kwargs.pop("environment", None)
+        chosen = {
+            "environment": environment_name or environment,
+            "name": kwargs.pop("name", None),
+            "gpu": kwargs.pop("gpu", None),
+        }
+        updates = {key: value for key, value in chosen.items() if value}
+        if updates:
+            config = config.model_copy(update=updates)
+        sandbox = DatalayerSandbox(
+            config=config, token=self._token, run_url=self._run_url, **kwargs
+        )
         sandbox.start()
         info = sandbox.info
         if info is None:
