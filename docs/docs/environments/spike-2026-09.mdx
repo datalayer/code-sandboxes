@@ -1,0 +1,114 @@
+---
+title: Provider spike, September 2026
+description: One numpy and pandas Environment built by hand on Datalayer, E2B, Daytona and Modal, to test sandbox-contract/v1 against each provider before any builder was written.
+---
+
+# Provider spike, September 2026
+
+In September 2026 one Environment was built by hand on each variant, before any builder was written, and every artifact went through the [doctor](./contract) and the conformance suite. The spike's code was thrown away and its provider artifacts deleted once recorded. This page is what it found; where a finding changes how a builder must work, the builder follows it.
+
+## The Environment
+
+| | |
+|---|---|
+| Base | A throwaway `sandbox-contract/v1` base on `python:3.13-slim-bookworm`: user `datalayer` 1000:100, home `/home/datalayer`, working directory `/home/datalayer/content`, `tini`, `C.UTF-8`, UTC, `ipykernel`, `jupyter_client` and `jupyter_server`, and the doctor under a read-only `/opt/datalayer` |
+| Where the base lives | A private AWS ECR repository, pushed by digest as an OCI index holding the `linux/amd64` image (71.9 MiB compressed) and an attestation manifest |
+| Packages | numpy 2.5.3 and pandas 3.0.5, locked with hashes by `uv pip compile` for Python 3.13, with python-dateutil and six |
+| A provider's credential for the base | A session of a read-only role that reads base images and nothing else, assumed for that one build |
+
+## At a glance
+
+| | Datalayer | E2B | Daytona | Modal |
+|---|---|---|---|---|
+| Artifact launched | Image digest | Build id, as `<team>/<template>:<build id>` | Snapshot id | Image id |
+| Credential for the private base | The builder's ECR login token | An ECR login token; session keys fail | An ECR login token in a registry entry | The session's keys and token |
+| Build | 114.8 s from the base in ECR, no cache | 47 s; a rebuild 24 s | 37.4 s to `Active` | 91.2 s to import the base, 21 s for the lock |
+| Build logs | Streamed | Polled, about a second behind | Streamed | Streamed |
+| Create to the first `1+1` | 2.3 s, image already local | 1.3 to 3.4 s | 1.7 s | 1.8 s |
+| Doctor and core tier | Pass | Pass once the template sets the user, working directory and locale | Pass | Pass once every exec re-asserts the user |
+
+## Datalayer
+
+**Build.** `buildctl` from `moby/buildkit:v0.23.2`, daemonless, with the builder's 12-hour ECR login token as client-side registry auth, pushed by digest with `attest:sbom` and `attest:provenance=mode=max`. The base took 137.6 s from cold. The Environment, rebuilt from the base in ECR with no BuildKit cache, took 114.8 s, 41.8 s of it pushing layers. Its image is 110.8 MiB compressed. A retried build of the same version, under a new `v<n>-<build>` tag, did not collide with the first; its digest differs, so builds are not bit-for-bit reproducible, and a cache key uses the spec, lock and base digests, never the image's.
+
+**Packages install as root.** The lock is installed as root into the system site-packages and the image returns to 1000:100. A user install would land in the home, which the runtime mounts over.
+
+**Launch.** Pulled by digest as the read-only puller in 43.5 s over a laptop's connection and started with a runtime pod's command, Jupyter Server answered 2.3 s after the container started.
+
+**Conformance.** The doctor passed every row, and all 14 checks passed.
+
+**Resolution.** Locking numpy and pandas took 0.02 to 0.27 s with uv's cache warm, and 0.5 to 0.7 s without it.
+
+## E2B
+
+e2b 2.45.1, e2b-code-interpreter 2.9.1, envd 0.9.0.
+
+**The private base.** `Template.from_aws_registry` refuses a session: E2B's builder calls ECR itself with the key and secret it is given, and ECR answers that the security token is invalid. That option takes long-lived keys only. `from_image` with `AWS` and a login token made from the session pulled the base by its index digest. Where E2B keeps the credential could not be seen — no endpoint returns it — and no credential value was found in the built image or its processes.
+
+**The team's cache outlives the credential.** A later build of the same digest, with no credential at all, was ready in 7 s from the team's layer cache, while a digest never built before failed with 401. The cache survives the template's deletion, and no API purges it.
+
+**Running code on the Datalayer base.** `run_code` talks to E2B's code-interpreter server, so the template carries it: a FastAPI server on port 49999 with `/health`, and a token-less Jupyter Server on port 8888, both started by `set_start_cmd`. That command runs once at build time and is snapshotted, not run at each create. The server hard-codes `/home/user`, so it needed a patch. E2B's own `code-interpreter-v1` template runs kernels as root in `/home/user`, which fails the identity check, so a builder starts from the Datalayer base and adds a pinned server layer.
+
+**Build.** Pulling the base and provisioning took 42 s, the Environment 47 s, a rebuild 24 s, and a fully cached build 13 to 20 s. Logs are not streamed: the SDK polls the build's status, and entries arrived about a second late.
+
+**Ids.** A rebuild under the same name keeps the template id and returns a new build id. After the rebuild, `<team>/<name>:<first build id>` still launched the first content, while `<name>` alone launched the second. Tags can point at a build and moving one changes what launches; the `default` tag follows every build and cannot be removed.
+
+**Launch and identity.** E2B ignores the image's `USER`, `WORKDIR`, `ENV`, `ENTRYPOINT` and `CMD`, and adds its own sudo user, `user`, uid 1001. A final `set_user("datalayer")` makes `datalayer` the default for commands and for the start command, so kernels run as 1000:100, and `set_workdir` sets the working directory. The locale needs variables given at create, since `set_envs` applies to the build only. No create option picks a user, and `commands.run(user="root")` always works with the team's key. The first `1+1` came 1.3 to 3.4 s after creation, over seven launches.
+
+**Conformance.** With that, the doctor passed every row and the core tier passed. Against the contract: systemd is PID 1 and reaps orphans, while `tini` is ignored; E2B installs 15 unpinned packages at build time, among them systemd, openssh-server, sudo, curl and git; and `/opt/datalayer`, read-only to `datalayer`, is writable as root through the SDK. Check 14 failed because `E2BSandbox.run_code` passes both a language and a context, which the SDK refuses — a gap in this package; with a workaround it read four of four.
+
+**Deletion.** A template is deleted in one call, refused while a sandbox runs from it. Builds cannot be deleted on their own, and once the template is gone every one of its build ids answers 404. The layer cache stays.
+
+**Regions and limits.** There is no region parameter; the documentation offers an EU cluster from the Pro plan. Documented limits: Hobby 20 sandboxes, 20 builds and one creation a second; Pro 100 to 1,100 sandboxes and five creations a second; a build is capped at an hour. None was reached. The team's key lists the template, its builds and its tags.
+
+## Daytona
+
+daytona 0.205.1, against server 0.213.0.
+
+**The private base.** A declarative `Image` build pulled the base by digest through a registry entry holding the ECR host, `AWS` and a login token made from the session; without the entry the pull fails with 401. Daytona's API takes no AWS keys — its ECR option lives in the dashboard and needs a standing IAM role that trusts Daytona. The entry is organization-wide, never returns its password, and was deleted as soon as the build ended.
+
+**References.** A digest works in the declarative `FROM`. Creating a snapshot from an image reference rewrites `@sha256:` to `:sha256:` and fails, so that path needs a tag. `latest` and a missing tag are refused when the snapshot is created; `lts` and `stable` are accepted there and fail later, on the runner.
+
+**Build.** 37.4 s from creation to `Active`, with BuildKit and pip logs streamed live. Resources — cpu 1, memory 1 GiB, disk 3 GiB — and the region are baked into the snapshot.
+
+**Ids.** A snapshot cannot be updated, a name in use is refused, and a name reused after deletion gets a new id. Sandbox records keep the snapshot's name, so launch by id only.
+
+**Launch.** By snapshot id. Daytona honours the image's `USER`, `HOME` and `WORKDIR`, and `code_interpreter` works on the Datalayer base. The first `1+1` came 1.7 s after creation. Resources passed together with a snapshot are refused.
+
+**Conformance.** The doctor passed every row and the core tier passed. The extended tier recorded 1,214 MiB/s and four concurrent contexts, and no token or key was found in the sandbox. Against the contract: Daytona's daemon is PID 1 with `tini` beneath it, so orphans are still reaped but a stop signal reaches the daemon first; the sandbox record names the user `daytona` while processes run as `datalayer`; and there is no kernel restart, so a restart means stopping and starting the sandbox (1.8 s).
+
+**Deletion.** A snapshot in use can be deleted. Running sandboxes keep working, even across a restart, but no new sandbox starts from its id. The build context stays in Daytona's object storage, and no call removes it.
+
+**Regions and limits.** Regions `us` and `eu`, of which this organization had `us` only. Quotas: 30 snapshots, 250 vCPU, 500 GiB memory, 2,000 GiB disk, 10 GPU. Rate limits: 600 creates a minute, none reached.
+
+## Modal
+
+modal 1.5.2.
+
+**The private base.** `Image.from_aws_ecr` pulled the base by its index digest with the session's keys, token and region in `Secret.from_dict`, importing it in 91.2 s; without the token ECR refuses. Each `.build()` stores that secret again as an app-owned secret that no listing shows, that outlives the app, and that only `SecretDelete` by id removes.
+
+**Build.** The lock's layers took 21 s, with logs streamed live. The workspace's default 2023.12 image builder installs runtime pins that fail on Python 3.13; the 2025.06 builder works. A fresh credential gave every layer a new id, the base included, so no layer cache survives from one build to the next.
+
+**Ids.** `publish("name")` publishes `name:latest`, and a second publish moves it. `Image.from_id` of the first image still launched the first content.
+
+**Launch and identity.** Every exec runs as root: `USER` is ignored, and neither `Sandbox.create` nor `exec` takes a user; `HOME` and `WORKDIR` are honoured. As Modal runs it, the doctor fails `user`, `uid`, `gid` and `reserved_path`. Prefixed with `setpriv --reuid=1000 --regid=100 --clear-groups` and given the working directory, every exec passes the doctor and the core tier. The first `1+1` came 1.8 s after creation. With no region requested, sandboxes ran in `FRA2`.
+
+**Conformance.** Check 14 failed: `ModalSandbox` runs one driver with one reply queue, so it cannot serve concurrent contexts — a gap in this package, not in Modal.
+
+**Deletion.** `experimental.image_delete` removes one layer, and intermediate layers survive it. Published names cannot be deleted, and apps can only be stopped.
+
+**Limits.** 200 calls a second with a 5-second burst, and 100 containers on Starter or 5,000 on Team, as documented; none reached.
+
+## What the builders take from this
+
+- **Launch by the immutable id** — a digest, a build id, a snapshot id, an image id — never by a name or tag. E2B's template names and tags, Daytona's sandbox records and Modal's published names all point at something that can move.
+- **Give a provider the narrowest credential it accepts, then delete what it kept.** Modal takes the session itself; E2B and Daytona take only a registry login, and the login token a session mints lasts 12 hours whatever the session's length. Delete Daytona's registry entry and each of Modal's per-build secrets as soon as the build ends. E2B's team cache keeps the base whatever is deleted.
+- **Install packages as root**, and leave the home to the runtime.
+- **Re-assert the contract where a provider ignores the image:** a final `set_user`, `set_workdir` and create-time locale on E2B, and the user on every exec on Modal.
+- **Carry the execution server a provider needs**, pinned: E2B's code-interpreter server, patched for the Datalayer home.
+- **Set what a provider would otherwise choose:** Modal's image builder version and region, and a Daytona snapshot's resources and region.
+
+## Not measured yet
+
+- **An operator launch.** The Datalayer image was started locally, not by a `RuntimeEnvironment` on a plane, because Kubernetes stayed unwritten during the spike.
+- **r1.** Pull times from its nodes, the cold-start delta against a platform environment, and the rootless BuildKit mode its kernels allow.
