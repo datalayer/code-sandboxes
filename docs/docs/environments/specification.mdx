@@ -36,7 +36,7 @@ A document is refused with `DL_ENV_SPEC_INVALID` when a field is wrong, and with
 | `env` | none | Variable names only. Nothing that looks like a credential, by its name or its value: that belongs in `buildSecrets`. |
 | `commands.postInstall` | none | At most 32 non-empty commands, run after the packages are installed. |
 | `buildSecrets` | none | `id` is a Datalayer secret id, `dlsec_...`; `mountAs` is `env` or `file`; `name` is the variable or file name. Ids and names are unique. Secrets are injected into the build step that needs them and never written into the artifact. |
-| `resources.sizeClass` | `small` | `small`, `medium`, `large`, `gpu-small` or `gpu-large`. A GPU class needs an accelerator and a CUDA base; an accelerator needs a GPU class. |
+| `resources.sizeClass` | `small` | `small`, `medium`, `large`, `gpu-small` or `gpu-large`. A GPU class needs an accelerator and a CUDA base; an accelerator needs a GPU class. Datalayer runs no GPU nodes yet, so a GPU class is built for Modal and Daytona, which bring their own GPUs; E2B has none. |
 | `resources.accelerator` | `none` | `none`, or `type`, `count` and `cuda`. |
 | `resources.hints` | none | `cpu`, `memoryGi`, `diskGi`: positive numbers, within the size class. |
 | `compatibility.variants.required` | `[datalayer]` | At least one of `datalayer`, `e2b`, `daytona`, `modal`. |
