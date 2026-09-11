@@ -1,0 +1,112 @@
+{
+  "$id": "https://datalayer.io/schemas/environments/v1alpha1/doctor-report.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "datalayer-sandbox doctor report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "caBundle",
+    "contract",
+    "doctor",
+    "doctorVersion",
+    "failed",
+    "identity",
+    "kernel",
+    "locale",
+    "ok",
+    "paths",
+    "python",
+    "rows",
+    "timezone"
+  ],
+  "properties": {
+    "doctor": { "const": "datalayer-sandbox" },
+    "doctorVersion": { "type": "string" },
+    "contract": { "type": "string", "pattern": "^sandbox-contract/v[0-9]+$" },
+    "ok": { "type": "boolean" },
+    "failed": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/rowId" }
+      ]
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 15,
+      "maxItems": 15,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["actual", "expected", "id", "message", "ok", "required"],
+        "properties": {
+          "id": { "$ref": "#/$defs/rowId" },
+          "required": { "type": "boolean" },
+          "ok": { "type": "boolean" },
+          "expected": {},
+          "actual": {},
+          "message": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "python": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executable", "pip", "version"],
+      "properties": {
+        "version": { "type": "string" },
+        "executable": { "type": ["string", "null"] },
+        "pip": { "type": ["string", "null"] }
+      }
+    },
+    "kernel": {
+      "type": "object",
+      "required": ["ipykernel", "jupyter_client"],
+      "additionalProperties": { "type": ["string", "null"] }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cwd", "gid", "home", "uid", "user"],
+      "properties": {
+        "user": { "type": ["string", "null"] },
+        "uid": { "type": "integer" },
+        "gid": { "type": "integer" },
+        "home": { "type": ["string", "null"] },
+        "cwd": { "type": "string" }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["readOnly", "writable"],
+      "properties": {
+        "writable": { "type": "array", "items": { "type": "string" } },
+        "readOnly": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "locale": { "type": ["string", "null"] },
+    "timezone": { "type": ["string", "null"] },
+    "caBundle": { "type": ["string", "null"] }
+  },
+  "$defs": {
+    "rowId": {
+      "enum": [
+        "architecture",
+        "os",
+        "user",
+        "uid",
+        "gid",
+        "home",
+        "workdir",
+        "python",
+        "pip",
+        "kernel",
+        "reserved_path",
+        "locale",
+        "timezone",
+        "ca_certificates",
+        "init"
+      ]
+    }
+  }
+}

@@ -1,0 +1,53 @@
+---
+title: Specification
+description: Every field of an Environment, environments.datalayer.io/v1alpha1, and the rules it is validated against.
+---
+
+# Specification
+
+An Environment document is YAML or JSON, `apiVersion: environments.datalayer.io/v1alpha1`, `kind: Environment`. The models in `code_sandboxes.environments.spec` are the specification; the JSON Schema at `schemas/environment-v1alpha1.json` in the repository is exported from them with `python -m code_sandboxes.environments schema --write`, and other languages generate their types from it.
+
+A document is refused with `DL_ENV_SPEC_INVALID` when a field is wrong, and with `DL_ENV_CAPABILITY_UNSUPPORTED` when it is valid but asks for something that cannot be built yet. Every finding is listed, each with the field it is in.
+
+## `metadata`
+
+| Field | Rules |
+|---|---|
+| `name` | Unique per owner. A DNS-1123 label: lowercase letters, digits and `-`, at most 63 characters. The prefixes `datalayer-`, `dl-`, `kube-` and `system-` are reserved. |
+| `title` | Free text. |
+| `labels` | String to string. |
+
+## `spec`
+
+| Field | Default | Rules |
+|---|---|---|
+| `contract` | `sandbox-contract/v1` | A supported [sandbox contract](./contract). |
+| `language.name` | `python` | Only `python`. |
+| `language.version` | — | `major.minor`, and one the base provides. It is checked against the base, never replaced. |
+| `base.ref` | — | An approved base: `datalayer/python-cpu` or `datalayer/python-cuda`. |
+| `base.channel` | — | The release channel, resolved to a digest per variant when the version is resolved. |
+| `platform.architecture` | `linux/amd64` | Only `linux/amd64`. |
+| `packages.python.manager` | `uv` | `uv` or `pip`; both are resolved with uv. `conda` is not buildable yet. |
+| `packages.python.dependencies` | none | PEP 508 requirements. |
+| `packages.python.constraints` | none | PEP 508 requirements, applied under Datalayer's protected constraints, which win. |
+| `packages.python.indexes` | `https://pypi.org/simple` | `https` URLs, with no credential in them. |
+| `packages.system.apt` | none | Package names, optionally `name=version`. |
+| `files` | none | At most 32 files. `path` is absolute and normalized, not under `/opt/datalayer`, and listed once; `contentRef` is a `blob://`, `https://` or `s3://` reference; `sizeBytes` is at most 1 MiB, 8 MiB for all files together; `sha256` is required before a file is built. |
+| `env` | none | Variable names only. Nothing that looks like a credential, by its name or its value: that belongs in `buildSecrets`. |
+| `commands.postInstall` | none | At most 32 non-empty commands, run after the packages are installed. |
+| `buildSecrets` | none | `id` is a Datalayer secret id, `dlsec_...`; `mountAs` is `env` or `file`; `name` is the variable or file name. Ids and names are unique. Secrets are injected into the build step that needs them and never written into the artifact. |
+| `resources.sizeClass` | `small` | `small`, `medium`, `large`, `gpu-small` or `gpu-large`. A GPU class needs an accelerator and a CUDA base; an accelerator needs a GPU class. |
+| `resources.accelerator` | `none` | `none`, or `type`, `count` and `cuda`. |
+| `resources.hints` | none | `cpu`, `memoryGi`, `diskGi`: positive numbers, within the size class. |
+| `compatibility.variants.required` | `[datalayer]` | At least one of `datalayer`, `e2b`, `daytona`, `modal`. |
+| `compatibility.variants.optional` | none | The same variants, none of them also required. |
+| `compatibility.regions` | none | Region names. |
+| `build.source` | `packages` | Only `packages` builds today; `dependencyFile`, `dockerfile` and `image` are refused until they do. |
+
+## The spec digest
+
+`spec_digest` is `sha256:` followed by the SHA-256 of the RFC 8785 serialization of `spec`, with its defaults written out. Two documents that say the same thing — whatever their key order or spacing, and whether or not they spell out a default — have the same digest; any change of value changes it. `metadata` is not part of it. The digest is one half of the build cache key, with the lock digest and the digest of the resolved base.
+
+## Status
+
+A version's `status` is written by the platform, never by a user: its number, the spec digest, the lock and its digest, the base resolved per variant, each variant's artifact and its state, and the version's own state.

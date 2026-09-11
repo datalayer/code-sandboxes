@@ -1,0 +1,57 @@
+---
+title: Sandbox contract
+description: What an artifact must be to run as a Datalayer Code Sandbox, sandbox-contract/v1.
+---
+
+# `sandbox-contract/v1`
+
+An artifact — an OCI image, an E2B template build, a Daytona snapshot, a Modal image — is usable as a Code Sandbox on any variant if and only if it satisfies this contract. Every Environment build ends by checking it, and a launcher refuses an artifact whose contract version it does not support.
+
+This page is generated from `code_sandboxes/environments/contract.py`: change the contract there, then run `python -m code_sandboxes.environments contract --markdown docs/docs/environments/contract.mdx`.
+
+## Requirements
+
+| Area | Requirement | Why | Checked by |
+|---|---|---|---|
+| Architecture | `linux/amd64`. | Modal pulls registry images for `linux/amd64` only; adopted everywhere for parity. | `doctor:architecture` |
+| Base OS | Debian-derived: Debian or Ubuntu. | E2B builds templates only from Debian-derived images; adopted everywhere for parity. | `doctor:os` |
+| User | Non-root user `datalayer`, uid 1000, gid 100, home `/home/datalayer`, working directory `/home/datalayer/content`. | Runtime pods run as 1000:100 and home folders on the shared filesystem are owned that way. Modal ignores `USER`, so its adapter asserts the user in the run command. | `doctor:user`, `doctor:uid`, `doctor:gid`, `doctor:home`, `doctor:workdir`, `conformance:2` |
+| Python | `python3` and `pip` on `PATH`. | The kernel, the doctor and the package installers all need them. | `doctor:python`, `doctor:pip`, `conformance:3` |
+| Kernel stack | `ipykernel`, `jupyter_client` and the Datalayer runtime agent, at versions inside the range Datalayer's protected constraints allow. | A pin outside that range builds, then gives a sandbox that never connects. | `doctor:kernel`, `conformance:4` |
+| Entrypoint | A long-running process that `exec`s the arguments it is given. | Modal requires it, Daytona defaults to `sleep infinity` and E2B uses a start command; the adapters make all three the same. | `conformance:8` |
+| Signals | PID 1 reaps children and forwards `SIGTERM`; shutdown finishes within 10 seconds. | A sandbox that ignores `SIGTERM` is killed with its work unsaved, and zombies pile up. | `doctor:init`, `conformance:8` |
+| Filesystem | `/opt/datalayer` is reserved and read-only to the user; `/home/datalayer/content` is writable; nothing is assumed to persist across restarts. | Datalayer's tools live under `/opt/datalayer`; user code writes where its content is. | `doctor:reserved_path`, `doctor:workdir`, `conformance:6` |
+| Network | Egress is governed at runtime by policy, not baked into the image; no build-time credentials on disk. | A credential left in a layer is readable by anyone who can pull the image. | `conformance:9`, `conformance:10` |
+| Locale and time | `C.UTF-8`, UTC, and current CA certificates. | Tools behave the same on every provider, and HTTPS works. | `doctor:locale`, `doctor:timezone`, `doctor:ca_certificates` |
+| Health | `datalayer-sandbox doctor --json` exits 0 and reports the contract version, the Python version, the kernel versions, the user and the writable paths. | This command is the first check of every smoke test. | `doctor`, `conformance:1` |
+
+`doctor:<row>` is a row of `datalayer-sandbox doctor --json`; `conformance:<n>` is a check of the conformance suite, which runs the doctor first.
+
+## Identity
+
+| Field | Value |
+|---|---|
+| User | `datalayer` |
+| uid | `1000` |
+| gid | `100` |
+| Home | `/home/datalayer` |
+| Working directory | `/home/datalayer/content` |
+| Reserved, read-only | `/opt/datalayer` |
+| Doctor | `/opt/datalayer/bin/datalayer-sandbox` |
+| Locale | `C.UTF-8` |
+| Time zone | `UTC` |
+| Graceful shutdown | 10 seconds |
+
+## Refused in a Dockerfile
+
+At least one provider cannot honor these, so a Dockerfile that uses them is refused before any build starts, with the line named.
+
+- `VOLUME`: Modal's image builder does not implement `VOLUME`.
+- `ONBUILD`: Modal's image builder does not implement `ONBUILD`.
+- `STOPSIGNAL`: Modal's image builder does not implement `STOPSIGNAL`.
+- A `FROM` that is not an approved Datalayer base, or that names its base through a build argument.
+- A `--platform` other than `linux/amd64`.
+- Privileged builds: `--privileged` and `RUN --security=insecure`.
+- `RUN --network=host`.
+- Mounting the Docker socket.
+- Bind-mounting a host path.

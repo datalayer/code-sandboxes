@@ -32,6 +32,20 @@ build:
 test:
 	pytest -q
 
+## Build the datalayer-sandbox doctor as a single-file zipapp.
+doctor-zipapp:
+	python -m code_sandboxes.environments.doctor.build dist/datalayer-sandbox
+
+## Regenerate the Environment JSON Schema and the sandbox contract page.
+environments-generate:
+	python -m code_sandboxes.environments schema --write
+	python -m code_sandboxes.environments contract --markdown docs/docs/environments/contract.mdx
+
+## Fail when the Environment JSON Schema or the sandbox contract page has drifted.
+environments-check:
+	python -m code_sandboxes.environments schema --check
+	python -m code_sandboxes.environments contract --check docs/docs/environments/contract.mdx
+
 ## The Contents provider matrix against the real providers (skips those without credentials).
 live-matrix:
 	CODE_SANDBOXES_LIVE=1 pytest -q -m live tests/test_contents_live_matrix.py

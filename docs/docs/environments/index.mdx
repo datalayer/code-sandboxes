@@ -1,0 +1,132 @@
+---
+title: Environments
+description: Define an environment once, resolve it once, and build an immutable artifact for every Code Sandbox variant.
+---
+
+# Environments
+
+An **Environment** says what a Code Sandbox runs with: a Python version on an approved base, the packages to install, a few files to bake in, and the variants — Datalayer, E2B, Daytona, Modal — it must build for. You write it once. It is resolved once into a lock, and every variant builds from that same lock, so the four sandboxes install the same package versions.
+
+:::info Preview
+`code_sandboxes.environments` holds what every party to an Environment shares: the specification, the sandbox contract, the version lifecycle, the error codes, the builder interface, the doctor and the conformance suite. The builders for each variant, and Datalayer's build service, arrive with the Environments feature of the Datalayer platform.
+:::
+
+## Three objects
+
+- An **Environment** is the stable object you name. It points at one promoted version.
+- An **Environment Version** is immutable once it leaves draft: its specification, the lock resolved from it, and the outcome of its builds. Editing a ready version makes a new draft.
+- An **Environment Artifact** is what one version builds into on one variant. A sandbox is always launched from the artifact's immutable reference, never from a name or a tag, which every provider lets move:
+
+| Variant | Immutable reference |
+|---|---|
+| Datalayer | The OCI image digest, `...@sha256:...` |
+| E2B | The template build id |
+| Daytona | The snapshot id, once the snapshot is active |
+| Modal | The image id, `im-...` |
+
+## A specification
+
+```yaml
+apiVersion: environments.datalayer.io/v1alpha1
+kind: Environment
+metadata:
+  name: geospatial-analysis
+  title: Geospatial analysis
+spec:
+  language:
+    name: python
+    version: "3.13"
+  base:
+    ref: datalayer/python-cpu
+    channel: "2026.09"
+  packages:
+    python:
+      manager: uv
+      dependencies:
+        - geopandas==1.1.1
+        - rasterio==1.4.3
+    system:
+      apt:
+        - gdal-bin
+  env:
+    GDAL_DATA: /usr/share/gdal
+  resources:
+    sizeClass: medium
+  compatibility:
+    variants:
+      required: [datalayer]
+      optional: [e2b, daytona, modal]
+```
+
+```python
+from code_sandboxes.environments import spec_digest, validate_environment
+
+environment = validate_environment(open("geospatial.yaml").read())
+print(spec_digest(environment))  # sha256:...
+```
+
+`validate_environment` returns the environment, or raises `EnvironmentsError` with every finding listed. The [specification reference](./specification) lists each field and its rules.
+
+## Lifecycle
+
+A version moves through these states, and only along these edges:
+
+| From | To | When |
+|---|---|---|
+| `draft` | `resolving` | It is submitted |
+| `resolving` | `resolved` or `failed` | The lock is produced, or the dependencies conflict |
+| `resolved` | `building` | A build is requested |
+| `building` | `validating` or `failed` | Every build has ended, or a required variant failed |
+| `validating` | `ready`, `partially_ready` or `failed` | The smoke tests pass everywhere, fail only on an optional variant, or fail on a required one |
+| `partially_ready` | `ready` | A backfill build brings the missing variant |
+| `ready` or `partially_ready` | `deprecated` | It is deprecated |
+
+Only a draft is edited. Only `ready` and `partially_ready` versions are promoted, and a `partially_ready` one only with its missing variants acknowledged. A deprecated version keeps its running sandboxes and takes no new ones.
+
+```python
+from code_sandboxes.environments import build_outcome, transition
+
+transition("draft", "resolving")  # "resolving"
+build_outcome(required={"datalayer": True}, optional={"modal": False})  # partially_ready
+```
+
+## Errors
+
+Every failure is reported under one code, whichever provider it came from:
+
+| Code | Retryable | What to do |
+|---|---|---|
+| `DL_ENV_SPEC_INVALID` | No | Fix the highlighted field |
+| `DL_ENV_CAPABILITY_UNSUPPORTED` | No | Remove the instruction or drop the variant |
+| `DL_ENV_RESOLVE_CONFLICT` | No | Relax a pin; the conflicting pair is shown |
+| `DL_ENV_PACKAGE_NOT_FOUND` | Sometimes | Check the name, the version, or the index allowlist |
+| `DL_ENV_PROTECTED_PACKAGE` | No | Remove the pin; the supported range is shown |
+| `DL_ENV_BUILD_FAILED` | No | Read the build log |
+| `DL_ENV_BUILD_TIMEOUT` | Yes | Retry or simplify |
+| `DL_ENV_QUOTA_EXCEEDED` | Later | Wait or raise the quota |
+| `DL_ENV_POLICY_DENIED` | No | Contact the organization admin |
+| `DL_ENV_SCAN_BLOCKED` | No | Upgrade the offending package |
+| `DL_ENV_SMOKE_TEST_FAILED` | No | The contract violation is named |
+| `DL_ENV_ARTIFACT_MISSING` | Yes | Build it or pick another variant |
+| `DL_ENV_PROVIDER_ERROR` | Yes | Retry; Datalayer is alerted |
+
+## Checking an artifact
+
+Every artifact must satisfy the [sandbox contract](./contract). Two tools check it:
+
+- **The doctor**, `datalayer-sandbox doctor --json`, runs inside the sandbox using nothing but the standard library and reports each row of the contract. Build it with `make doctor-zipapp`; images carry it at `/opt/datalayer/bin/datalayer-sandbox`.
+- **The conformance suite**, `code_sandboxes.environments.conformance`, runs against a started sandbox. Its core tier — the doctor, identity, Python, the kernel, the locked imports, the filesystem, a kernel restart, shutdown and build secrets — must pass on every required variant before a version is ready. Its extended tier — egress, GPU, disk throughput, cold start and concurrent kernels — is recorded per variant.
+
+```python
+from code_sandboxes import Sandbox
+from code_sandboxes.environments.conformance import run_core_tier
+
+with Sandbox.create(variant="datalayer", environment="acme/geospatial-analysis") as sandbox:
+    result = run_core_tier(
+        sandbox,
+        python_version="3.13",
+        expected_packages={"geopandas": "1.1.1", "rasterio": "1.4.3"},
+    )
+    for check in result.failures:
+        print(check.id, check.detail)
+```

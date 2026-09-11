@@ -1,0 +1,497 @@
+{
+  "$defs": {
+    "Accelerator": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        },
+        "cuda": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cuda"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Accelerator",
+      "type": "object"
+    },
+    "Base": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "title": "Channel",
+          "type": "string"
+        },
+        "ref": {
+          "title": "Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref",
+        "channel"
+      ],
+      "title": "Base",
+      "type": "object"
+    },
+    "BuildSecret": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^dlsec_[0-9A-Za-z]+$",
+          "title": "Id",
+          "type": "string"
+        },
+        "mountAs": {
+          "default": "env",
+          "enum": [
+            "env",
+            "file"
+          ],
+          "title": "Mountas",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Za-z0-9_.-]+$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "BuildSecret",
+      "type": "object"
+    },
+    "BuildSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "default": "packages",
+          "enum": [
+            "packages",
+            "dependencyFile",
+            "dockerfile",
+            "image"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "title": "BuildSpec",
+      "type": "object"
+    },
+    "Commands": {
+      "additionalProperties": false,
+      "properties": {
+        "postInstall": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Postinstall",
+          "type": "array"
+        }
+      },
+      "title": "Commands",
+      "type": "object"
+    },
+    "Compatibility": {
+      "additionalProperties": false,
+      "properties": {
+        "regions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Regions",
+          "type": "array"
+        },
+        "variants": {
+          "$ref": "#/$defs/VariantSet"
+        }
+      },
+      "title": "Compatibility",
+      "type": "object"
+    },
+    "EnvironmentSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/Base"
+        },
+        "build": {
+          "$ref": "#/$defs/BuildSpec"
+        },
+        "buildSecrets": {
+          "items": {
+            "$ref": "#/$defs/BuildSecret"
+          },
+          "title": "Buildsecrets",
+          "type": "array"
+        },
+        "commands": {
+          "$ref": "#/$defs/Commands"
+        },
+        "compatibility": {
+          "$ref": "#/$defs/Compatibility"
+        },
+        "contract": {
+          "default": "sandbox-contract/v1",
+          "title": "Contract",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Env",
+          "type": "object"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/FileEntry"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "language": {
+          "$ref": "#/$defs/Language"
+        },
+        "packages": {
+          "$ref": "#/$defs/Packages"
+        },
+        "platform": {
+          "$ref": "#/$defs/Platform"
+        },
+        "resources": {
+          "$ref": "#/$defs/Resources"
+        }
+      },
+      "required": [
+        "language",
+        "base"
+      ],
+      "title": "EnvironmentSpec",
+      "type": "object"
+    },
+    "FileEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "contentRef": {
+          "title": "Contentref",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "sizeBytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sizebytes"
+        }
+      },
+      "required": [
+        "path",
+        "contentRef"
+      ],
+      "title": "FileEntry",
+      "type": "object"
+    },
+    "Language": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "const": "python",
+          "default": "python",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^3\\.\\d+$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "title": "Language",
+      "type": "object"
+    },
+    "Metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Metadata",
+      "type": "object"
+    },
+    "Packages": {
+      "additionalProperties": false,
+      "properties": {
+        "python": {
+          "$ref": "#/$defs/PythonPackages"
+        },
+        "system": {
+          "$ref": "#/$defs/SystemPackages"
+        }
+      },
+      "title": "Packages",
+      "type": "object"
+    },
+    "Platform": {
+      "additionalProperties": false,
+      "properties": {
+        "architecture": {
+          "const": "linux/amd64",
+          "default": "linux/amd64",
+          "title": "Architecture",
+          "type": "string"
+        }
+      },
+      "title": "Platform",
+      "type": "object"
+    },
+    "PythonPackages": {
+      "additionalProperties": false,
+      "properties": {
+        "constraints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Constraints",
+          "type": "array"
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "indexes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Indexes",
+          "type": "array"
+        },
+        "manager": {
+          "default": "uv",
+          "enum": [
+            "uv",
+            "pip",
+            "conda"
+          ],
+          "title": "Manager",
+          "type": "string"
+        }
+      },
+      "title": "PythonPackages",
+      "type": "object"
+    },
+    "ResourceHints": {
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpu"
+        },
+        "diskGi": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Diskgi"
+        },
+        "memoryGi": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memorygi"
+        }
+      },
+      "title": "ResourceHints",
+      "type": "object"
+    },
+    "Resources": {
+      "additionalProperties": false,
+      "properties": {
+        "accelerator": {
+          "anyOf": [
+            {
+              "const": "none",
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/Accelerator"
+            }
+          ],
+          "default": "none",
+          "title": "Accelerator"
+        },
+        "hints": {
+          "$ref": "#/$defs/ResourceHints"
+        },
+        "sizeClass": {
+          "default": "small",
+          "title": "Sizeclass",
+          "type": "string"
+        }
+      },
+      "title": "Resources",
+      "type": "object"
+    },
+    "SystemPackages": {
+      "additionalProperties": false,
+      "properties": {
+        "apt": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Apt",
+          "type": "array"
+        }
+      },
+      "title": "SystemPackages",
+      "type": "object"
+    },
+    "VariantSet": {
+      "additionalProperties": false,
+      "properties": {
+        "optional": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Optional",
+          "type": "array"
+        },
+        "required": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required",
+          "type": "array"
+        }
+      },
+      "title": "VariantSet",
+      "type": "object"
+    }
+  },
+  "$id": "https://datalayer.io/schemas/environments/v1alpha1/environment.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A Datalayer Environment, environments.datalayer.io/v1alpha1.",
+  "properties": {
+    "apiVersion": {
+      "const": "environments.datalayer.io/v1alpha1",
+      "default": "environments.datalayer.io/v1alpha1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Environment",
+      "default": "Environment",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/EnvironmentSpec"
+    }
+  },
+  "required": [
+    "metadata",
+    "spec"
+  ],
+  "title": "Environment",
+  "type": "object"
+}

@@ -168,3 +168,8 @@ ignore = [
 "code_sandboxes/eval_sandbox.py" = ["C901", "S102", "S307"]
 "code_sandboxes/jupyter_sandbox.py" = ["C901", "S110", "S603", "UP007"]
 "code_sandboxes/e2b_sandbox.py" = ["C901"]
+# A serializer, the Dockerfile parser and the spec's rules read top to bottom;
+# splitting them to please a complexity count would hide the rules.
+"code_sandboxes/environments/canonical.py" = ["C901"]
+"code_sandboxes/environments/contract.py" = ["C901"]
+"code_sandboxes/environments/spec.py" = ["C901"]
