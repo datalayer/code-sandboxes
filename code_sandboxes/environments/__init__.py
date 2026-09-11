@@ -19,6 +19,7 @@ provider-specific:
 - :mod:`.errors` — the error taxonomy every provider error maps into;
 - :mod:`.builders` — the builder interface and its neutral types;
 - :mod:`.conformance` — the checks an artifact passes before it is ready;
+- :mod:`.redact` — a build's log with its secrets taken out before it is stored;
 - :mod:`.doctor` — the in-sandbox contract checker.
 
 The builders themselves are in :mod:`.adapters`, loaded by variant.

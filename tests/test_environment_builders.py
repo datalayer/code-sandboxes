@@ -272,6 +272,7 @@ def test_the_neutral_modules_import_no_provider_sdk() -> None:
         "import code_sandboxes.environments\n"
         "import code_sandboxes.environments.conformance\n"
         "import code_sandboxes.environments.files\n"
+        "import code_sandboxes.environments.redact\n"
         "import code_sandboxes.environments.schema\n"
     )
     completed = subprocess.run(  # noqa: S603
