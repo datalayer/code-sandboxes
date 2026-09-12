@@ -148,7 +148,24 @@ def test_a_variant_that_is_not_one_has_no_builder() -> None:
     assert refused.value.code is errors.CAPABILITY_UNSUPPORTED
 
 
-def test_a_variant_whose_builder_is_not_shipped_is_unsupported_not_an_import_error() -> None:
+def test_every_variant_ships_a_builder_that_honours_the_interface() -> None:
+    """Since E2-06: a spec is answered for on every variant, whatever half of
+    that variant's builder has landed. `test_environment_managed_builders.py`
+    is where each one's answers live."""
+    from code_sandboxes.environments.spec import VARIANTS
+
+    for variant in VARIANTS:
+        assert builder_contract_violations(get_builder(variant), variant=variant) == [], variant
+
+
+def test_a_variant_whose_builder_is_not_shipped_is_unsupported_not_an_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A release that drops an adapter answers "this release cannot", not a
+    traceback about a module a caller has never heard of."""
+    monkeypatch.setitem(
+        builders.BUILDER_MODULES, "modal", "code_sandboxes.environments.adapters.nowhere"
+    )
     with pytest.raises(EnvironmentsError) as refused:
         get_builder("Modal")
     assert refused.value.code is errors.CAPABILITY_UNSUPPORTED
