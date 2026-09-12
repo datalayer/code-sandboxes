@@ -8,16 +8,20 @@
 # requirements, and the base channels carry this file at
 # /opt/datalayer/constraints/sandbox-contract-v1.txt.
 #
-# Pinned to what jupyter-python:0.2.0 (image sha256:818da879f549) carries, the image
-# datalayer/python-cpu:2026.09 is built on, as read from its installed distributions
-# on 2026-09-11. The channel image refuses to build when they differ.
+# Pinned to what jupyter-python carries, the image datalayer/python-cpu:2026.09 is built
+# on. The channel image refuses to build when they differ. Read from the installed
+# distributions of jupyter-python:0.2.1 (image sha256:731f736f7e50) on 2026-09-12, the
+# build that restored the fork.
 #
-# jupyter-server is the fork's slot. jupyter-python installs the fork
-# (datalayer-externals/jupyter-server@81b0571c, 2.12.0.dev0), and its next layer,
-# `pip install datalayer`, replaces it with PyPI's 2.21.0: the image's files match
-# that wheel's RECORD exactly. The pin is what the image runs.
+# jupyter-server is Datalayer's fork, branch datalayer-2.21 of
+# datalayer-externals/jupyter-server: its four commits rebased on upstream 2.21.0 and
+# versioned 2.21.0+datalayer.1. jupyter-python:0.2.0 installed the fork at 2.12.0.dev0,
+# and `pip install datalayer` replaced it with PyPI's 2.21.0, because datalayer-ui,
+# jupyterlab and jupyter-server-ydoc require jupyter-server>=2.19. The rebased fork
+# satisfies those ranges, so pip keeps it; its local label, which PyPI never serves,
+# tells it apart from the release.
 ipykernel==7.3.0
 jupyter-client==8.9.1
-jupyter-server==2.21.0
+jupyter-server==2.21.0+datalayer.1
 jupyter-server-nbmodel==0.2.8
 datalayer==1.7.4

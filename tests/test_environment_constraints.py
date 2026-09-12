@@ -10,6 +10,7 @@ from importlib import resources
 
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
+from packaging.version import Version
 
 from code_sandboxes.environments.contract import SANDBOX_CONTRACT_V1
 
@@ -49,3 +50,15 @@ def test_each_constraint_is_one_exact_version() -> None:
         assert requirement.url is None, requirement
         assert requirement.marker is None, requirement
         assert not requirement.extras, requirement
+
+
+def test_jupyter_server_is_the_datalayer_fork() -> None:
+    """PLAN_ENV.md, E1-05: the channels run the jupyter-server fork, not PyPI's release.
+
+    The fork carries a local version label, which PyPI never serves. A pin without one
+    names the release that replaced the fork in jupyter-python:0.2.0.
+    """
+    (pin,) = [r for r in _constraints() if canonicalize_name(r.name) == "jupyter-server"]
+    (specifier,) = pin.specifier
+    local = Version(specifier.version).local
+    assert local is not None and local.startswith("datalayer"), pin
