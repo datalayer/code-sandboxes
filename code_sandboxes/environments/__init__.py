@@ -14,6 +14,7 @@ This package holds what every party to that life shares, and nothing
 provider-specific:
 
 - :mod:`.spec` — the canonical specification and its rules;
+- :mod:`.resolve` — the lock a version is resolved into, once (D-9);
 - :mod:`.contract` — ``sandbox-contract/v1`` and the Dockerfile validator;
 - :mod:`.lifecycle` — the version states and their legal moves;
 - :mod:`.errors` — the error taxonomy every provider error maps into;
@@ -49,6 +50,17 @@ from .contract import (
 )
 from .errors import ERROR_CODES, EnvironmentsError, ErrorCode, map_provider_error
 from .lifecycle import VersionState, build_outcome, can_transition, transition
+from .resolve import (
+    LOCK_FORMAT,
+    BuildkitResolveRunner,
+    LocalResolveRunner,
+    ResolveRunner,
+    locked_versions,
+    merge_requirements,
+    parse_resolver_failure,
+    protected_pins,
+    resolve_environment,
+)
 from .spec import (
     API_VERSION,
     VARIANTS,
@@ -65,11 +77,13 @@ __all__ = [
     "APPROVED_BASES",
     "CONTRACT_V1",
     "ERROR_CODES",
+    "LOCK_FORMAT",
     "SANDBOX_CONTRACT_V1",
     "SUPPORTED_CONTRACTS",
     "VARIANTS",
     "ApprovedBase",
     "ArtifactReference",
+    "BuildkitResolveRunner",
     "BuildRequest",
     "CapabilityReport",
     "CapabilitySet",
@@ -79,6 +93,8 @@ __all__ = [
     "EnvironmentSpec",
     "EnvironmentsError",
     "ErrorCode",
+    "LocalResolveRunner",
+    "ResolveRunner",
     "SandboxContract",
     "ValidationResult",
     "VersionState",
@@ -88,8 +104,13 @@ __all__ = [
     "canonical_json",
     "check_dockerfile",
     "get_builder",
+    "locked_versions",
+    "merge_requirements",
     "map_provider_error",
     "parse_environment",
+    "parse_resolver_failure",
+    "protected_pins",
+    "resolve_environment",
     "spec_digest",
     "spec_findings",
     "transition",

@@ -173,3 +173,7 @@ ignore = [
 "code_sandboxes/environments/canonical.py" = ["C901"]
 "code_sandboxes/environments/contract.py" = ["C901"]
 "code_sandboxes/environments/spec.py" = ["C901"]
+# uv writes its refusals in a box: the `×` and `╰─▶` are the resolver's own
+# characters, and the parser and its recordings quote them exactly.
+"code_sandboxes/environments/resolve.py" = ["RUF001"]
+"tests/test_environment_resolve.py" = ["RUF001"]
