@@ -338,8 +338,33 @@ class TestBuildingAndPushing:
         assert ecr.created[0]["imageScanningConfiguration"] == {"scanOnPush": True}
         assert ecr.created[0]["encryptionConfiguration"] == {"encryptionType": "KMS"}
 
+    def test_the_cache_repository_is_created_with_mutable_tags_when_it_is_missing(self) -> None:
+        """Terraform never creates it — its own comment says "created by the
+
+        builder" — and until this, nothing here ever had either: the first
+        real build got all the way to a real push and only then failed
+        exporting its cache, a plain 404 against a repository that was never
+        created (found live, 2026-09-12).
+        """
+        ecr = FakeEcr()
+        a_builder(run=Buildctl(), ecr=ecr).build(a_request())
+        cache = [
+            item
+            for item in ecr.created
+            if item["repositoryName"] == f"environments/cache/u/{OWNER}"
+        ]
+        assert len(cache) == 1
+        assert cache[0]["imageTagMutability"] == "MUTABLE"
+        assert cache[0]["imageScanningConfiguration"] == {"scanOnPush": True}
+        assert cache[0]["encryptionConfiguration"] == {"encryptionType": "KMS"}
+
     def test_an_existing_repository_is_left_as_it_is(self) -> None:
-        ecr = FakeEcr(repositories={owner_repository(OWNER, "geospatial-analysis")})
+        ecr = FakeEcr(
+            repositories={
+                owner_repository(OWNER, "geospatial-analysis"),
+                f"environments/cache/u/{OWNER}",
+            }
+        )
         a_builder(run=Buildctl(), ecr=ecr).build(a_request())
         assert ecr.created == []
 

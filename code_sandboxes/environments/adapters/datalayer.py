@@ -319,6 +319,7 @@ class Builder:
         repository = owner_repository(request.owner_uid, request.environment.metadata.name)
         registry = self._registry_host()
         self._ensure_repository(repository)
+        self._ensure_cache_repository(f"environments/cache/u/{request.owner_uid}")
         tag = f"v{request.version}-{request.build_uid}"
         reference = f"{registry}/{repository}:{tag}"
         with tempfile.TemporaryDirectory(prefix="dl-build-") as directory:
@@ -507,6 +508,22 @@ class Builder:
 
     def _ensure_repository(self, repository: str) -> None:
         """Create the owner's repository if it is missing, with immutable tags (D-10)."""
+        self._ensure_ecr_repository(repository, mutability="IMMUTABLE")
+
+    def _ensure_cache_repository(self, repository: str) -> None:
+        """Create the owner's cache repository if it is missing, with mutable tags.
+
+        Every repository is immutable except this one: a build re-exports its
+        cache under the same tag every time, which an immutable one refuses
+        (E0-05). Terraform never creates it — its own comment says so, "created
+        by the builder" — and nothing here ever had either, found live on
+        2026-09-12: the first real build got all the way to a real push, then
+        failed exporting its cache with a plain 404, the repository never
+        having existed to push to.
+        """
+        self._ensure_ecr_repository(repository, mutability="MUTABLE")
+
+    def _ensure_ecr_repository(self, repository: str, *, mutability: str) -> None:
         client = self._client()
         try:
             client.describe_repositories(repositoryNames=[repository])
@@ -518,13 +535,14 @@ class Builder:
         try:
             client.create_repository(
                 repositoryName=repository,
-                imageTagMutability="IMMUTABLE",
+                imageTagMutability=mutability,
                 imageScanningConfiguration={"scanOnPush": True},
                 encryptionConfiguration={"encryptionType": "KMS"},
             )
         except Exception as error:
             if self._already_exists(error):
-                # Another build of the same environment got there first.
+                # Another build of the same environment, or the same owner's
+                # cache, got there first.
                 return
             raise self._provider_error("create the repository", error) from error
 
