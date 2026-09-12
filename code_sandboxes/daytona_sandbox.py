@@ -510,8 +510,13 @@ class DaytonaSandbox(Sandbox):
         given = {key: value for key, value in settings.items() if value}
         return daytona.DaytonaConfig(**given) if given else None
 
-    def _create_params(self, daytona: Any) -> Any:
-        """What to ask Daytona for, from the configuration of this sandbox."""
+    def _create_params(self, daytona: Any) -> Any:  # noqa: C901
+        """What to ask Daytona for, from the configuration of this sandbox.
+
+        Read top to bottom: what it refuses — a snapshot with resources, a
+        snapshot with an image — is the rule, and splitting the refusals
+        across helpers would hide them from the one place a reader looks.
+        """
         common: dict[str, Any] = {"labels": self._labels()}
         if self.config.env_vars:
             common["env_vars"] = dict(self.config.env_vars)
@@ -538,6 +543,27 @@ class DaytonaSandbox(Sandbox):
             common["auto_delete_interval"] = 0
         if self._spot:
             common.update(self._spot_params(resources))
+        if self._snapshot is not None:
+            # A snapshot carries the machine it was created for — Daytona bakes
+            # CPU, memory, disk and GPU into it, and it is region-scoped — so
+            # asking for resources beside one asks for two different machines.
+            # This used to take the image branch instead: the sandbox came up
+            # from a Debian image with the resources asked for, running none of
+            # the content the snapshot held, and nothing said so (PLAN_ENV.md
+            # correction 13, E2-02). A resource change is a new snapshot.
+            if resources is not None:
+                raise SandboxConfigurationError(
+                    "A Daytona snapshot carries its own CPU, memory, disk and GPU, so "
+                    "cpu=, memory= and gpu= cannot be passed with snapshot=: the sandbox "
+                    "would have come up from a plain image instead, with none of the "
+                    "snapshot's content. Create a snapshot for the machine you want, or "
+                    "pass image= with the resources."
+                )
+            if self._image is not None:
+                raise SandboxConfigurationError(
+                    "snapshot= and image= are two different things to start from; pass one. "
+                    "A snapshot is what an Environment build records for this variant."
+                )
         if self._image is not None or resources is not None:
             image = self._image
             if image is None:
@@ -547,6 +573,8 @@ class DaytonaSandbox(Sandbox):
                     else daytona.Image.debian_slim()
                 )
             return daytona.CreateSandboxFromImageParams(image=image, resources=resources, **common)
+        # No snapshot named and nothing asked for: Daytona's own default, which
+        # is what `snapshot=None` means to it.
         return daytona.CreateSandboxFromSnapshotParams(snapshot=self._snapshot, **common)
 
     def _spot_params(self, resources: Any | None) -> dict[str, Any]:

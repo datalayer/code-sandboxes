@@ -508,6 +508,7 @@ class Sandbox(ABC):
         allowed_hosts: list[str] | None = None,
         tags: dict[str, str] | None = None,
         examples: list[tuple[str, str]] | None = None,
+        artifact: Any = None,
         **kwargs,
     ) -> Sandbox:
         """Factory method to create a sandbox of the specified variant.
@@ -588,6 +589,17 @@ class Sandbox(ABC):
         from .eval_sandbox import EvalSandbox
 
         variant_value = normalize_variant(variant)
+
+        if artifact is not None:
+            # One neutral reference, translated into the argument its variant
+            # takes: a template build for E2B, a snapshot for Daytona, an
+            # image id for Modal (PLAN_ENV.md E2-02). A caller holding an
+            # Environment's artifact should not have to know which. What the
+            # caller passed itself wins, so naming both is not a surprise.
+            from .environments.builders import launch_arguments
+
+            for name_, value in launch_arguments(artifact).items():
+                kwargs.setdefault(name_, value)
 
         if variant_value == "eval":
             sandbox = EvalSandbox(config=config, **kwargs)

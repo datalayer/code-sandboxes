@@ -167,6 +167,7 @@ class ModalSandbox(Sandbox):
         config: SandboxConfig | None = None,
         app_name: str = DEFAULT_APP_NAME,
         image: Any | None = None,
+        image_id: str | None = None,
         pip_packages: list[str] | None = None,
         python_version: str = DEFAULT_MODAL_PYTHON_VERSION,
         python_executable: str = "python",
@@ -176,6 +177,10 @@ class ModalSandbox(Sandbox):
         super().__init__(config)
         self._app_name = app_name
         self._image = image
+        #: A Modal image id, `im-…`: what an Environment build of this variant
+        #: records, and the only reference a launch may use — a published name
+        #: is mutable by design (PLAN_ENV.md section 6, E2-02).
+        self._image_id = str(image_id or "").strip()
         self._pip_packages = pip_packages or []
         self._python_version = python_version
         self._python_executable = python_executable
@@ -334,6 +339,10 @@ class ModalSandbox(Sandbox):
         self._app = modal.App.lookup(self._app_name, create_if_missing=True)
 
         image = self._image
+        if image is None and self._image_id:
+            # `Image.from_id` in the Python SDK; `images.fromId` is the
+            # JavaScript one, which an earlier note had here (correction 42).
+            image = modal.Image.from_id(self._image_id)
         if image is None:
             image = modal.Image.debian_slim(python_version=self._python_version)
             if self._pip_packages:
