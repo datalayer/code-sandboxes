@@ -89,9 +89,20 @@ class ApprovedBase(BaseModel):
 APPROVED_BASES: dict[str, ApprovedBase] = {
     base.ref: base
     for base in (
-        # E1-05: jupyter-python:0.2.0 plus the contract layer. No digest until released.
+        # E1-05: jupyter-python:0.2.1 (the restored fork) plus the contract layer,
+        # released 2026-09-12 to environments/base/python-cpu. One image, so every
+        # variant pins the same digest until a variant needs a base of its own.
         ApprovedBase(
-            ref="datalayer/python-cpu", python_versions=("3.13",), channels={"2026.09": {}}
+            ref="datalayer/python-cpu",
+            python_versions=("3.13",),
+            channels={
+                "2026.09": dict.fromkeys(
+                    # `.spec.VARIANTS`, spelled out: `spec` imports from this
+                    # module, so importing it back here would be circular.
+                    ("datalayer", "e2b", "daytona", "modal"),
+                    "sha256:4e68063fdd92cccd689a9c062b1814d9b9f3bd98afbc2604f6ca0d588169679f",
+                )
+            },
         ),
         # E2-17: jupyter-python-cuda plus the same layer.
         ApprovedBase(
