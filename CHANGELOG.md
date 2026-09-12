@@ -8,6 +8,30 @@
 
 ## Unreleased
 
+## 1.8.0
+
+- **The Datalayer builder** (`environments.adapters.datalayer`, PLAN_ENV.md
+  E1-07). The Dockerfile is generated from the lock — `uv pip sync
+  --require-hashes`, apt at the versions the lock recorded, `env` before
+  anything installs, `postInstall` as uid 1000 with no network — and the push
+  is by digest with an SBOM and provenance attestation, under the operability
+  tag `v<n>-<build_uid>` so a retried build cannot collide with the attempt
+  before it. `inspect`, `resolve`, `exists` and `delete` go through the ECR
+  API. Needs the `environments-builder` extra.
+- **The scan and the signature** (`environments.policy`,
+  `environments.attest`, E1-08, E1-09). A critical finding with a fixed
+  version blocks and one nothing fixes is recorded; the decision record keeps
+  the threshold it was decided under, so what stopped a build reads a month
+  later. cosign signs only once the scan passed, and a replay finds the
+  signature rather than pushing a second.
+- **A sandbox launches from an artifact** (E2-02): `Sandbox.create(artifact=…)`
+  hands each variant its own argument — an E2B template build, a Daytona
+  snapshot, a Modal image id through `Image.from_id`.
+- **Fixed, and a live defect:** Daytona's adapter took the image branch
+  whenever resources were requested, so a snapshot asked for with `cpu=` came
+  up from a plain Debian image running none of the snapshot's content, with
+  nothing saying so. The combination is refused (correction 13).
+
 ## 1.7.0
 
 - **A version is resolved into one lock** (`code_sandboxes.environments.resolve`,
