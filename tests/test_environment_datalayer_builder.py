@@ -285,8 +285,10 @@ class TestBuildingAndPushing:
         argv = " ".join(buildctl.argv)
         repository = owner_repository(OWNER, "geospatial-analysis")
         assert f"type=image,name={REGISTRY}/{repository}:v3-bld-1,push=true" in argv
-        assert "--attest type=sbom" in argv
-        assert "--attest type=provenance,mode=max" in argv
+        # `--opt attest:...`, not `--attest`: that flag is `docker buildx`'s,
+        # and a bare `buildctl` refuses it outright (found live, 2026-09-12).
+        assert "--opt attest:sbom=" in argv
+        assert "--opt attest:provenance=mode=max" in argv
         # The digest is what is kept; the tag is only there to find the build.
         assert artifact.immutable_reference == f"{REGISTRY}/{repository}@{DIGEST}"
         assert artifact.provider_artifact_id == DIGEST

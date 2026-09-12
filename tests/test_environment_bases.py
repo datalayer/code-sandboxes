@@ -53,7 +53,7 @@ def test_the_2026_09_channel_of_python_cpu_resolves_the_digest_its_release_pushe
 ) -> None:
     """PLAN_ENV.md, E1-05: released 2026-09-12, same digest for every variant."""
     ref = "datalayer/python-cpu"
-    digest = "sha256:4e68063fdd92cccd689a9c062b1814d9b9f3bd98afbc2604f6ca0d588169679f"
+    digest = "sha256:469a614b153ffda452184a5c1bdacbb06a740d43eea26936ae79a95c393e35ff"
     assert APPROVED_BASES[ref].channels == {"2026.09": dict.fromkeys(VARIANTS, digest)}
     assert resolve_base(ref, "2026.09", variant) == digest
 

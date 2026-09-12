@@ -145,11 +145,29 @@ class TestTheProtectedPins:
 
     def test_a_requirement_that_agrees_with_a_pin_is_dropped_for_it(self) -> None:
         # The fork satisfies `>=2.19`, which is what jupyterlab asks for, so
-        # the user's line is redundant rather than wrong.
+        # the user's own line is redundant rather than wrong — it is dropped,
+        # and Datalayer's own pin is what ends up in the requirements instead
+        # (below), the same as for every protected package, asked for or not.
         merged = merge_requirements(["jupyter-server>=2.19", "geopandas==1.1.1"])
-        assert merged.requirements == ("geopandas==1.1.1",)
+        assert "geopandas==1.1.1" in merged.requirements
+        assert "jupyter-server>=2.19" not in merged.requirements
+        assert "jupyter-server==2.21.0+datalayer.1" in merged.requirements
         assert "jupyter-server==2.21.0+datalayer.1" in merged.constraints
         assert any("jupyter-server" in note for note in merged.notes)
+
+    def test_every_protected_pin_is_a_requirement_whether_or_not_the_spec_asked(self) -> None:
+        """A `uv --constraint` only bounds what is already in the graph.
+
+        It never pulls a package in — found live on 2026-09-12, where a spec
+        with no kernel dependency of its own locked one package, and
+        `uv pip sync` then removed the base image's own ipykernel and
+        jupyter_client for not being in that lock. The contract's whole point
+        is that every artifact can start a kernel, so every pin is forced in.
+        """
+        merged = merge_requirements(["six==1.16.0"])
+        assert "six==1.16.0" in merged.requirements
+        for pin in protected_pins():
+            assert pin.requirement in merged.requirements
 
     def test_a_requirement_that_contradicts_a_pin_is_refused_with_the_range(self) -> None:
         with pytest.raises(EnvironmentsError) as raised:
@@ -301,6 +319,51 @@ class TestTheBases:
             "modal": "environments/base/python-cpu@sha256:" + "22" * 32,
         }
 
+    def test_a_registry_qualifies_every_base_so_from_resolves_anywhere_but_docker_hub(
+        self,
+    ) -> None:
+        """A bare `<repository>@sha256:…` `FROM`s Docker Hub, which is not where it lives.
+
+        Found live on 2026-09-12: the first real BuildKit solve against a
+        published base failed `pull access denied` from `docker.io`, because
+        nothing had ever qualified the reference with the registry it is
+        actually in. Runtimes' own `resolvedBases` validation already
+        documents `<registry>/<repository>@sha256:<hex>` as the shape it
+        stores; this is the other end of that contract.
+        """
+        from code_sandboxes.environments.spec import parse_environment
+
+        resolved = resolve_bases(
+            parse_environment(a_spec()),
+            ["datalayer", "modal"],
+            BASES,
+            registry="123456789012.dkr.ecr.us-east-1.amazonaws.com",
+        )
+        assert resolved == {
+            "datalayer": "123456789012.dkr.ecr.us-east-1.amazonaws.com/"
+            "environments/base/python-cpu@sha256:" + "11" * 32,
+            "modal": "123456789012.dkr.ecr.us-east-1.amazonaws.com/"
+            "environments/base/python-cpu@sha256:" + "22" * 32,
+        }
+
+    def test_resolve_environment_qualifies_the_base_from_the_credentials_registry(
+        self,
+    ) -> None:
+        class Credential:
+            registry = "123456789012.dkr.ecr.us-east-1.amazonaws.com"
+
+        document = resolve_environment(
+            spec=a_spec(),
+            variants=["datalayer"],
+            credential=Credential(),
+            runner=RecordedRunner(A_LOCK),
+            bases=BASES,
+        )
+        assert document["resolved_bases"]["datalayer"] == (
+            "123456789012.dkr.ecr.us-east-1.amazonaws.com/"
+            "environments/base/python-cpu@sha256:" + "11" * 32
+        )
+
     def test_a_channel_nobody_published_refuses_by_name(self) -> None:
         spec = a_spec(base={"ref": "datalayer/python-cpu", "channel": "2026.10"})
         with pytest.raises(BaseChannelUnpublishedError) as raised:
@@ -340,7 +403,10 @@ class TestResolvingAVersion:
         # The interpreter that resolves is the one the artifact will have (D-9).
         assert request.base_reference.endswith("11" * 32)
         assert request.python_version == "3.13"
-        assert request.requirements == ("geopandas==1.1.1", "rasterio==1.4.3")
+        assert "geopandas==1.1.1" in request.requirements
+        assert "rasterio==1.4.3" in request.requirements
+        # Every protected pin is forced in too, whether or not the spec asked.
+        assert "ipykernel==7.3.0" in request.requirements
         assert "ipykernel==7.3.0" in request.constraints
         assert request.indexes == ("https://pypi.org/simple",)
 

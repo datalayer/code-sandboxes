@@ -335,11 +335,17 @@ class Builder:
                 f"dockerfile={root}",
                 "--output",
                 f"type=image,name={reference},push=true,oci-mediatypes=true",
-                # The supply chain is part of the artifact (D-11).
-                "--attest",
-                "type=sbom",
-                "--attest",
-                "type=provenance,mode=max",
+                # The supply chain is part of the artifact (D-11). `--attest`
+                # is `docker buildx`'s flag, not `buildctl`'s — a bare
+                # `buildctl` (which never goes through buildx) takes the same
+                # request as a dockerfile.v0 frontend option: found live on
+                # 2026-09-12, the first real build this adapter ever drove,
+                # where `--attest type=sbom` failed before anything else did
+                # ("flag provided but not defined: -attest").
+                "--opt",
+                "attest:sbom=",
+                "--opt",
+                "attest:provenance=mode=max",
                 "--metadata-file",
                 str(metadata),
                 *self._cache_options(request),

@@ -204,6 +204,15 @@ def merge_requirements(
     ``DL_ENV_PROTECTED_PACKAGE``, naming what was asked for and what is
     supported, because the alternative is a build that succeeds and a sandbox
     that never connects.
+
+    Every pin is also its own requirement, whether or not the user's own
+    dependencies happen to need it. A ``uv --constraint`` alone only bounds a
+    package already in the graph; it never pulls one in — found live on
+    2026-09-12, building a spec with no kernel dependency of its own: the lock
+    held one package, ``uv pip sync`` then removed the base image's own
+    ipykernel and jupyter_client for not being in it, and the doctor's kernel
+    check failed in the built image. The contract's whole point is that every
+    artifact can start a kernel, regardless of what the spec asked for.
     """
     from packaging.requirements import InvalidRequirement, Requirement
     from packaging.utils import canonicalize_name
@@ -250,6 +259,10 @@ def merge_requirements(
             notes.append(
                 f"{requirement.name} is Datalayer's to pin; `{text}` agrees and is dropped"
             )
+    # Forced in regardless of what the spec asked for: the kernel stack a
+    # sandbox needs to connect at all is not optional, and a constraint alone
+    # never installs anything nothing else already depends on.
+    kept.extend(pin.requirement for pin in table.values())
     return MergedRequirements(
         requirements=tuple(kept),
         constraints=tuple(user_constraints) + tuple(pin.requirement for pin in table.values()),
@@ -779,10 +792,20 @@ def resolve_bases(
     environment: Environment,
     variants: Sequence[str],
     bases: dict[str, ApprovedBase] = APPROVED_BASES,
+    registry: str | None = None,
 ) -> dict[str, str]:
-    """Each variant's base, pinned by digest: ``<repository>@sha256:…`` (D-9, §4)."""
+    """Each variant's base, pinned by digest (D-9, §4).
+
+    ``<registry>/<repository>@sha256:…`` when ``registry`` is given — what
+    Runtimes' own `resolvedBases` validation already documents as the shape
+    it stores, and what a real ``FROM`` needs to resolve anywhere but Docker
+    Hub. Bare ``<repository>@sha256:…`` otherwise, which is what every test
+    and fixture that never passes a credential still gets.
+    """
     base = bases.get(environment.spec.base.ref)
     repository = base.repository if base is not None else environment.spec.base.ref
+    if registry:
+        repository = f"{registry}/{repository}"
     resolved: dict[str, str] = {}
     for variant in variants:
         digest = resolve_base(
@@ -858,7 +881,7 @@ def resolve_environment(
             detail={"field": "spec.packages.python.manager", "manager": "conda"},
         )
     wanted = sorted({str(variant) for variant in variants} or {"datalayer"})
-    resolved_bases = resolve_bases(environment, wanted, bases)
+    resolved_bases = resolve_bases(environment, wanted, bases, registry=_registry_of(credential))
     merged = merge_requirements(python.dependencies, python.constraints)
     for note in merged.notes:
         say(note)
@@ -889,6 +912,20 @@ def resolve_environment(
         + f" as {document['digest']}"
     )
     return {**document, "resolved_bases": resolved_bases}
+
+
+def _registry_of(credential: Any) -> str | None:
+    """The credential's registry host, to qualify a base reference with (D-18).
+
+    ``None`` with no credential, which is what a plane whose registry is not
+    deployed yet looks like — ``resolve_bases`` then answers the bare
+    reference it always has, unresolvable anywhere but by a caller who knows
+    which registry to prepend itself.
+    """
+    if credential is None:
+        return None
+    registry = getattr(credential, "registry", None)
+    return str(registry) if registry else None
 
 
 def _registry_auth(credential: Any) -> Mapping[str, str] | None:
