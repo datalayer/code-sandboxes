@@ -92,6 +92,15 @@ LOCK_FORMAT = "uv-pip-compile"
 #: ``/opt/datalayer/constraints/sandbox-contract-v1.txt`` (E1-05).
 CONSTRAINTS_PATH = Path(__file__).parent / "constraints" / "sandbox-contract-v1.txt"
 
+#: A protected pin's own wheel, when no index carries it — the jupyter-server
+#: fork's local version, ``2.21.0+datalayer.1``, is on none (E1-04, E1-05).
+#: Every protected pin is forced into the requirements (below), so every
+#: resolve and every build needs a way to satisfy this one; the base channel
+#: bakes it in at this path, and ``uv`` is pointed at it with
+#: ``--find-links``, preferring an index match and falling back to a local
+#: wheel only for what no index has.
+WHEELHOUSE_IMAGE_PATH = "/opt/datalayer/wheelhouse"
+
 #: How an apt pin is written in the lock. A comment, so every reader of a
 #: ``pip`` requirements file — the CLI's diff included — ignores it.
 APT_PIN_PREFIX = "# datalayer-apt: "
@@ -565,6 +574,7 @@ class BuildkitResolveRunner:
             "RUN --mount=type=cache,target=/root/.cache/uv "
             f"uv pip compile --quiet --no-header --generate-hashes "
             f"--python-version {request.python_version} --constraint constraints.txt "
+            f"--find-links {WHEELHOUSE_IMAGE_PATH} "
             + " ".join(_index_options(request.indexes))
             + " requirements.in -o /solve/lock.txt",
         ]

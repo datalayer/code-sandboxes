@@ -193,7 +193,8 @@ class TestTheDockerfileItGenerates:
             "USER root\n"
             "COPY lock.txt /opt/datalayer/lock.txt\n"
             "RUN --mount=type=cache,target=/root/.cache/uv "
-            "uv pip sync --system --require-hashes /opt/datalayer/lock.txt\n"
+            "uv pip sync --system --require-hashes --find-links /opt/datalayer/wheelhouse "
+            "/opt/datalayer/lock.txt\n"
             "USER 1000:100\n"
             "WORKDIR /home/datalayer/content\n"
             "RUN --network=none python -c 'import geopandas'\n"
@@ -224,7 +225,10 @@ class TestTheDockerfileItGenerates:
 
     def test_it_installs_from_the_lock_with_hashes(self) -> None:
         dockerfile = a_builder().dockerfile(a_request())
-        assert "uv pip sync --system --require-hashes /opt/datalayer/lock.txt" in dockerfile
+        assert (
+            "uv pip sync --system --require-hashes --find-links /opt/datalayer/wheelhouse "
+            "/opt/datalayer/lock.txt" in dockerfile
+        )
         # Never the loose list: that is the whole point of resolving once.
         assert "geopandas==1.1.1" not in dockerfile
 

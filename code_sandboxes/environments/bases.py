@@ -100,7 +100,7 @@ APPROVED_BASES: dict[str, ApprovedBase] = {
                     # `.spec.VARIANTS`, spelled out: `spec` imports from this
                     # module, so importing it back here would be circular.
                     ("datalayer", "e2b", "daytona", "modal"),
-                    "sha256:469a614b153ffda452184a5c1bdacbb06a740d43eea26936ae79a95c393e35ff",
+                    "sha256:cd09308a0c5e5adeec7fb5d8d29cf7455e78ba86f5c6c095a79068a280e1254f",
                 )
             },
         ),

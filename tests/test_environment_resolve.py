@@ -508,6 +508,8 @@ class TestTheBuildkitRunner:
         assert "uv pip compile" in dockerfile
         assert "--generate-hashes" in dockerfile
         assert "--constraint constraints.txt" in dockerfile
+        # A protected pin's own wheel, for what no index has (E1-04, E1-05).
+        assert "--find-links /opt/datalayer/wheelhouse" in dockerfile
         assert "snapshot.ubuntu.com" in dockerfile
         assert "apt-get install --simulate" in dockerfile
         # Exported, not left in the image: the lock is the only output.

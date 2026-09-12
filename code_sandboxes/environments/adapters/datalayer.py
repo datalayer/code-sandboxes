@@ -67,7 +67,7 @@ from ..errors import (
     EnvironmentsError,
 )
 from ..files import files_step
-from ..resolve import apt_pins_in, locked_versions
+from ..resolve import WHEELHOUSE_IMAGE_PATH, apt_pins_in, locked_versions
 from ..spec import Environment
 
 __all__ = ["ECR_ENVIRONMENT_PREFIX", "Builder", "owner_repository"]
@@ -261,8 +261,11 @@ class Builder:
                 "COPY lock.txt /opt/datalayer/lock.txt",
                 # `sync` and not `install`: the artifact holds the lock's set,
                 # and `--require-hashes` means every byte was the resolved one.
+                # `--find-links` for what no index has — a protected pin's
+                # own wheel, the fork's local version above all (E1-04).
                 "RUN --mount=type=cache,target=/root/.cache/uv "
-                "uv pip sync --system --require-hashes /opt/datalayer/lock.txt",
+                f"uv pip sync --system --require-hashes --find-links {WHEELHOUSE_IMAGE_PATH} "
+                "/opt/datalayer/lock.txt",
             ]
         )
         if request.build_secret_ids:
