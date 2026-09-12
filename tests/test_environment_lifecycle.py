@@ -11,6 +11,7 @@ import itertools
 import pytest
 
 from code_sandboxes.environments.lifecycle import (
+    RETRY,
     TERMINAL_STATES,
     TRANSITIONS,
     InvalidTransitionError,
@@ -23,6 +24,7 @@ from code_sandboxes.environments.lifecycle import (
     is_terminal,
     next_states,
     promotion_needs_acknowledgement,
+    reopened_by_retry,
     transition,
     unavailable_variants,
 )
@@ -47,8 +49,13 @@ EDGES = {
 
 
 def test_the_transitions_are_exactly_the_diagram() -> None:
-    assert {(item.source, item.target) for item in TRANSITIONS} == EDGES
+    assert {(item.source, item.target) for item in TRANSITIONS if not item.on_request} == EDGES
     assert all(item.event for item in TRANSITIONS)
+
+
+def test_the_one_move_asked_for_by_name_is_the_retry_that_reopens_a_version() -> None:
+    asked = [(item.source, item.target, item.event) for item in TRANSITIONS if item.on_request]
+    assert asked == [(S.FAILED, S.BUILDING, RETRY)]
 
 
 @pytest.mark.parametrize(("source", "target"), sorted(EDGES, key=str))
@@ -78,6 +85,39 @@ def test_nothing_leaves_a_terminal_state() -> None:
     assert TERMINAL_STATES == {S.FAILED, S.DEPRECATED}
     for state in VersionState:
         assert is_terminal(state) == (not next_states(state))
+
+
+def test_a_retryable_failure_is_the_one_way_back_to_building() -> None:
+    """The owner's decision of 2026-09-11: a retry reopens a version it may reopen."""
+    assert can_transition(S.FAILED, S.BUILDING, event=RETRY, retryable=True)
+    assert transition("failed", "building", event=RETRY, retryable=True) is S.BUILDING
+    assert reopened_by_retry("failed", retryable=True)
+    # Nobody walks it: without the event, and without a retryable failure, a
+    # failed version is where a version stops.
+    assert not can_transition(S.FAILED, S.BUILDING)
+    assert not can_transition(S.FAILED, S.BUILDING, retryable=True)
+    assert not can_transition(S.FAILED, S.BUILDING, event=RETRY, retryable=False)
+    assert not reopened_by_retry("failed", retryable=False)
+    assert next_states(S.FAILED) == frozenset()
+    assert next_states(S.FAILED, event=RETRY) == frozenset({S.BUILDING})
+
+
+def test_a_retry_refused_says_a_new_version_is_what_changes_it() -> None:
+    with pytest.raises(InvalidTransitionError, match="needs a new version"):
+        transition("failed", "building", event=RETRY, retryable=False)
+    with pytest.raises(InvalidTransitionError, match="cannot change state"):
+        transition("failed", "building")
+
+
+def test_the_retry_event_moves_nothing_else() -> None:
+    for state in VersionState:
+        gained = next_states(state, event=RETRY) - next_states(state)
+        assert gained == (frozenset({S.BUILDING}) if state is S.FAILED else frozenset())
+    # A deprecated version is not retried back into a build, and neither is a
+    # ready one whose backfill failed.
+    assert not can_transition(S.DEPRECATED, S.BUILDING, event=RETRY, retryable=True)
+    assert not can_transition(S.READY, S.BUILDING, event=RETRY, retryable=True)
+    assert not reopened_by_retry(S.DEPRECATED, retryable=True)
 
 
 def test_only_a_draft_is_edited() -> None:

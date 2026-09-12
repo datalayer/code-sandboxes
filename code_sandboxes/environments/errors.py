@@ -48,6 +48,7 @@ __all__ = [
     "map_provider_error",
     "provider_error_rules",
     "register_provider_error",
+    "retryable_failure",
 ]
 
 
@@ -177,6 +178,23 @@ def error_code(code: str) -> ErrorCode:
         return ERROR_CODES[code]
     except KeyError:
         raise KeyError(f"no error code {code!r}; the codes are {', '.join(ERROR_CODES)}") from None
+
+
+def retryable_failure(code: str | ErrorCode | None, *, occurrence: bool | None = None) -> bool:
+    """Whether a failure recorded under this code may be sent again as it stands.
+
+    This is the one place that decides it. The code decides, except where the
+    occurrence does (``PACKAGE_NOT_FOUND``): there the caller's answer stands,
+    and without one nothing is retried, so an index that named no such package
+    is not asked a second time. A code nobody recognises, or none at all, is
+    not retried either — what nothing says can pass on a second run needs a new
+    version rather than another attempt.
+    """
+    known = code if isinstance(code, ErrorCode) else ERROR_CODES.get(str(code or ""))
+    if known is None:
+        return False
+    decided = known.retryable
+    return bool(occurrence) if decided is None else decided
 
 
 class EnvironmentsError(Exception):

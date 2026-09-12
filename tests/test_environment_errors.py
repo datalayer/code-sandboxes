@@ -19,6 +19,7 @@ from code_sandboxes.environments.errors import (
     map_provider_error,
     provider_error_rules,
     register_provider_error,
+    retryable_failure,
 )
 
 #: PLAN_ENV.md §10: the code, and whether retrying can succeed (None: it depends).
@@ -59,6 +60,27 @@ def test_a_code_the_occurrence_decides_defaults_to_not_retrying() -> None:
     assert (
         EnvironmentsError(errors.PACKAGE_NOT_FOUND, "index down", retryable=True).retryable is True
     )
+
+
+@pytest.mark.parametrize(("code", "retryable"), TABLE)
+def test_only_a_retryable_code_is_sent_again(code: str, retryable: bool | None) -> None:
+    """What the retry route asks before it makes another attempt (E1-01)."""
+    assert retryable_failure(code) is (retryable is True)
+    assert retryable_failure(error_code(code)) is (retryable is True)
+
+
+def test_a_code_the_occurrence_decides_takes_the_occurrence_s_answer() -> None:
+    assert retryable_failure("DL_ENV_PACKAGE_NOT_FOUND", occurrence=True) is True
+    assert retryable_failure("DL_ENV_PACKAGE_NOT_FOUND", occurrence=False) is False
+    # A code that decides for itself is not talked out of it either way.
+    assert retryable_failure("DL_ENV_BUILD_FAILED", occurrence=True) is False
+    assert retryable_failure("DL_ENV_BUILD_TIMEOUT", occurrence=False) is True
+
+
+def test_a_failure_under_no_code_or_a_code_nobody_knows_is_not_retried() -> None:
+    assert retryable_failure("") is False
+    assert retryable_failure(None) is False
+    assert retryable_failure("DL_ENV_NOPE") is False
 
 
 def test_contradicting_what_a_code_decides_is_refused() -> None:

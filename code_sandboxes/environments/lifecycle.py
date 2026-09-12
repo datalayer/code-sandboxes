@@ -16,6 +16,12 @@ Backfilling a variant onto a ``ready`` or ``partially_ready`` version builds
 from the stored lock without moving the version; the only move a backfill
 makes is ``partially_ready`` to ``ready``, when the last unavailable variant
 arrives.
+
+One move is made only by asking for it: retrying a build that failed under a
+retryable code reopens its version, ``failed`` back to ``building`` (the
+owner's decision of 2026-09-11). A version never walks it on its own — without
+the :data:`RETRY` event, and without a failure the taxonomy calls retryable,
+``failed`` is where a version stops and the answer is a new version.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from enum import Enum
 __all__ = [
     "LAUNCHABLE_STATES",
     "PROMOTABLE_STATES",
+    "RETRY",
     "TERMINAL_STATES",
     "TRANSITIONS",
     "InvalidTransitionError",
@@ -40,6 +47,7 @@ __all__ = [
     "is_terminal",
     "next_states",
     "promotion_needs_acknowledgement",
+    "reopened_by_retry",
     "transition",
     "unavailable_variants",
 ]
@@ -57,6 +65,11 @@ class VersionState(str, Enum):
     DEPRECATED = "deprecated"
 
 
+#: The event that reopens a failed version: a retry of a build whose failure
+#: the taxonomy calls retryable. The only event a move is asked for by name.
+RETRY = "retry"
+
+
 @dataclass(frozen=True)
 class Transition:
     """One legal move, and what makes it."""
@@ -64,6 +77,9 @@ class Transition:
     source: VersionState
     target: VersionState
     event: str
+    #: True when the move is made only by naming its event, and never on its
+    #: own: nothing reaches this target by walking the machine.
+    on_request: bool = False
 
 
 S = VersionState
@@ -81,9 +97,11 @@ TRANSITIONS: tuple[Transition, ...] = (
     Transition(S.READY, S.DEPRECATED, "deprecate"),
     Transition(S.PARTIALLY_READY, S.READY, "backfill build succeeds"),
     Transition(S.PARTIALLY_READY, S.DEPRECATED, "deprecate"),
+    Transition(S.FAILED, S.BUILDING, RETRY, on_request=True),
 )
 
-#: Nothing leaves these.
+#: Nothing leaves these on its own. A retry of a retryable failure is the one
+#: move out, and it is made only by asking for it by name.
 TERMINAL_STATES: frozenset[VersionState] = frozenset({S.FAILED, S.DEPRECATED})
 
 #: What may become an Environment's promoted version.
@@ -106,22 +124,65 @@ def _state(value: VersionState | str) -> VersionState:
         raise ValueError(f"no version state {value!r}; the states are {names}") from None
 
 
-def next_states(state: VersionState | str) -> frozenset[VersionState]:
-    """Where a version in this state may go."""
+def next_states(state: VersionState | str, *, event: str | None = None) -> frozenset[VersionState]:
+    """Where a version in this state may go on its own, and where the event takes it."""
     source = _state(state)
-    return frozenset(item.target for item in TRANSITIONS if item.source is source)
+    return frozenset(
+        item.target
+        for item in TRANSITIONS
+        if item.source is source and (not item.on_request or item.event == event)
+    )
 
 
-def can_transition(source: VersionState | str, target: VersionState | str) -> bool:
-    return _state(target) in next_states(source)
+def _move(source: VersionState, target: VersionState, event: str | None) -> Transition | None:
+    """The transition from one state to the other, when this event makes it."""
+    for item in TRANSITIONS:
+        if item.source is not source or item.target is not target:
+            continue
+        if not item.on_request or item.event == event:
+            return item
+    return None
 
 
-def transition(source: VersionState | str, target: VersionState | str) -> VersionState:
+def can_transition(
+    source: VersionState | str,
+    target: VersionState | str,
+    *,
+    event: str | None = None,
+    retryable: bool | None = None,
+) -> bool:
+    """Whether this move is legal, under the event asked for.
+
+    The retry that reopens a failed version also needs its failure to be
+    retryable (:func:`errors.retryable_failure` decides that).
+    """
+    move = _move(_state(source), _state(target), event)
+    return move is not None and (move.event != RETRY or bool(retryable))
+
+
+def reopened_by_retry(state: VersionState | str, *, retryable: bool) -> bool:
+    """Whether retrying a build of a version in this state moves it back to `building`."""
+    return can_transition(state, S.BUILDING, event=RETRY, retryable=retryable)
+
+
+def transition(
+    source: VersionState | str,
+    target: VersionState | str,
+    *,
+    event: str | None = None,
+    retryable: bool | None = None,
+) -> VersionState:
     """The target, when the move is legal; otherwise an error naming the legal ones."""
     origin, destination = _state(source), _state(target)
-    if destination in next_states(origin):
+    move = _move(origin, destination, event)
+    if move is not None:
+        if move.event == RETRY and not retryable:
+            raise InvalidTransitionError(
+                f"a {origin.value} version is reopened only by a retry of a retryable failure; "
+                "a failure that is not retryable needs a new version"
+            )
         return destination
-    legal = sorted(state.value for state in next_states(origin))
+    legal = sorted(state.value for state in next_states(origin, event=event))
     if not legal:
         raise InvalidTransitionError(f"a {origin.value} version cannot change state")
     raise InvalidTransitionError(
