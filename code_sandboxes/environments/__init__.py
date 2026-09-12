@@ -16,6 +16,7 @@ provider-specific:
 - :mod:`.spec` — the canonical specification and its rules;
 - :mod:`.resolve` — the lock a version is resolved into, once (D-9);
 - :mod:`.policy` — whether an artifact's scan lets it be used (D-11);
+- :mod:`.accounts` — whose provider account a managed artifact lives in (D-8);
 - :mod:`.attest` — the scan and the signature it needs before anything runs it;
 - :mod:`.contract` — ``sandbox-contract/v1`` and the Dockerfile validator;
 - :mod:`.lifecycle` — the version states and their legal moves;
@@ -30,6 +31,7 @@ The builders themselves are in :mod:`.adapters`, loaded by variant.
 
 from __future__ import annotations
 
+from .accounts import account_fingerprints, fingerprint_matches, provider_account
 from .attest import Attestor, attest_artifact, signature_tag
 from .bases import APPROVED_BASES, ApprovedBase
 from .builders import (
@@ -106,6 +108,7 @@ __all__ = [
     "ScanPolicy",
     "ValidationResult",
     "VersionState",
+    "account_fingerprints",
     "attest_artifact",
     "build_outcome",
     "can_transition",
@@ -113,6 +116,7 @@ __all__ = [
     "canonical_json",
     "check_dockerfile",
     "decide",
+    "fingerprint_matches",
     "get_builder",
     "locked_versions",
     "map_provider_error",
@@ -120,6 +124,7 @@ __all__ = [
     "parse_environment",
     "parse_resolver_failure",
     "protected_pins",
+    "provider_account",
     "refuse_if_blocked",
     "resolve_environment",
     "signature_tag",
