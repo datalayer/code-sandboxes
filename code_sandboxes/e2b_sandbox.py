@@ -527,11 +527,19 @@ class E2BSandbox(Sandbox):
                 on_result(translated)
 
         seconds = timeout if timeout is not None else self.config.timeout
+        # A language and a context are two ways of saying the same thing to
+        # E2B, and its SDK refuses both at once: "You can provide context or
+        # language, but not both at the same time." A context already carries
+        # the language it was created with, so the context wins when there is
+        # one — which is what check 14 of E0-04 found here (PLAN_ENV E2-02).
+        e2b_context = self._e2b_context(context)
+        chosen: dict[str, Any] = (
+            {"context": e2b_context} if e2b_context is not None else {"language": "python"}
+        )
         try:
             execution = self._sandbox.run_code(
                 code,
-                language="python",
-                context=self._e2b_context(context),
+                **chosen,
                 on_stdout=take_stdout,
                 on_stderr=take_stderr,
                 on_result=take_result,

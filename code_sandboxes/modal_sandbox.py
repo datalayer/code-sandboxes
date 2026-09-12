@@ -23,6 +23,7 @@ import logging
 import math
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from .base import Sandbox, marks_execution
@@ -144,6 +145,19 @@ for line in sys.stdin:
 """
 
 
+@dataclass
+class _Session:
+    """One context's session process: the driver, its replies, its sequence.
+
+    A class rather than a tuple because the sequence is written on every
+    request, and a dataclass says which fields a reader may expect.
+    """
+
+    driver: Any
+    replies: Any
+    seq: int = 0
+
+
 def _modal_exec_timeout_seconds(timeout: float | None, default: float) -> int:
     """Return a Modal-compatible timeout in integer seconds."""
     value = timeout if timeout is not None else default
@@ -190,6 +204,11 @@ class ModalSandbox(Sandbox):
         self._features = list(features) if features is not None else None
         self._app = None
         self._sandbox = None
+        #: One session process per context, made on first use: a driver holds
+        #: one namespace, so a single one would make `create_context` a label
+        #: rather than an isolation (PLAN_ENV.md E2-02).
+        self._drivers: dict[str, Any] = {}
+        self._driver: Any | None = None
         self._sandbox_id = str(uuid.uuid4())
         self._execution_count = 0
         self._jupyter_endpoint: JupyterServerEndpoint | None = None
@@ -388,10 +407,17 @@ class ModalSandbox(Sandbox):
         )
         self._started = True
 
-    def _start_driver(self) -> None:
-        """Start the session process, and fall back to nothing on failure.
+    def _start_driver(self, context_id: str = "default") -> Any | None:
+        """Start a session process for one context, or nothing on failure.
 
-        A driver that cannot come up leaves `self._driver` unset, and
+        **One driver per context** (PLAN_ENV.md E2-02). A driver holds one
+        namespace, so a single one made `create_context` a label rather than
+        an isolation: `x = 1` in one context was readable from another, which
+        is what check 14 of E0-04 found. Each context gets its own process,
+        made on first use — starting one is a round trip, and most callers use
+        the default alone.
+
+        A driver that cannot come up leaves the context without one, and
         `run_code` then executes each snippet in its own process as before —
         working, merely stateless.
         """
@@ -405,7 +431,7 @@ class ModalSandbox(Sandbox):
                 "The Modal session driver could not be started; snippets will not share state.",
                 exc_info=True,
             )
-            return
+            return None
         replies: queue.Queue = queue.Queue()
 
         def pump() -> None:
@@ -417,29 +443,53 @@ class ModalSandbox(Sandbox):
             replies.put(None)
 
         # A thread reads the replies: the stream blocks, and a request that
-        # never gets its answer must time out rather than hang run_code.
-        thread = threading.Thread(target=pump, name="modal-driver-stdout", daemon=True)
+        # never gets its answer must time out rather than hang run_code. One
+        # queue per driver, so a reply cannot be read by another context's
+        # request — with one queue for every context, a slow answer surfaced
+        # under whichever request was waiting.
+        thread = threading.Thread(
+            target=pump, name=f"modal-driver-stdout-{context_id}", daemon=True
+        )
         thread.start()
-        self._driver = driver
-        self._driver_replies = replies
-        self._driver_seq = 0
+        session = _Session(driver=driver, replies=replies)
+        self._drivers[context_id] = session
+        if context_id == "default":
+            # Kept for the code that reads `_driver` to ask whether a session
+            # came up at all.
+            self._driver = driver
+        return session
 
-    def _driver_request(self, code: str, timeout: float) -> dict | None:
-        """One request to the session process, or None when it cannot serve."""
+    def _session(self, context_id: str) -> Any | None:
+        """The driver of this context, started on first use."""
+        existing = self._drivers.get(context_id)
+        if existing is not None:
+            return existing
+        return self._start_driver(context_id)
+
+    def _forget_session(self, context_id: str) -> None:
+        self._drivers.pop(context_id, None)
+        if context_id == "default":
+            self._driver = None
+
+    def _driver_request(
+        self, code: str, timeout: float, context_id: str = "default"
+    ) -> dict | None:
+        """One request to this context's session process, or None when it cannot serve."""
         import json as json_module
         import queue
 
-        if getattr(self, "_driver", None) is None:
+        session = self._session(context_id)
+        if session is None or session.driver is None:
             return None
-        self._driver_seq += 1
+        session.seq += 1
         try:
-            self._driver.stdin.write(
-                json_module.dumps({"seq": self._driver_seq, "code": code}) + "\n"
+            session.driver.stdin.write(
+                json_module.dumps({"seq": session.seq, "code": code}) + "\n"
             )
-            self._driver.stdin.drain()
+            session.driver.stdin.drain()
         except Exception:
             logger.warning("The Modal session driver went away; restarting stateless.")
-            self._driver = None
+            self._forget_session(context_id)
             return None
         deadline = time.monotonic() + timeout
         while True:
@@ -447,18 +497,18 @@ class ModalSandbox(Sandbox):
             if remaining <= 0:
                 raise TimeoutError(f"No reply from the Modal session within {timeout:.0f}s.")
             try:
-                line = self._driver_replies.get(timeout=remaining)
+                line = session.replies.get(timeout=remaining)
             except queue.Empty:
                 continue
             if line is None:
                 # The reader reached EOF: the driver is gone.
-                self._driver = None
+                self._forget_session(context_id)
                 return None
             try:
                 reply = json_module.loads(line)
             except ValueError:
                 continue
-            if reply.get("seq") == self._driver_seq:
+            if reply.get("seq") == session.seq:
                 return reply
 
     def stop(self) -> None:
@@ -517,7 +567,11 @@ class ModalSandbox(Sandbox):
         # not there.
         reply = None
         try:
-            reply = self._driver_request(code, timeout or self.config.timeout)
+            reply = self._driver_request(
+                code,
+                timeout or self.config.timeout,
+                context_id=context.id if context else "default",
+            )
         except TimeoutError as error:
             return ExecutionResult(
                 execution_ok=False,
