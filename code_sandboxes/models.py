@@ -12,7 +12,7 @@ Uses Pydantic for:
 """
 
 from enum import Enum
-from typing import Any, Callable, Literal, Optional, TypeVar
+from typing import Any, Callable, Literal, Optional, TypeVar, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -563,6 +563,13 @@ class SandboxConfig(BaseModel):
     #: does not exist on current deployments, so asking for it failed at
     #: the first cell with "Environment 'python-cpu-env' not found".
     environment: str = "ai-agents-env"
+    #: Which VERSION of that environment, for a user environment of the
+    #: registry: its number, or a version uid (PLAN_ENV.md, D-2, E1-19).
+    #:
+    #: `None` means the promoted version, which is what a platform environment
+    #: always launches — the field is additive, and a sandbox that names no
+    #: version is launched exactly as it was before there were any.
+    environment_version: Optional[Union[int, str]] = None
     working_dir: Optional[str] = None
     env_vars: dict[str, str] = Field(default_factory=dict)
     gpu: Optional[str] = None

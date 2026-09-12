@@ -475,11 +475,19 @@ class DatalayerSandbox(Sandbox):
             # Build sandbox name
             sandbox_name = self.config.name or f"sandbox-{self._sandbox_id[:8]}"
 
+            # Which VERSION of that environment, passed through as the
+            # environment is (PLAN_ENV.md, E1-19). `None` means the promoted
+            # version, which is what every platform environment launches — and
+            # what every sandbox launched before there were versions asked for.
+            # The GPU rewrite above is left exactly as it is until E4-11 (D-20).
+            environment_version = self.config.environment_version
+
             # Create the runtime (optionally from snapshot)
             if self._snapshot_name:
                 self._runtime = self._client.create_runtime(
                     name=sandbox_name,
                     environment=environment,
+                    version=environment_version,
                     time_reservation=time_reservation,
                     snapshot_name=self._snapshot_name,
                 )
@@ -487,6 +495,7 @@ class DatalayerSandbox(Sandbox):
                 self._runtime = self._client.create_runtime(
                     name=sandbox_name,
                     environment=environment,
+                    version=environment_version,
                     time_reservation=time_reservation,
                 )
 

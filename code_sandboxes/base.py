@@ -499,6 +499,7 @@ class Sandbox(ABC):
         timeout: float | None = None,
         name: str | None = None,
         environment: str | None = None,
+        environment_version: str | int | None = None,
         gpu: str | None = None,
         cpu: float | None = None,
         memory: int | None = None,
@@ -525,7 +526,12 @@ class Sandbox(ABC):
             config: Optional full configuration object (overrides individual params).
             timeout: Default timeout for code execution in seconds.
             name: Optional name for the sandbox.
-            environment: Runtime environment (e.g., "ai-agents-env").
+            environment: Runtime environment (e.g., "ai-agents-env"), or a user
+                environment as "<account-handle>/<name>" or by its uid.
+            environment_version: Which version of a user environment to launch:
+                its number, or a version uid. Without one the promoted version
+                launches, which is what a platform environment always does.
+                Only the datalayer variant has versions (PLAN_ENV.md, E1-19).
             gpu: GPU type to use (e.g., "T4", "A100", "H100"). Only for datalayer.
             cpu: CPU cores to allocate.
             memory: Memory limit in MB.
@@ -559,6 +565,7 @@ class Sandbox(ABC):
             config = SandboxConfig(
                 timeout=timeout or 30.0,
                 environment=environment or DEFAULT_ENVIRONMENT,
+                environment_version=environment_version,
                 memory_limit=memory * 1024 * 1024 if memory else None,
                 cpu_limit=cpu,
                 env_vars=env or {},
