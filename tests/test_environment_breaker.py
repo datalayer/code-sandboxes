@@ -41,7 +41,9 @@ def at(minutes_ago: float) -> str:
     return (NOW - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def build(variant: str = "e2b", status: str = "succeeded", *, code: str = "", ago: float = 1) -> dict:
+def build(
+    variant: str = "e2b", status: str = "succeeded", *, code: str = "", ago: float = 1
+) -> dict:
     return {
         "variant": variant,
         "status": status,
@@ -116,7 +118,12 @@ class TestTheWindow:
 
     def test_it_reads_the_camel_names_a_route_answers_too(self) -> None:
         answered = [
-            {"variant": "e2b", "status": "failed", "errorCode": "DL_ENV_BUILD_TIMEOUT", "finishedAt": at(2)}
+            {
+                "variant": "e2b",
+                "status": "failed",
+                "errorCode": "DL_ENV_BUILD_TIMEOUT",
+                "finishedAt": at(2),
+            }
         ]
         assert load_of("e2b", answered, now=NOW).failures == 1
 
@@ -124,7 +131,9 @@ class TestTheWindow:
         assert load_of("e2b", [{"variant": "e2b", "status": "failed"}], now=NOW).attempts == 0
 
     def test_the_newest_counted_failure_is_what_the_cool_down_runs_from(self) -> None:
-        load = load_of("e2b", [failed("e2b", ago=9), failed("e2b", ago=2), failed("e2b", ago=6)], now=NOW)
+        load = load_of(
+            "e2b", [failed("e2b", ago=9), failed("e2b", ago=2), failed("e2b", ago=6)], now=NOW
+        )
         assert load.newest_failure_at == NOW - timedelta(minutes=2)
 
     def test_a_record_the_repository_wrapped_is_read_the_same(self) -> None:
@@ -226,7 +235,9 @@ class TestTheRefusal:
         assert Health(variant="modal").as_body() == {"variant": "modal", "degraded": False}
 
     def test_the_body_carries_what_a_dashboard_and_a_person_both_need(self) -> None:
-        body = decide(load_of("e2b", [failed(), failed(ago=2), build(), build(ago=3)], now=NOW), now=NOW).as_body()
+        body = decide(
+            load_of("e2b", [failed(), failed(ago=2), build(), build(ago=3)], now=NOW), now=NOW
+        ).as_body()
         assert set(body) == {
             "variant",
             "degraded",
