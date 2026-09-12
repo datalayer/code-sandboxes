@@ -74,6 +74,8 @@ __all__ = [
     "ResolveOutcome",
     "ResolveRequest",
     "ResolveRunner",
+    "apt_pins",
+    "apt_pins_in",
     "lock_document",
     "locked_versions",
     "merge_requirements",
@@ -711,6 +713,25 @@ def locked_versions(lock_text: str) -> dict[str, str]:
         if len(pinned) == 1:
             versions[canonicalize_name(requirement.name)] = pinned[0]
     return versions
+
+
+def apt_pins_in(lock_text: str) -> dict[str, str]:
+    """The apt versions a lock records, by package.
+
+    The builder installs exactly these (E1-07): the lock is the one document
+    that says what a build installs, apt included, so a build never asks a
+    mirror what the newest version is.
+    """
+    pins: dict[str, str] = {}
+    for raw in lock_text.splitlines():
+        line = raw.strip()
+        if not line.startswith(APT_PIN_PREFIX.strip()):
+            continue
+        pin = line[len(APT_PIN_PREFIX.strip()) :].strip()
+        name, _, version = pin.partition("=")
+        if name and version:
+            pins[name.strip()] = version.strip()
+    return pins
 
 
 def lock_document(
