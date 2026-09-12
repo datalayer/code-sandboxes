@@ -34,6 +34,9 @@ if TYPE_CHECKING:
 __all__ = [
     "CORE_CHECKS",
     "EXTENDED_CHECKS",
+    "cross_variant_packages",
+    "drifted_from",
+    "package_versions_of",
     "run_conformance",
     "run_core_tier",
     "run_extended_tier",
@@ -653,3 +656,74 @@ def run_conformance(
         sandbox, contract=contract, timeout=timeout, **dict(extended or {})
     )
     return ValidationResult(contract_version=contract.version, checks=core.checks + recorded.checks)
+
+
+# --- One dependency set everywhere (PLAN_ENV.md E2-08) ----------------------------
+
+#: Check 5's own id, the one `package_versions_of` reads out of a `ValidationResult`.
+_IMPORTS_CHECK_ID = "conformance:5"
+
+
+def package_versions_of(validation: ValidationResult) -> dict[str, str]:
+    """One variant's check 5, reduced to `{package: version}`.
+
+    `_imports` already records the full answer — the imported module, the
+    error, the version — as check 5's `data["packages"]`; this is the one
+    field a *cross*-variant comparison needs; a version differing is the
+    only way one variant's build can disagree with another's when both
+    installed from the same lock (a variant that could not import the
+    package at all failed check 5 on its own, in its own sandbox, and is not
+    this function's concern).
+    """
+    for check in validation.checks:
+        if check.id == _IMPORTS_CHECK_ID:
+            packages = check.data.get("packages") or {}
+            return {
+                str(name): str(entry.get("version"))
+                for name, entry in packages.items()
+                if isinstance(entry, Mapping) and entry.get("version")
+            }
+    return {}
+
+
+def drifted_from(
+    stored: Mapping[str, Mapping[str, str]], variant: str, versions: Mapping[str, str]
+) -> tuple[str, str, str] | None:
+    """The first package this variant's versions disagree with another variant's, or `None`.
+
+    `stored` is `{other_variant: {package: version}}` for every variant that
+    has already built this version — the version's own running record, not
+    this build's. Every variant installs from the *same* lock (section 5), so
+    a real disagreement means something about the base or the provider's own
+    layer let a different transitive version in despite it; this is Appendix
+    B check 5's whole purpose, run *across* variants rather than only within
+    one.
+
+    Returns `(package, this variant's version, the other's)` for the first
+    disagreement found, so the refusal can name both — never a bare "check 5
+    failed" for a build that, on its own, imported everything the lock named.
+    """
+    for name, version in versions.items():
+        for other_variant, other_versions in stored.items():
+            if other_variant == variant:
+                continue
+            other_version = other_versions.get(name)
+            if other_version and other_version != version:
+                return name, version, other_version
+    return None
+
+
+def cross_variant_packages(
+    stored: Mapping[str, Mapping[str, str]], variant: str, versions: Mapping[str, str]
+) -> dict[str, dict[str, str]]:
+    """`stored`, with this variant's own versions folded in.
+
+    The report a version keeps is this — every variant's `{package: version}`
+    together — so that once every declared variant has built, the one
+    question "does this environment's dependency set agree everywhere" has
+    one place to be read from, identical no matter which variant's build is
+    read last.
+    """
+    merged = {name: dict(found) for name, found in stored.items()}
+    merged[variant] = dict(versions)
+    return merged
