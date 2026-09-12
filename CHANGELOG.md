@@ -8,6 +8,24 @@
 
 ## Unreleased
 
+## 1.7.0
+
+- **A version is resolved into one lock** (`code_sandboxes.environments.resolve`,
+  PLAN_ENV.md E1-04, D-9). Datalayer's protected constraints are merged over the
+  user's requirements — a requirement that agrees with a pin is dropped for it,
+  one that contradicts it is `DL_ENV_PROTECTED_PACKAGE` with the supported range
+  — the base is resolved to a digest per requested variant, and uv's refusals
+  are read into the error taxonomy: a conflict with the pair that cannot hold, a
+  package no index has, a protected pin, and `DL_ENV_PROVIDER_ERROR`, which is
+  retryable, for a failure that is not about the version.
+
+  The lock is uv's hashed output with the apt pins and the protected pins above
+  it as comments: one document that says everything a build installs, and still
+  a requirements file. `BuildkitResolveRunner` is D-9's solve, `FROM` the
+  resolved base digest; `LocalResolveRunner` runs `uv` where it is called, for
+  `plane local`, and refuses to pin apt rather than lock another
+  distribution's versions.
+
 - **Every variant has a real interrupt now, and can be reached to give it.**
   `Sandbox.interrupt` is two gates — `_executing_event` must be set, then
   `_do_interrupt` must answer — and seven variants failed one of them, each in
