@@ -48,6 +48,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Callable
 
+from ..build_secrets import resolve_build_secret
 from ..builders import (
     ArtifactMetadata,
     ArtifactReference,
@@ -57,7 +58,6 @@ from ..builders import (
     CapabilitySet,
     ValidationResult,
 )
-from ..build_secrets import resolve_build_secret
 from ..contract import SANDBOX_CONTRACT_V1
 from ..errors import (
     ARTIFACT_MISSING,
@@ -622,7 +622,9 @@ class Builder:
         without it.
         """
         wanted = set(request.build_secret_ids)
-        secrets = [secret for secret in request.environment.spec.build_secrets if secret.id in wanted]
+        secrets = [
+            secret for secret in request.environment.spec.build_secrets if secret.id in wanted
+        ]
         args: list[str] = []
         for secret in secrets:
             value = self._resolve_secret(secret, owner_uid=request.owner_uid)

@@ -455,6 +455,64 @@ class TestBuildingAndPushing:
         # and that the argv named the Dockerfile beside it.
         assert f"dockerfile={buildctl.context}" in buildctl.argv
 
+    def test_a_build_secret_is_resolved_and_passed_to_buildctl_by_file(self) -> None:
+        """The value never sits in argv (a process listing could read it),
+        and the file is gone once `build` returns — the same one
+        `TemporaryDirectory` the Dockerfile and lock already live in."""
+        resolved: list[tuple[str, str]] = []
+        seen: dict[str, tuple[str, int]] = {}
+
+        def resolve_secret(secret, *, owner_uid):
+            resolved.append((secret.id, owner_uid))
+            return "s3cr3t-token-value"
+
+        class RecordingBuildctl(Buildctl):
+            def __call__(self, argv, **kwargs):
+                result = super().__call__(argv, **kwargs)
+                assert self.context is not None
+                path = self.context / "secret-dlsec_01J9BUILDSECRET0000000000"
+                seen["file"] = (path.read_text(encoding="utf-8"), path.stat().st_mode & 0o777)
+                return result
+
+        request = a_request(
+            spec={
+                "buildSecrets": [
+                    {"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}
+                ]
+            },
+            build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
+        )
+        buildctl = RecordingBuildctl()
+        a_builder(run=buildctl, resolve_secret=resolve_secret).build(request)
+
+        assert resolved == [("dlsec_01J9BUILDSECRET0000000000", OWNER)]
+        assert seen["file"] == ("s3cr3t-token-value", 0o600)
+        argv = " ".join(buildctl.argv)
+        assert "--secret" in argv
+        assert "id=dlsec_01J9BUILDSECRET0000000000,src=" in argv
+        # Never the value itself, anywhere in argv.
+        assert "s3cr3t-token-value" not in argv
+
+    def test_a_build_never_starts_when_a_secret_cannot_be_resolved(self) -> None:
+        from code_sandboxes.environments.errors import BUILD_SECRET_UNAVAILABLE
+
+        def resolve_secret(secret, *, owner_uid):
+            raise EnvironmentsError(BUILD_SECRET_UNAVAILABLE, "IAM is unreachable")
+
+        request = a_request(
+            spec={
+                "buildSecrets": [
+                    {"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}
+                ]
+            },
+            build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
+        )
+        buildctl = Buildctl()
+        with pytest.raises(EnvironmentsError) as refused:
+            a_builder(run=buildctl, resolve_secret=resolve_secret).build(request)
+        assert refused.value.code is BUILD_SECRET_UNAVAILABLE
+        assert buildctl.argv == []  # never invoked: nothing half-built
+
     def test_a_retried_build_of_the_same_version_pushes_a_tag_of_its_own(self) -> None:
         first, second = Buildctl(), Buildctl(digest="sha256:" + "ee" * 32)
         a_builder(run=first).build(a_request())
