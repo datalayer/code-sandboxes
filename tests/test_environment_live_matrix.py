@@ -10,15 +10,25 @@ plan records used, and which hid the one finding that mattered (E2-04's
 build-time doctor check) until a real lock exposed it — launches a sandbox
 from that artifact, and runs the formal core tier
 (:func:`code_sandboxes.environments.conformance.run_core_tier`) against it.
-Everything this test creates is deleted, whether it passes or not.
+Everything this test creates is deleted where the provider allows it —
+Daytona and Modal both do; E2B's SDK exposes no template-delete call at
+all (found live, E2-03's own builder docstring), so a live run of
+``TestE2B`` leaves a real template behind every time, for the owner to
+clean up from the E2B dashboard.
 
-E2B and Modal are `xfail(strict=False)`: each has its own already-documented,
-unticked gap (E2-03's uid/gid mismatch; `modal_sandbox.py`'s missing
-`setpriv`, so `ModalSandbox` execs as root today) that the core tier is
-expected to catch. `strict=False` means passing does not fail the run either
-— an `XPASS` is exactly the signal that one of those gaps has been closed
-and its plan box can tick. Daytona carries no such marker: it is expected to
-pass in full, and a failure there is a real regression.
+E2B and Modal are `xfail(strict=False)`: each still has its own
+already-documented, unticked gap that the core tier is expected to catch —
+not at build time for either any more (both builds now succeed in full),
+but at launch: E2B's `jupyter.service`/`code-interpreter.service` run as
+root regardless of the build's own `set_user`, and E2B's own private
+server hardcodes `/home/user` as the cwd; Modal's own identity gap is
+closed (`modal_sandbox.py`'s driver now drops to `1000:100` for a
+contract-built artifact), but checks 5/6 (imports, filesystem) still fail
+for a separate, unexplained reason specific to a contract-built image
+under repeated `exec`. `strict=False` means passing does not fail the run
+either — an `XPASS` is exactly the signal that one of those gaps has been
+closed and its plan box can tick. Daytona carries no such marker: it is
+expected to pass in full, and a failure there is a real regression.
 
 Run on purpose:
 
@@ -262,14 +272,24 @@ class TestModal:
 
 
 class TestE2B:
-    """`xfail(strict=False)`: E2-03's own documented uid/gid gap makes the
-    build itself refuse (the doctor's own build-time check fails it) before
-    a sandbox is ever launched — an `XPASS` here means that gap closed and
-    E2-03 can tick."""
+    """`xfail(strict=False)`: the build itself now succeeds in full — the
+    uid/gid mismatch this used to refuse on at build time is fixed — but a
+    live launch still fails the core tier's identity checks (root, not
+    `1000:100`; cwd `/home/user`, not the content directory): the two
+    `systemd` services that actually execute a launched sandbox's code
+    (`jupyter.service`, `code-interpreter.service`) have no `User=` of
+    their own, and E2B's own private server hardcodes `/home/user`,
+    independent of anything the build sets. Root-caused and documented in
+    full in `adapters/e2b.py`'s own module docstring; not yet fixed there,
+    for the same reason `modal_sandbox.py`'s own `setpriv` gap was left
+    open before it was closed — this one touches E2B's own private
+    execution engine, not a one-off build step. An `XPASS` here means that
+    gap closed and E2-03 can tick."""
 
     @pytest.mark.xfail(
-        reason="E2-03's own documented gap: code-interpreter-v1 lands datalayer "
-        "on uid 1001, gid 1001, not the contract's 1000:100",
+        reason="the build succeeds; a live launch still runs as root because "
+        "jupyter.service/code-interpreter.service have no User= and E2B's own "
+        "private server hardcodes /home/user as the cwd — see adapters/e2b.py",
         strict=False,
     )
     def test_build_launch_and_the_core_tier(self, real_lock: tuple[str, str]) -> None:
