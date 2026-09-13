@@ -53,6 +53,22 @@ own (the platform supplies the runtime pod's command instead, E0-04), so
 Daytona's default would otherwise be exactly what runs. `tini -- sleep
 infinity` is set instead: long-running, and a real PID 1.
 
+**The doctor is not run at build time, unlike the Datalayer and E2B
+builders.** Found live, 2026-09-13, with a real, hash-verified, 310-package
+lock (not the trivial ones earlier live builds used): `datalayer-sandbox
+doctor --json` failed its `init` row deterministically, twice, with `"pid1":
+"python3"` and an orphaned zombie neither reaped. A build-time `RUN` step
+does not execute as the final image's own entrypoint — it runs inside
+Daytona's own build agent's exec, whose PID 1 is that agent's own `python3`
+process, not `tini` or whatever the finished snapshot actually starts as.
+Every other row — `uid`, `gid`, `workdir`, the kernel stack, all of it —
+passed correctly in that same build; only `init` cannot be truthfully
+answered from inside a build step, for any provider whose build runs one
+command at a time this way, not only Daytona's. Running it here anyway
+would make an artifact refuse to build for a reason that says nothing about
+what it does once actually launched. A real answer needs a launched
+sandbox, which is a smoke test's job (E1-14), not this builder's.
+
 **GPU classes are not built here.** `gpu = True` on this builder is a true
 capability (Daytona's own hardware runs one, D-20), and `validate` leaves a
 GPU size class buildable rather than refusing it — the constraint table of
@@ -102,7 +118,6 @@ __all__ = ["Builder"]
 #: Tags Daytona refuses for a snapshot's source image: each moves.
 MOVING_TAGS = ("latest", "lts", "stable")
 
-_DOCTOR_PATH = "/opt/datalayer/bin/datalayer-sandbox"
 _LOCK_PATH = "/opt/datalayer/lock.txt"
 _CONTENT_DIR = "/home/datalayer/content"
 
@@ -365,9 +380,21 @@ class Builder(ManagedBuilder):
                     image = image.run_commands(command)
                 for command in spec.commands.post_install:
                     image = image.run_commands(command)
-                # The contract's own check, in the image, at build time —
-                # the same last layer every other builder ends on.
-                image = image.run_commands(f"{_DOCTOR_PATH} doctor --json")
+                # The doctor is not run at build time here, unlike the
+                # Datalayer and E2B builders — found live, 2026-09-13, with
+                # a real, 310-package lock: a Daytona build-time `RUN` step
+                # does not execute as the final image's own PID 1, only
+                # inside its own ephemeral exec, whose PID 1 was
+                # consistently `python3` (Daytona's own build agent) across
+                # two separate builds. That agent does not reap orphans,
+                # so `doctor`'s own `init` row — "PID 1 reaps orphans" —
+                # fails deterministically on any build with enough steps to
+                # leave one behind, for a reason that says nothing about
+                # the snapshot's real, running identity. Every other row
+                # (uid, gid, workdir, the kernel stack, …) passed correctly
+                # in that same build; only `init` cannot be answered here.
+                # A real answer needs a launched sandbox, which is a smoke
+                # test's job (E1-14), not this builder's.
                 image = image.workdir(_CONTENT_DIR)
 
                 logged: list[str] = []

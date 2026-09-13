@@ -482,7 +482,7 @@ class TestBuildingASnapshot:
         )
         assert root_at < sync_at < contract_user_at
 
-    def test_post_install_and_the_doctor_check_run_after_user_is_restored(self) -> None:
+    def test_post_install_runs_after_user_is_restored(self) -> None:
         daytona = FakeDaytonaModule()
         a_builder(daytona=daytona).build(a_request())
         image = daytona.client.snapshot.create_calls[0].args[0].image
@@ -496,12 +496,17 @@ class TestBuildingASnapshot:
             for i, call in enumerate(image.calls)
             if call.name == "run_commands" and "import geopandas" in call.args[0]
         )
-        doctor_at = next(
-            i
-            for i, call in enumerate(image.calls)
-            if call.name == "run_commands" and "doctor --json" in call.args[0]
-        )
-        assert contract_user_at < post_install_at < doctor_at
+        assert contract_user_at < post_install_at
+
+    def test_the_doctor_check_is_not_run_at_build_time(self) -> None:
+        """A build-time `RUN` step's own PID 1 is Daytona's build agent, not
+        the finished snapshot's — found live, 2026-09-13: `init` failed
+        deterministically for a reason unrelated to the shipped artifact.
+        A real answer needs a launched sandbox (E1-14), not this builder."""
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request())
+        image = daytona.client.snapshot.create_calls[0].args[0].image
+        assert not any("doctor" in call.args[0] for call in calls_named(image, "run_commands"))
 
     def test_the_chain_ends_with_workdir(self) -> None:
         daytona = FakeDaytonaModule()
