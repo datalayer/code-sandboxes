@@ -371,38 +371,47 @@ class Builder:
                 wheelhouse.mkdir()
                 for wheel in WHEELHOUSE_PATH.glob("*.whl"):
                     (wheelhouse / wheel.name).write_bytes(wheel.read_bytes())
-            secret_args = self._secret_files(request, root)
             metadata = root / "metadata.json"
-            command = [
-                self._buildctl,
-                *(["--addr", self._address] if self._address else []),
-                "build",
-                "--frontend",
-                "dockerfile.v0",
-                "--local",
-                f"context={root}",
-                "--local",
-                f"dockerfile={root}",
-                "--output",
-                f"type=image,name={reference},push=true,oci-mediatypes=true",
-                # The supply chain is part of the artifact (D-11). `--attest`
-                # is `docker buildx`'s flag, not `buildctl`'s — a bare
-                # `buildctl` (which never goes through buildx) takes the same
-                # request as a dockerfile.v0 frontend option: found live on
-                # 2026-09-12, the first real build this adapter ever drove,
-                # where `--attest type=sbom` failed before anything else did
-                # ("flag provided but not defined: -attest").
-                "--opt",
-                "attest:sbom=",
-                "--opt",
-                "attest:provenance=mode=max",
-                "--metadata-file",
-                str(metadata),
-                *self._cache_options(request),
-                *secret_args,
-            ]
-            self._log(f"Building {reference} from {request.resolved_base}")
-            finished = self._invoke(command, timeout=self._max_build_seconds)
+            # A secret's value is never written under `root`: that directory
+            # is also `--local context=`, sent to `buildkitd` as ordinary
+            # build-context data — so a value living there would reach the
+            # daemon over the context channel too, not only over `--secret`,
+            # and a stray `COPY` could bake it into a layer. Its own,
+            # sibling `TemporaryDirectory` is never named in `--local`, only
+            # in `--secret ...,src=`, which `buildctl` reads directly.
+            with tempfile.TemporaryDirectory(prefix="dl-build-secrets-") as secrets_directory:
+                secret_args = self._secret_files(request, Path(secrets_directory))
+                command = [
+                    self._buildctl,
+                    *(["--addr", self._address] if self._address else []),
+                    "build",
+                    "--frontend",
+                    "dockerfile.v0",
+                    "--local",
+                    f"context={root}",
+                    "--local",
+                    f"dockerfile={root}",
+                    "--output",
+                    f"type=image,name={reference},push=true,oci-mediatypes=true",
+                    # The supply chain is part of the artifact (D-11).
+                    # `--attest` is `docker buildx`'s flag, not `buildctl`'s —
+                    # a bare `buildctl` (which never goes through buildx)
+                    # takes the same request as a dockerfile.v0 frontend
+                    # option: found live on 2026-09-12, the first real build
+                    # this adapter ever drove, where `--attest type=sbom`
+                    # failed before anything else did ("flag provided but not
+                    # defined: -attest").
+                    "--opt",
+                    "attest:sbom=",
+                    "--opt",
+                    "attest:provenance=mode=max",
+                    "--metadata-file",
+                    str(metadata),
+                    *self._cache_options(request),
+                    *secret_args,
+                ]
+                self._log(f"Building {reference} from {request.resolved_base}")
+                finished = self._invoke(command, timeout=self._max_build_seconds)
             if finished.returncode != 0:
                 raise EnvironmentsError(
                     BUILD_FAILED,
@@ -604,17 +613,22 @@ class Builder:
             f"type=registry,ref={cache},mode=max,image-manifest=true,oci-mediatypes=true",
         ]
 
-    def _secret_files(self, request: BuildRequest, root: Path) -> list[str]:
+    def _secret_files(self, request: BuildRequest, secrets_directory: Path) -> list[str]:
         """Resolve every declared build secret and hand ``buildctl`` a ``--secret`` per one (E3-05).
 
-        Each value is written to its own file under ``root`` — the same
-        `TemporaryDirectory` the Dockerfile and lock already live in for this
-        one build, removed the moment `build` returns, on success or failure
-        — with owner-only permissions, and named opaquely by the secret's id
-        rather than its name, so a directory listing does not itself say what
-        a secret is for. ``buildctl``'s own ``--secret id=<id>,src=<path>``
-        reads the file directly; the value is never held as an argv string,
-        which a process listing on the same host could read.
+        Each value is written to its own file under ``secrets_directory`` —
+        never under the Dockerfile/lock's own directory, which is also
+        ``--local context=``: a value living there would reach `buildkitd`
+        as ordinary build-context data in addition to the secret channel,
+        and a stray ``COPY`` could bake it into a layer. This directory is
+        never named in any ``--local``, only in ``--secret ...,src=``, which
+        ``buildctl`` reads directly — and it is its own `TemporaryDirectory`,
+        removed the moment `build` returns, on success or failure.
+
+        Each file has owner-only permissions, and is named opaquely by the
+        secret's id rather than its name, so a directory listing does not
+        itself say what a secret is for. The value is never held as an argv
+        string, which a process listing on the same host could read.
 
         Raises whatever `resolve_build_secret` raises when a secret cannot be
         resolved (`DL_ENV_BUILD_SECRET_UNAVAILABLE`) — a build never starts
@@ -628,7 +642,7 @@ class Builder:
         args: list[str] = []
         for secret in secrets:
             value = self._resolve_secret(secret, owner_uid=request.owner_uid)
-            path = root / f"secret-{secret.id}"
+            path = secrets_directory / f"secret-{secret.id}"
             path.write_text(value, encoding="utf-8")
             path.chmod(0o600)
             args += ["--secret", f"id={secret.id},src={path}"]

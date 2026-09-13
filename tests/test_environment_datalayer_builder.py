@@ -457,8 +457,9 @@ class TestBuildingAndPushing:
 
     def test_a_build_secret_is_resolved_and_passed_to_buildctl_by_file(self) -> None:
         """The value never sits in argv (a process listing could read it),
-        and the file is gone once `build` returns — the same one
-        `TemporaryDirectory` the Dockerfile and lock already live in."""
+        and the file is gone once `build` returns — in its own directory,
+        never the one `--local context=` also names, so a value cannot reach
+        `buildkitd` as ordinary context data alongside the secret channel."""
         resolved: list[tuple[str, str]] = []
         seen: dict[str, tuple[str, int]] = {}
 
@@ -470,7 +471,11 @@ class TestBuildingAndPushing:
             def __call__(self, argv, **kwargs):
                 result = super().__call__(argv, **kwargs)
                 assert self.context is not None
-                path = self.context / "secret-dlsec_01J9BUILDSECRET0000000000"
+                secret_arg = next(
+                    value for value in argv if value.startswith("id=dlsec_01J9BUILDSECRET")
+                )
+                path = Path(secret_arg.split("src=", 1)[1])
+                assert path.parent != self.context  # never the build context
                 seen["file"] = (path.read_text(encoding="utf-8"), path.stat().st_mode & 0o777)
                 return result
 

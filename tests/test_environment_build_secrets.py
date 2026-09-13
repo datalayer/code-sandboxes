@@ -77,6 +77,9 @@ def test_no_key_refuses_before_any_network_call() -> None:
         )
     assert raised.value.code is BUILD_SECRET_UNAVAILABLE
     assert IAM_API_KEY_VARIABLE in raised.value.message
+    # A configuration problem: retrying with the same unset key answers the
+    # same refusal.
+    assert raised.value.retryable is False
 
 
 def test_no_iam_url_refuses_before_any_network_call() -> None:
@@ -93,6 +96,7 @@ def test_no_iam_url_refuses_before_any_network_call() -> None:
         )
     assert raised.value.code is BUILD_SECRET_UNAVAILABLE
     assert IAM_URL_VARIABLE in raised.value.message
+    assert raised.value.retryable is False
 
 
 def test_a_404_is_build_secret_unavailable_not_a_bare_404() -> None:
@@ -109,6 +113,8 @@ def test_a_404_is_build_secret_unavailable_not_a_bare_404() -> None:
         )
     assert raised.value.code is BUILD_SECRET_UNAVAILABLE
     assert SECRET.id in raised.value.message
+    # This owner genuinely has no such secret: retrying answers the same.
+    assert raised.value.retryable is False
 
 
 def test_iam_unreachable_is_build_secret_unavailable() -> None:
@@ -124,6 +130,8 @@ def test_iam_unreachable_is_build_secret_unavailable() -> None:
             transport=httpx.MockTransport(unreachable),
         )
     assert raised.value.code is BUILD_SECRET_UNAVAILABLE
+    # A network failure is the usual shape of "IAM is briefly unreachable".
+    assert raised.value.retryable is True
 
 
 def test_a_non_200_that_is_not_404_is_still_build_secret_unavailable() -> None:
@@ -139,6 +147,44 @@ def test_a_non_200_that_is_not_404_is_still_build_secret_unavailable() -> None:
             transport=httpx.MockTransport(handler),
         )
     assert raised.value.code is BUILD_SECRET_UNAVAILABLE
+    # IAM's own trouble, which a retry may have cleared by the time it runs.
+    assert raised.value.retryable is True
+
+
+def test_malformed_json_is_build_secret_unavailable_and_retryable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"not json at all")
+
+    with pytest.raises(EnvironmentsError) as raised:
+        resolve_build_secret(
+            SECRET,
+            owner_uid=OWNER,
+            iam_url="https://iam.example.com",
+            api_key="k",
+            transport=httpx.MockTransport(handler),
+        )
+    assert raised.value.code is BUILD_SECRET_UNAVAILABLE
+    assert raised.value.retryable is True
+
+
+def test_a_non_object_json_body_is_build_secret_unavailable() -> None:
+    """A `200` whose body parses but is not an object: `.get` must never be
+    called on it directly, or a list or bare string crashes with `AttributeError`
+    instead of raising the taxonomy's own code."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=["not", "an", "object"])
+
+    with pytest.raises(EnvironmentsError) as raised:
+        resolve_build_secret(
+            SECRET,
+            owner_uid=OWNER,
+            iam_url="https://iam.example.com",
+            api_key="k",
+            transport=httpx.MockTransport(handler),
+        )
+    assert raised.value.code is BUILD_SECRET_UNAVAILABLE
+    assert raised.value.retryable is False
 
 
 def test_an_empty_value_is_refused_rather_than_used() -> None:
@@ -154,6 +200,9 @@ def test_an_empty_value_is_refused_rather_than_used() -> None:
             transport=httpx.MockTransport(handler),
         )
     assert raised.value.code is BUILD_SECRET_UNAVAILABLE
+    # The response parsed, but not into a value: retrying an unchanged
+    # answer would not help.
+    assert raised.value.retryable is False
 
 
 def test_the_environment_variables_are_read_when_no_argument_is_given(monkeypatch) -> None:

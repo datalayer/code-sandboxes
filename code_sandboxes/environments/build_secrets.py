@@ -68,10 +68,13 @@ def resolve_build_secret(
     """
     key = api_key if api_key is not None else os.environ.get(IAM_API_KEY_VARIABLE, "")
     if not key:
+        # A configuration problem, not a transient one: retrying with the
+        # same unset variable answers the same refusal.
         raise EnvironmentsError(
             BUILD_SECRET_UNAVAILABLE,
             f"No {IAM_API_KEY_VARIABLE} to ask IAM for {secret.id}'s value with",
             detail={"id": secret.id, "missing": IAM_API_KEY_VARIABLE},
+            retryable=False,
         )
     base = (iam_url if iam_url is not None else os.environ.get(IAM_URL_VARIABLE, "")).rstrip("/")
     if not base:
@@ -79,6 +82,7 @@ def resolve_build_secret(
             BUILD_SECRET_UNAVAILABLE,
             f"No {IAM_URL_VARIABLE} to ask for {secret.id}'s value from",
             detail={"id": secret.id, "missing": IAM_URL_VARIABLE},
+            retryable=False,
         )
     try:
         import httpx
@@ -88,6 +92,7 @@ def resolve_build_secret(
             "No HTTP client to resolve a build secret with: install "
             "`code-sandboxes[environments-builder]`",
             detail={"id": secret.id, "missing": "httpx"},
+            retryable=False,
         ) from error
     url = f"{base}/api/iam/v1/secrets/{secret.id}/value"
     try:
@@ -98,28 +103,50 @@ def resolve_build_secret(
                 headers={"X-API-Key": key},
             )
     except httpx.HTTPError as error:
+        # A network failure: the usual reason IAM cannot be reached is that
+        # it is briefly unreachable, so this is worth retrying.
         raise EnvironmentsError(
             BUILD_SECRET_UNAVAILABLE,
             f"IAM could not be reached to resolve {secret.id}: {error}",
             detail={"id": secret.id},
+            retryable=True,
         ) from error
     if response.status_code == 404:
+        # This owner genuinely has no such secret: retrying answers the same.
         raise EnvironmentsError(
             BUILD_SECRET_UNAVAILABLE,
             f"{secret.id} does not exist for this owner",
             detail={"id": secret.id, "status": 404},
+            retryable=False,
         )
     if response.status_code != 200:
+        # Everything else — 5xx, a rate limit, a gateway timeout — is IAM's
+        # own trouble, which a retry may have cleared by the time it runs.
         raise EnvironmentsError(
             BUILD_SECRET_UNAVAILABLE,
             f"IAM refused to resolve {secret.id}: {response.status_code}",
             detail={"id": secret.id, "status": response.status_code},
+            retryable=True,
         )
-    value = response.json().get("value")
+    try:
+        body = response.json()
+    except ValueError as error:
+        # Malformed JSON is IAM answering incoherently, not this secret's
+        # own state — the same class of trouble a 5xx is.
+        raise EnvironmentsError(
+            BUILD_SECRET_UNAVAILABLE,
+            f"IAM answered {secret.id} with a body that is not valid JSON",
+            detail={"id": secret.id},
+            retryable=True,
+        ) from error
+    value = body.get("value") if isinstance(body, dict) else None
     if not isinstance(value, str) or not value:
+        # The response parsed, but not into a secret's value: retrying an
+        # unchanged answer would not help.
         raise EnvironmentsError(
             BUILD_SECRET_UNAVAILABLE,
             f"IAM answered {secret.id} with no usable value",
             detail={"id": secret.id},
+            retryable=False,
         )
     return value
