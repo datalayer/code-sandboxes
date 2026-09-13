@@ -68,10 +68,9 @@ process-wide before every build — the one place this adapter's own build
 reaches outside itself, and worth knowing if a worker ever builds more than
 one variant's image concurrently in the same process.
 
-**The entrypoint must exec its arguments** (§6, §11.4 item 6): `Sandbox.create`
-passes its own command as the entrypoint's argv, so the entrypoint must
-`exec` it, correctly, whatever that command's own arguments look like —
-which took two live attempts. A quoted `exec "$@"` given inline as
+**The entrypoint must stay alive with no command at all, and still exec one
+correctly if it is ever given one** (§6, §11.4 item 6) — which took three
+live attempts. A quoted `exec "$@"` given inline as
 `entrypoint(["/bin/sh", "-c", 'exec "$@"'])` came out of `entrypoint()`'s
 own Dockerfile rendering as literal, broken `"exec "$@""` — it does not
 escape a quote embedded in an argv element — and the sandbox it produced
@@ -79,12 +78,19 @@ shut down within seconds. An unquoted `exec $0 $@` avoided that (nothing
 left to escape) but is not a correct forwarder either: unquoted `$@`
 word-splits and glob-expands each argument, so a command argument
 containing a space — a `python -c "…"` source, above all — arrives split
-into several arguments instead of one (found in review). The fix is a real
+into several arguments instead of one (found in review). Fixed with a real
 script file, not an inline one-liner: `/opt/datalayer/bin/entrypoint.sh`,
-baked in with a plain `#!/bin/sh\nexec "$@"\n`, is real file *content*, so
-its own quotes need no Dockerfile-string escaping at all, and `exec "$@"`
-inside it is the correct, standard forwarder. `entrypoint()` is then given
-one bare path with nothing to escape.
+baked in with `exec "$@"` as real file *content*, needs no Dockerfile-string
+escaping, and forwards correctly. But **the actual launcher,
+`code_sandboxes.modal_sandbox.ModalSandbox.start()`, creates the sandbox
+with no command args at all** — it execs into the running container
+separately, after creation (found live, 2026-09-13, running this exact
+builder's own artifact through it, not a hand-rolled `Sandbox.create` call
+the way every earlier live check here did): `exec "$@"` with nothing to
+expand is a no-op in `sh`, so the script fell straight through to its own
+end and the container exited before that first real exec ever reached it.
+The entrypoint now execs `sleep infinity` when it is given no arguments,
+and `"$@"` when it is — correct either way a caller invokes it.
 
 **A GPU size class is left buildable at `validate()`,** matching an existing
 test (`test_a_gpu_spec_is_buildable_on_modal_and_daytona`), and refused at
@@ -154,7 +160,15 @@ _IMAGE_BUILDER_VERSION = "2025.06"
 #: module docstring for why. `entrypoint()` is given this one bare path,
 #: nothing in it needing a Dockerfile-string escape.
 _ENTRYPOINT_PATH = "/opt/datalayer/bin/entrypoint.sh"
-_ENTRYPOINT_SCRIPT = '#!/bin/sh\nexec "$@"\n'
+#: `code_sandboxes.modal_sandbox.ModalSandbox.start()` — the actual launcher
+#: — creates the sandbox with no command args at all, and execs into it
+#: separately afterward (found live, 2026-09-13: `exec "$@"` with nothing to
+#: expand is a no-op in `sh`, so the container's own PID 1 fell straight
+#: through to the end of the script and exited, and the sandbox was gone
+#: before the first real `exec` reached it). `sleep infinity` when nothing
+#: is given keeps it alive for that; `exec "$@"` still wins when something
+#: is, for a caller that does supply a command directly.
+_ENTRYPOINT_SCRIPT = '#!/bin/sh\nif [ "$#" -eq 0 ]; then exec sleep infinity; fi\nexec "$@"\n'
 
 
 def _modal_sdk() -> Any:

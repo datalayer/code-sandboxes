@@ -530,11 +530,30 @@ class TestBuildingAnImage:
             for call in calls_named(image, "add_local_file")
             if call.args[1] == "/opt/datalayer/bin/entrypoint.sh"
         ]
-        assert script_copy.kwargs["content"] == b'#!/bin/sh\nexec "$@"\n'
+        assert script_copy.kwargs["content"] == (
+            b'#!/bin/sh\nif [ "$#" -eq 0 ]; then exec sleep infinity; fi\nexec "$@"\n'
+        )
         assert any(
             "chmod +x /opt/datalayer/bin/entrypoint.sh" in str(call.args)
             for call in calls_named(image, "run_commands")
         )
+
+    def test_the_entrypoint_stays_alive_with_no_command_at_all(self) -> None:
+        """`ModalSandbox.start()` — the actual launcher — creates the
+        sandbox with no command args and execs into it separately; found
+        live, 2026-09-13: `exec "$@"` alone is a no-op with nothing to
+        expand, so the container exited before that first real exec
+        arrived."""
+        modal = FakeModalModule()
+        a_builder(modal=modal).build(a_request())
+        [image] = modal.Image.created
+        [script_copy] = [
+            call
+            for call in calls_named(image, "add_local_file")
+            if call.args[1] == "/opt/datalayer/bin/entrypoint.sh"
+        ]
+        script = script_copy.kwargs["content"].decode("utf-8")
+        assert "sleep infinity" in script
 
     def test_the_image_builder_version_is_pinned(self) -> None:
         modal = FakeModalModule()
