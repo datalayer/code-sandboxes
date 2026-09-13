@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import uuid
 from collections.abc import Iterator
 
 import pytest
@@ -147,7 +148,11 @@ def _build_request(variant: str, resolved_base: str, lock_text: str) -> BuildReq
     return BuildRequest(
         environment_uid="01k0env0000000000000000000",
         version=1,
-        build_uid=f"live-{variant}",
+        # A per-run nonce, not just the variant (found in review): E2B and
+        # Daytona both fold `build_uid` into the artifact/template name, so a
+        # constant one would have every nightly run collide with the
+        # previous run's own artifact instead of building a fresh one.
+        build_uid=f"live-{variant}-{uuid.uuid4().hex[:8]}",
         owner_uid="01k0wner000000000000000000",
         variant=variant,
         environment=parse_environment(_ENVIRONMENT_SPEC),

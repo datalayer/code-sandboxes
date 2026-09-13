@@ -491,3 +491,37 @@ def test_modal_start_forwards_gpu_flavor(monkeypatch):
     assert captured["create_kwargs"]["gpu"] == "GPU_A100"
 
     sandbox.stop()
+
+
+def test_stop_cleans_up_a_sandbox_left_behind_by_a_failed_start():
+    """`start()` creates the remote sandbox well before it marks itself
+    started (`_start_driver`, `create_context`, building `SandboxInfo` all
+    come after) — found in review: a failure in between used to leave a
+    real, running sandbox that `stop()`, guarded on `_started` rather than
+    the resource itself, skipped entirely and this object could never clean
+    up again."""
+
+    class _FakeSandboxObj:
+        def __init__(self) -> None:
+            self.terminated = False
+            self.detached = False
+
+        def terminate(self):
+            self.terminated = True
+
+        def detach(self):
+            self.detached = True
+
+    sandbox = ModalSandbox(config=SandboxConfig(timeout=10.0))
+    fake = _FakeSandboxObj()
+    sandbox._sandbox = fake
+    assert not sandbox.is_started
+
+    sandbox.stop()
+
+    assert fake.terminated
+    assert fake.detached
+
+
+def test_stop_is_a_true_no_op_before_anything_was_ever_created():
+    ModalSandbox(config=SandboxConfig(timeout=10.0)).stop()

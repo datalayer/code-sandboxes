@@ -361,6 +361,26 @@ def test_stopping_kills_the_sandbox_and_says_it_stopped():
     assert not sandbox.is_started
 
 
+def test_stop_cleans_up_a_sandbox_left_behind_by_a_failed_start():
+    """`start()` creates the remote sandbox well before it marks itself
+    started (`create_context`, building `SandboxInfo` both come after) —
+    found in review: a failure in between used to leave a real, running
+    sandbox that `stop()`, guarded on `_started` rather than the resource
+    itself, skipped entirely and this object could never clean up again."""
+    sandbox = E2BSandbox()
+    fake = _FakeE2BSandbox()
+    sandbox._sandbox = fake
+    assert not sandbox.is_started
+
+    sandbox.stop()
+
+    assert fake.killed
+
+
+def test_stop_is_a_true_no_op_before_anything_was_ever_created():
+    E2BSandbox().stop()
+
+
 def test_the_life_of_a_sandbox_can_be_extended_while_it_runs():
     sandbox = _started()
 

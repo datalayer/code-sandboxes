@@ -28,6 +28,13 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
+# The default token on this repository is read-only: without this, a genuine
+# matrix failure would still 403 trying to label and open the issue that is
+# meant to report it (found in review).
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   live-matrix:
     runs-on: ubuntu-latest

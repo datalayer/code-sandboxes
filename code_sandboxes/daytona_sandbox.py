@@ -655,17 +655,21 @@ class DaytonaSandbox(Sandbox):
         )
 
     def stop(self) -> None:
-        if not self._started:
+        # Guarded on the resource itself, not `_started` (found in review):
+        # `start()` creates the remote sandbox well before it marks itself
+        # started, so a failure in between — `create_context`, building
+        # `SandboxInfo` — would otherwise leave a real, running sandbox that
+        # `stop()` skips entirely and this object can never clean up again.
+        if self._sandbox is None:
             return
-        if self._sandbox is not None:
-            try:
-                if self._delete_on_stop:
-                    self._sandbox.delete()
-                else:
-                    self._sandbox.stop()
-            except Exception:
-                logger.debug("Ignoring error while stopping the Daytona sandbox", exc_info=True)
-            self._sandbox = None
+        try:
+            if self._delete_on_stop:
+                self._sandbox.delete()
+            else:
+                self._sandbox.stop()
+        except Exception:
+            logger.debug("Ignoring error while stopping the Daytona sandbox", exc_info=True)
+        self._sandbox = None
         self._daytona = None
         self._jupyter_endpoint = None
         self._contexts.clear()
