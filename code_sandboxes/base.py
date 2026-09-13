@@ -198,6 +198,17 @@ class Sandbox(ABC):
         """Check if sandbox has been started."""
         return self._started
 
+    def is_alive(self) -> bool:
+        """Check whether the sandbox is still usable.
+
+        Distinct from :attr:`is_started`, which only records that `start` ran
+        in this process: a sandbox can be culled, evicted or shut down by
+        whoever else holds it, and nothing tells us. The base answer is
+        :attr:`is_started`, all a variant with no way to ask its provider can
+        honestly say; variants that can ask override this.
+        """
+        return self.is_started
+
     @property
     def is_executing(self) -> bool:
         """Check if the sandbox is currently executing code."""

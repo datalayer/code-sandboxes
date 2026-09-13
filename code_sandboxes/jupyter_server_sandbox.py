@@ -499,6 +499,35 @@ class JupyterServerSandbox(Sandbox):
         """
         return self._client
 
+    def is_alive(self) -> bool:
+        """Check whether the kernel this sandbox is bound to is still running.
+
+        The kernel id is looked up on the server, the way
+        :meth:`_find_existing_kernel` lists them, so a kernel culled for being
+        idle or shut down from a notebook is reported as gone. A server that
+        cannot be reached counts as not alive: nothing can be executed on it
+        either way, and answering `True` here is what leaves a caller running
+        code into a socket that no longer has a kernel behind it.
+        """
+        if not self._started or self._client is None or not self._server_url:
+            return False
+        kernel_id = getattr(self._client, "id", None)
+        if not kernel_id:
+            return False
+        try:
+            from jupyter_server_client import JupyterServerClient
+
+            jsc = JupyterServerClient(
+                base_url=self._server_url,
+                token=self._token,
+                headers=self._headers or None,
+            )
+            jsc.kernels.get_kernel(kernel_id)
+        except Exception as e:
+            logger.debug("Kernel %s is not running on %s: %s", kernel_id, self._server_url, e)
+            return False
+        return True
+
     def _setup_tool_caller(self) -> None:
         """Keep tool calling on the client side for Jupyter sandboxes."""
         return

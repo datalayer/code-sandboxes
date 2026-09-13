@@ -39,6 +39,16 @@ class TestEvalSandbox:
         assert not sandbox.is_started
         assert sandbox.info.status == "stopped"
 
+    def test_a_variant_that_cannot_ask_its_provider_answers_from_is_started(self):
+        """The base liveness answer: all a variant with nothing to ask can say."""
+        sandbox = EvalSandbox()
+
+        assert sandbox.is_alive() is False
+        sandbox.start()
+        assert sandbox.is_alive() is True
+        sandbox.stop()
+        assert sandbox.is_alive() is False
+
     def test_context_manager(self):
         """Test using sandbox as context manager."""
         with EvalSandbox() as sandbox:
