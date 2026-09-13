@@ -384,6 +384,22 @@ class TestAttestingAnArtifact:
             attest_artifact(artifact=artifact, attestor=an_attestor())
         assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
 
+    def test_a_malformed_digest_cannot_be_attested_either(self) -> None:
+        """`sha256:bad` starts with `sha256:` too: only a whole one is
+        accepted (found on PR #27's Copilot review). `e2b` rather than
+        `datalayer`, whose own model validator already refuses a malformed
+        digest before this function ever sees it — `attest_artifact` takes
+        `artifact: Any`, so nothing guarantees every caller went through it."""
+        artifact = ArtifactReference(
+            variant="e2b",
+            immutable_reference=f"{REGISTRY}/{REPOSITORY}@sha256:bad",
+            provider_artifact_id="sha256:bad",
+            contract_version="sandbox-contract/v1",
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            attest_artifact(artifact=artifact, attestor=an_attestor())
+        assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
+
     def test_the_policy_it_was_decided_under_is_part_of_the_record(self) -> None:
         answer = attest_artifact(artifact=self.an_artifact(), attestor=an_attestor())
         assert answer["scan_summary"]["policy"] == DEFAULT_POLICY.body()

@@ -661,8 +661,14 @@ def run_conformance(
         secret_roots=secret_roots,
         timeout=timeout,
     )
+    # `contract` and `timeout` are `run_conformance`'s own to decide for both
+    # tiers; `extended` is for the tier's own options (`egress_allowed`,
+    # `cuda_version`, ...). Spread first and override after, so a caller that
+    # also put either of those two in `extended` gets the shared one rather
+    # than `run_extended_tier() got multiple values for keyword argument`
+    # (found on PR #27's Copilot review).
     recorded = run_extended_tier(
-        sandbox, contract=contract, timeout=timeout, **dict(extended or {})
+        sandbox, **{**dict(extended or {}), "contract": contract, "timeout": timeout}
     )
     return ValidationResult(contract_version=contract.version, checks=core.checks + recorded.checks)
 

@@ -43,8 +43,9 @@ bridge = ["datalayer-core>=1.1.65", "fusepy>=3.0", "websockets>=12"]
 cloudflare = ["httpx>=0.27"]
 # What the Datalayer Environment builder needs where it RUNS — the durable
 # worker (PLAN_ENV.md E1-07): the ECR API for the owner's repository, the
-# artifact and its scan. `buildctl` is a binary in that image, not a package.
-environments-builder = ["boto3>=1.34"]
+# artifact and its scan; `httpx` for an imported image's own registry (E3-04).
+# `buildctl` is a binary in that image, not a package.
+environments-builder = ["boto3>=1.34", "httpx>=0.27"]
 coreweave = ["cwsandbox>=1.6"]
 datalayer = ["agent_runtimes>=1.0.16"]
 daytona = ["daytona>=0.205.1"]

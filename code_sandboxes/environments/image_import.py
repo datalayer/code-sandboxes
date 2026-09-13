@@ -109,11 +109,16 @@ def parse_image_reference(reference: str) -> ImageReference:
     a host only if it has a dot, a port, or is `localhost`.
     """
     text = str(reference or "").strip()
-    if not text:
+    if not text or any(character.isspace() for character in text):
+        # A reference is embedded straight into a Dockerfile `FROM` line
+        # (`resolve_image_base`, `BuildkitResolveRunner.dockerfile`): an
+        # embedded newline would end that line and start another Dockerfile
+        # instruction of the author's choosing. Whitespace is never legal in
+        # a real reference anyway, so refusing it here is free.
         raise EnvironmentsError(
             SPEC_INVALID,
-            "an image reference names an image",
-            detail={"field": "spec.build.image.reference"},
+            "an image reference names an image, with no whitespace in it",
+            detail={"field": "spec.build.image.reference", "reference": reference},
         )
     digest = ""
     if "@" in text:

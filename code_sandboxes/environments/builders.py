@@ -212,7 +212,9 @@ LAUNCH_ARGUMENTS: dict[str, str] = {
 }
 
 
-def launch_arguments(artifact: ArtifactReference | Mapping[str, Any]) -> dict[str, Any]:
+def launch_arguments(
+    artifact: ArtifactReference | Mapping[str, Any], *, expected_variant: str | None = None
+) -> dict[str, Any]:
     """What launching this artifact means to its variant (PLAN_ENV.md E2-02).
 
     One neutral reference in, one variant's own argument out: E2B launches a
@@ -224,6 +226,12 @@ def launch_arguments(artifact: ArtifactReference | Mapping[str, Any]) -> dict[st
     digest to the Operator over a route only Runtimes may call (E1-10, E1-11):
     a client passing a digest could name an artifact of somebody else's
     environment, so it names the environment and the version instead.
+
+    ``expected_variant``, when given, must be the artifact's own — the caller
+    that asked to launch on one variant handed an artifact of another's,
+    which the wrong keyword argument would otherwise carry silently into that
+    variant's own launch, starting its default image rather than the artifact
+    named (found on PR #27's Copilot review).
     """
     reference = artifact if isinstance(artifact, ArtifactReference) else None
     if reference is None:
@@ -237,6 +245,12 @@ def launch_arguments(artifact: ArtifactReference | Mapping[str, Any]) -> dict[st
             {to_snake(name): value for name, value in artifact.items()}
         )
     variant = reference.variant
+    if expected_variant is not None and variant != expected_variant:
+        raise EnvironmentsError(
+            SPEC_INVALID,
+            f"this artifact is `{variant}`'s, not `{expected_variant}`'s",
+            detail={"variant": expected_variant, "artifact_variant": variant},
+        )
     if variant == "datalayer":
         raise EnvironmentsError(
             CAPABILITY_UNSUPPORTED,

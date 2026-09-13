@@ -131,6 +131,10 @@ _CREDENTIAL_VALUE = re.compile(
     r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+|dlsec_[0-9A-Za-z]+"
 )
 _URL_CREDENTIALS = re.compile(r"^[a-z][a-z0-9+.-]*://[^/@\s]+:[^/@\s]*@", re.IGNORECASE)
+#: A control character in an `env` value: the Dockerfile `ENV` line it
+#: becomes is one line, and an embedded newline ends it and starts another
+#: instruction of the value's own choosing (found on PR #27's Copilot review).
+_CONTROL_CHARACTER = re.compile(r"[\x00-\x1f\x7f]")
 
 
 class _Model(BaseModel):
@@ -365,7 +369,14 @@ def parse_requirements_txt(text: str) -> list[str]:
     """
     lines: list[str] = []
     for raw in text.splitlines():
-        line = raw.split("#", 1)[0].strip()
+        line = raw.strip()
+        if line.startswith("#"):
+            continue
+        # A `#` is only a comment when whitespace sets it off from what came
+        # before — pip's own rule. A direct reference's own `#egg=…` or
+        # `#sha256=…` fragment has no whitespace in front of it and is part
+        # of the requirement, not a comment to drop.
+        line = re.split(r"\s#", line, maxsplit=1)[0].strip()
         if not line or line.startswith("-"):
             continue
         lines.append(line)
@@ -584,6 +595,10 @@ def spec_findings(
         field = f"spec.env.{key}"
         if not _ENV_NAME.match(key):
             findings.append(SpecFinding(field, f"`{key}` is not an environment variable name"))
+        if _CONTROL_CHARACTER.search(value):
+            findings.append(
+                SpecFinding(field, "carries a control character, which a Dockerfile line cannot")
+            )
         if (
             _CREDENTIAL_NAME.search(key)
             or _CREDENTIAL_VALUE.search(value)
@@ -606,6 +621,17 @@ def spec_findings(
     for index, command in enumerate(spec.commands.post_install):
         if not command.strip():
             findings.append(SpecFinding(f"spec.commands.postInstall[{index}]", "is empty"))
+        elif _CONTROL_CHARACTER.search(command):
+            # Each command becomes one `RUN` line (`files.py`'s baked commands
+            # too): an embedded newline ends it and starts another
+            # instruction — as root, with network, outside what `postInstall`
+            # itself is allowed (found on PR #27's Copilot review).
+            findings.append(
+                SpecFinding(
+                    f"spec.commands.postInstall[{index}]",
+                    "carries a control character, which a Dockerfile line cannot",
+                )
+            )
 
     for attribute, label in (("id", "id"), ("name", "name")):
         values = [getattr(secret, attribute) for secret in spec.build_secrets]

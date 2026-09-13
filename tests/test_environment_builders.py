@@ -382,3 +382,25 @@ class TestLaunchingAnArtifact:
 
         sandbox = Sandbox.create(variant="modal", artifact=self.an_artifact("modal", "im-123"))
         assert sandbox._image_id == "im-123"
+
+    def test_an_artifact_of_another_variant_is_refused(self) -> None:
+        """`launch_arguments` maps by the *artifact's own* variant, not the
+        caller's: asking for `modal` with an `e2b` artifact used to translate
+        it into Modal's own keyword regardless, silently launching Modal's
+        default image instead of the artifact named (found on PR #27's
+        Copilot review)."""
+        from code_sandboxes.environments.errors import EnvironmentsError
+
+        with pytest.raises(EnvironmentsError) as raised:
+            builders.launch_arguments(
+                self.an_artifact("e2b", "dl/geo:bld-1"), expected_variant="modal"
+            )
+        assert raised.value.code.code == "DL_ENV_SPEC_INVALID"
+        assert raised.value.detail == {"variant": "modal", "artifact_variant": "e2b"}
+
+    def test_create_refuses_an_artifact_of_another_variant(self) -> None:
+        from code_sandboxes.base import Sandbox
+        from code_sandboxes.environments.errors import EnvironmentsError
+
+        with pytest.raises(EnvironmentsError):
+            Sandbox.create(variant="modal", artifact=self.an_artifact("e2b", "dl/geo:bld-1"))

@@ -239,6 +239,34 @@ class TestTheDockerfileItGenerates:
         # Nowhere else, and never in a layer.
         assert dockerfile.count("dlsec_abc") == 2
 
+    def test_an_imported_image_bootstraps_uv_from_its_own_wheelhouse(self) -> None:
+        """An imported image (E3-04) is not baked with `uv` or the fork's
+        wheel the way an approved base is (E1-05): both are brought to this
+        stage too, the same as the resolver's own solve. Found on PR #27's
+        Copilot review — the resolve half of this had already been fixed,
+        the actual build's Dockerfile had not."""
+        request = a_request(
+            spec={
+                "packages": {},
+                "build": {
+                    "source": "image",
+                    "image": {"reference": "python:3.12-slim-bookworm"},
+                },
+            }
+        )
+        dockerfile = a_builder().dockerfile(request)
+        assert "COPY wheelhouse/ /opt/datalayer/wheelhouse-import/" in dockerfile
+        assert 'RUN pip install --no-cache-dir "uv==0.12.11"' in dockerfile
+        assert "--find-links /opt/datalayer/wheelhouse-import" in dockerfile
+        # Never the approved base's own path: that one is not copied in here.
+        assert "--find-links /opt/datalayer/wheelhouse " not in dockerfile
+
+    def test_a_packages_source_never_copies_a_wheelhouse_in(self) -> None:
+        dockerfile = a_builder().dockerfile(a_request())
+        assert "COPY wheelhouse/" not in dockerfile
+        assert "uv==0.12.11" not in dockerfile
+        assert "--find-links /opt/datalayer/wheelhouse " in dockerfile
+
     def test_it_ends_by_running_the_contracts_own_check(self) -> None:
         assert (
             a_builder()
@@ -332,6 +360,49 @@ class TestBuildingAndPushing:
         assert artifact.size_class == "medium"
         assert artifact.contract_version == "sandbox-contract/v1"
 
+    def test_an_imported_image_build_copies_the_wheelhouse_into_the_context(self) -> None:
+        from code_sandboxes.environments.resolve import WHEELHOUSE_PATH
+
+        expected = {wheel.name for wheel in WHEELHOUSE_PATH.glob("*.whl")}
+        assert expected, "the package's own wheelhouse must not be empty"
+        seen: dict[str, set[str]] = {}
+
+        class RecordingBuildctl(Buildctl):
+            def __call__(self, argv, **kwargs):
+                result = super().__call__(argv, **kwargs)
+                assert self.context is not None
+                seen["wheelhouse"] = {
+                    path.name for path in (self.context / "wheelhouse").glob("*.whl")
+                }
+                return result
+
+        request = a_request(
+            spec={
+                "packages": {},
+                "build": {
+                    "source": "image",
+                    "image": {"reference": "python:3.12-slim-bookworm"},
+                },
+            }
+        )
+        buildctl = RecordingBuildctl()
+        a_builder(run=buildctl).build(request)
+        assert seen["wheelhouse"] == expected
+
+    def test_a_packages_source_build_has_no_wheelhouse_in_its_context(self) -> None:
+        seen: dict[str, bool] = {}
+
+        class RecordingBuildctl(Buildctl):
+            def __call__(self, argv, **kwargs):
+                result = super().__call__(argv, **kwargs)
+                assert self.context is not None
+                seen["exists"] = (self.context / "wheelhouse").exists()
+                return result
+
+        buildctl = RecordingBuildctl()
+        a_builder(run=buildctl).build(a_request())
+        assert seen["exists"] is False
+
     def test_the_context_holds_the_lock_the_build_installs(self) -> None:
         buildctl = Buildctl()
         a_builder(run=buildctl).build(a_request())
@@ -400,14 +471,51 @@ class TestBuildingAndPushing:
         assert ecr.created == []
 
     def test_the_credential_reaches_buildctl_and_not_the_workers_own_config(self) -> None:
-        buildctl = Buildctl()
-        a_builder(run=buildctl).build(a_request())
-        assert buildctl.env is not None
-        config = Path(buildctl.env["DOCKER_CONFIG"]) / "config.json"
-        written = json.loads(config.read_text(encoding="utf-8"))
-        assert REGISTRY in written["auths"]
-        # Readable by this build alone.
-        assert oct(config.stat().st_mode)[-3:] == "600"
+        seen: dict[str, object] = {}
+
+        class RecordingBuildctl(Buildctl):
+            def __call__(self, argv, **kwargs):
+                result = super().__call__(argv, **kwargs)
+                assert self.env is not None
+                config = Path(self.env["DOCKER_CONFIG"]) / "config.json"
+                seen["written"] = json.loads(config.read_text(encoding="utf-8"))
+                # Readable by this build alone.
+                seen["mode"] = oct(config.stat().st_mode)[-3:]
+                return result
+
+        a_builder(run=RecordingBuildctl()).build(a_request())
+        assert REGISTRY in seen["written"]["auths"]
+        assert seen["mode"] == "600"
+
+    def test_the_docker_config_does_not_outlive_the_build(self) -> None:
+        """A registry password base64'd into a file the worker keeps forever
+        is a credential leak on disk, whichever way the build ends (found on
+        PR #27's Copilot review)."""
+        seen: dict[str, Path] = {}
+
+        class RecordingBuildctl(Buildctl):
+            def __call__(self, argv, **kwargs):
+                result = super().__call__(argv, **kwargs)
+                assert self.env is not None
+                seen["directory"] = Path(self.env["DOCKER_CONFIG"])
+                return result
+
+        a_builder(run=RecordingBuildctl()).build(a_request())
+        assert not seen["directory"].exists()
+
+    def test_the_docker_config_is_removed_even_when_the_build_fails(self) -> None:
+        seen: dict[str, Path] = {}
+
+        class RecordingBuildctl(Buildctl):
+            def __call__(self, argv, **kwargs):
+                result = super().__call__(argv, **kwargs)
+                assert self.env is not None
+                seen["directory"] = Path(self.env["DOCKER_CONFIG"])
+                return result
+
+        with pytest.raises(EnvironmentsError):
+            a_builder(run=RecordingBuildctl(returncode=1, digest=None)).build(a_request())
+        assert not seen["directory"].exists()
 
     def test_a_failed_build_is_that_code_and_says_to_read_the_log(self) -> None:
         with pytest.raises(EnvironmentsError) as raised:

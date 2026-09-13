@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -70,6 +71,11 @@ SCAN_STATUSES = {
 #: How long a scan is waited for, and how often it is asked about.
 DEFAULT_SCAN_TIMEOUT_SECONDS = 15 * 60
 DEFAULT_SCAN_INTERVAL_SECONDS = 10.0
+
+#: A whole digest, not merely something that starts with `sha256:` — found on
+#: PR #27's Copilot review: `sha256:bad` used to pass the check that reached
+#: the scan and the signature, both keyed on this string.
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def signature_tag(digest: str) -> str:
@@ -409,7 +415,7 @@ def attest_artifact(
     reference = str(getattr(artifact, "immutable_reference", "") or "")
     registry, _, rest = reference.partition("/")
     repository, _, digest = rest.partition("@")
-    if not (registry and repository and digest.startswith("sha256:")):
+    if not (registry and repository and _DIGEST.match(digest)):
         raise EnvironmentsError(
             PROVIDER_ERROR,
             f"`{reference}` is not a digest in a repository, so it cannot be attested",

@@ -67,7 +67,7 @@ from ..errors import (
     EnvironmentsError,
 )
 from ..files import files_step
-from ..resolve import WHEELHOUSE_IMAGE_PATH, apt_pins_in, locked_versions
+from ..resolve import WHEELHOUSE_IMAGE_PATH, WHEELHOUSE_PATH, apt_pins_in, locked_versions
 from ..spec import Environment
 
 __all__ = ["ECR_ENVIRONMENT_PREFIX", "Builder", "owner_repository"]
@@ -259,16 +259,29 @@ class Builder:
                     "    && rm -rf /var/lib/apt/lists/*",
                 ]
             )
+        # An imported image (E3-04) cannot be assumed to carry `uv` or the
+        # wheelhouse the way an approved base does (E1-05): both are brought
+        # to this stage instead, the same as the resolver's own solve
+        # already does for the same reason. An approved base needs neither,
+        # so this changes nothing about a build that already works.
+        imported = spec.build.source == "image"
+        imported_wheelhouse = f"{WHEELHOUSE_IMAGE_PATH}-import"
+        find_links = imported_wheelhouse if imported else WHEELHOUSE_IMAGE_PATH
+        lines.append("USER root")
+        if imported:
+            lines += [
+                f"COPY wheelhouse/ {imported_wheelhouse}/",
+                'RUN pip install --no-cache-dir "uv==0.12.11"',
+            ]
         lines.extend(
             [
-                "USER root",
                 "COPY lock.txt /opt/datalayer/lock.txt",
                 # `sync` and not `install`: the artifact holds the lock's set,
                 # and `--require-hashes` means every byte was the resolved one.
                 # `--find-links` for what no index has — a protected pin's
                 # own wheel, the fork's local version above all (E1-04).
                 "RUN --mount=type=cache,target=/root/.cache/uv "
-                f"uv pip sync --system --require-hashes --find-links {WHEELHOUSE_IMAGE_PATH} "
+                f"uv pip sync --system --require-hashes --find-links {find_links} "
                 "/opt/datalayer/lock.txt",
             ]
         )
@@ -330,6 +343,11 @@ class Builder:
             root = Path(directory)
             (root / "Dockerfile").write_text(self.dockerfile(request), encoding="utf-8")
             (root / "lock.txt").write_text(request.lock_text, encoding="utf-8")
+            if request.environment.spec.build.source == "image":
+                wheelhouse = root / "wheelhouse"
+                wheelhouse.mkdir()
+                for wheel in WHEELHOUSE_PATH.glob("*.whl"):
+                    (wheelhouse / wheel.name).write_bytes(wheel.read_bytes())
             metadata = root / "metadata.json"
             command = [
                 self._buildctl,
@@ -562,31 +580,40 @@ class Builder:
         ]
 
     def _invoke(self, command: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        directory = self._docker_config_directory()
         try:
-            finished = self._run(
-                list(command),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-                env=self._environment(),
-            )
-        except subprocess.TimeoutExpired as expired:
-            raise EnvironmentsError(
-                PROVIDER_ERROR,
-                f"The build did not finish within {timeout:.0f}s",
-                detail={"variant": self.variant, "timeout": timeout},
-            ) from expired
-        for line in (finished.stderr or "").splitlines():
-            self._log(line)
-        return finished
+            try:
+                finished = self._run(
+                    list(command),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=False,
+                    env=self._environment(directory),
+                )
+            except subprocess.TimeoutExpired as expired:
+                raise EnvironmentsError(
+                    PROVIDER_ERROR,
+                    f"The build did not finish within {timeout:.0f}s",
+                    detail={"variant": self.variant, "timeout": timeout},
+                ) from expired
+            for line in (finished.stderr or "").splitlines():
+                self._log(line)
+            return finished
+        finally:
+            # The registry password lives only in this file, for this one
+            # invocation: left behind on success, on failure or on a timeout
+            # alike, it is a credential sitting on the worker's disk forever
+            # (found on PR #27's Copilot review).
+            if directory is not None:
+                shutil.rmtree(directory, ignore_errors=True)
 
-    def _environment(self) -> dict[str, str] | None:
-        """What ``buildctl`` needs to push, as client-side registry auth (D-17).
+    def _docker_config_directory(self) -> Path | None:
+        """A docker config of this build's own, holding the registry auth (D-17).
 
-        The credential is written into a docker config of this build's own, so
-        nothing is added to the worker's, and ``buildkitd`` still holds no AWS
-        key.
+        Nothing is added to the worker's own docker config, and ``buildkitd``
+        still holds no AWS key — the credential lives in this one file, for
+        this one invocation, and is the caller's to remove once it is done.
         """
         registry = str(getattr(self._credential, "registry", "") or "")
         username = str(getattr(self._credential, "username", "") or "")
@@ -602,6 +629,12 @@ class Builder:
         )
         directory.chmod(0o700)
         (directory / "config.json").chmod(0o600)
+        return directory
+
+    def _environment(self, directory: Path | None) -> dict[str, str] | None:
+        """What ``buildctl`` needs to push, as client-side registry auth (D-17)."""
+        if directory is None:
+            return None
         return {**os.environ, "DOCKER_CONFIG": str(directory)}
 
     def _digest_of(self, metadata: Path) -> str:

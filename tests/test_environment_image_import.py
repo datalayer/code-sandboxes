@@ -58,6 +58,16 @@ class TestParsingAReference:
             parse_image_reference("")
         assert raised.value.detail["field"] == "spec.build.image.reference"
 
+    def test_an_embedded_newline_is_invalid(self) -> None:
+        """A reference lands straight in a Dockerfile `FROM` line: a newline
+        would end it and start another instruction of the author's choosing."""
+        with pytest.raises(EnvironmentsError):
+            parse_image_reference("python:3.12-slim-bookworm\nRUN whoami")
+
+    def test_embedded_whitespace_anywhere_is_invalid(self) -> None:
+        with pytest.raises(EnvironmentsError):
+            parse_image_reference("ghcr.io/owner /repo:v1")
+
     def test_a_malformed_digest_is_invalid(self) -> None:
         with pytest.raises(EnvironmentsError):
             parse_image_reference("python@not-a-digest")

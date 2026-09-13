@@ -598,7 +598,7 @@ class Sandbox(ABC):
             # caller passed itself wins, so naming both is not a surprise.
             from .environments.builders import launch_arguments
 
-            for name_, value in launch_arguments(artifact).items():
+            for name_, value in launch_arguments(artifact, expected_variant=variant_value).items():
                 kwargs.setdefault(name_, value)
 
         if variant_value == "eval":

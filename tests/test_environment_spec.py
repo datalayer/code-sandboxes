@@ -219,7 +219,19 @@ UNSUPPORTED = "DL_ENV_CAPABILITY_UNSUPPORTED"
         ("spec.env", {"PIP_INDEX_TOKEN": "abc"}, "spec.env.PIP_INDEX_TOKEN", INVALID),
         ("spec.env", {"AWS_REGION": "AKIAIOSFODNN7EXAMPLE"}, "spec.env.AWS_REGION", INVALID),
         ("spec.env", {"bad name": "x"}, "spec.env.bad name", INVALID),
+        (
+            "spec.env",
+            {"GDAL_DATA": "/opt/gdal\nRUN whoami"},
+            "spec.env.GDAL_DATA",
+            INVALID,
+        ),
         ("spec.commands.postInstall", ["  "], "spec.commands.postInstall[0]", INVALID),
+        (
+            "spec.commands.postInstall",
+            ["echo hi\nUSER root"],
+            "spec.commands.postInstall[0]",
+            INVALID,
+        ),
         (
             "spec.buildSecrets",
             [{"id": "dlsec_1", "name": "A"}, {"id": "dlsec_1", "name": "B"}],
@@ -450,6 +462,20 @@ class TestParsingARequirementsFile:
         from code_sandboxes.environments.spec import parse_requirements_txt
 
         assert parse_requirements_txt("\n\n# only comments\n") == []
+
+    def test_a_direct_references_own_fragment_is_not_a_comment(self) -> None:
+        """`#egg=` and `#sha256=` have no whitespace in front of them: they
+        are part of the requirement, not something to drop as a comment."""
+        from code_sandboxes.environments.spec import parse_requirements_txt
+
+        text = (
+            "geopandas @ https://example.com/geopandas.whl#sha256=" + "a" * 64 + "\n"
+            "git+https://example.com/rasterio.git#egg=rasterio  # inline note\n"
+        )
+        assert parse_requirements_txt(text) == [
+            "geopandas @ https://example.com/geopandas.whl#sha256=" + "a" * 64,
+            "git+https://example.com/rasterio.git#egg=rasterio",
+        ]
 
 
 @pytest.mark.parametrize(

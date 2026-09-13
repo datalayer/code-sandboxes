@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -466,6 +467,13 @@ def parse_resolver_failure(
 
 
 def _index_options(indexes: Sequence[str]) -> list[str]:
+    """`--index-url`/`--extra-index-url`, one pair per index, raw.
+
+    Raw on purpose: :class:`LocalResolveRunner` passes this straight into an
+    argv list, which needs no shell quoting of its own — quoting here would
+    corrupt it there. :class:`BuildkitResolveRunner`, whose `RUN` line *is* a
+    shell command, quotes each option itself before joining them in.
+    """
     options: list[str] = []
     for position, index in enumerate(indexes):
         options.extend(["--index-url" if position == 0 else "--extra-index-url", index])
@@ -603,7 +611,12 @@ class BuildkitResolveRunner:
             f"uv pip compile --quiet --no-header --generate-hashes "
             f"--python-version {request.python_version} --constraint constraints.txt "
             f"--find-links {find_links} "
-            + " ".join(_index_options(request.indexes))
+            # This whole line is one shell command once BuildKit runs it: an
+            # index URL is a spec field a user wrote, checked only for
+            # `https://` and no embedded credential (spec.py's own
+            # findings), never for shell metacharacters — quoting here is
+            # what keeps one from ending this command and starting another.
+            + " ".join(shlex.quote(option) for option in _index_options(request.indexes))
             + " requirements.in -o /solve/lock.txt",
         ]
         if request.apt:
@@ -993,6 +1006,7 @@ def _verified_pyproject_lock(
     if not text.endswith("\n"):
         text += "\n"
     packages = locked_versions(text)
+    _refuse_unless_protected_pins_are_locked(packages)
     digest = "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
     log(f"Verified and exported {len(packages)} packages from uv.lock as {digest}")
     return {
@@ -1002,6 +1016,46 @@ def _verified_pyproject_lock(
         "python_version": python_version,
         "package_count": len(packages),
     }
+
+
+def _refuse_unless_protected_pins_are_locked(packages: Mapping[str, str]) -> None:
+    """A `pyproject` source is never merged with Datalayer's pins (E3-01):
+    bringing your own lock is the point, so nothing is force-injected the
+    way `merge_requirements` forces them into a `packages`/`requirements`
+    solve. What still has to hold is that the *author's* lock already
+    agrees with them — the kernel stack a sandbox needs to connect is not
+    optional for this source either, and refusing it here, naming the
+    package, is cheaper than a build that fails the smoke test's `kernel`
+    check after using the resolver's own reservation and worker time.
+    """
+    from packaging.specifiers import InvalidSpecifier, SpecifierSet
+
+    for pin in protected_pins():
+        locked = packages.get(pin.name)
+        supported = pin.supported
+        agrees = False
+        if locked is not None:
+            try:
+                agrees = not supported or SpecifierSet(supported).contains(locked, prereleases=True)
+            except InvalidSpecifier:
+                agrees = False
+        if not agrees:
+            raise EnvironmentsError(
+                PROTECTED_PACKAGE,
+                f"`{pin.name}` is pinned by Datalayer to `{supported}`, and this uv.lock "
+                + (
+                    f"locks it to `{locked}`, which is outside that range"
+                    if locked is not None
+                    else "does not lock it at all"
+                )
+                + ": the sandbox needs it to connect, whatever else the lock brings",
+                detail={
+                    "field": "spec.build.dependencyFile.lockContent",
+                    "package": pin.name,
+                    "supported": supported,
+                    "locked": locked or "",
+                },
+            )
 
 
 def resolve_environment(
