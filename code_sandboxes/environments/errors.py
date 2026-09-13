@@ -28,6 +28,7 @@ from ..models import normalize_variant
 __all__ = [
     "ARTIFACT_MISSING",
     "BUILD_FAILED",
+    "BUILD_SECRET_UNAVAILABLE",
     "BUILD_TIMEOUT",
     "CAPABILITY_UNSUPPORTED",
     "ERROR_CODES",
@@ -35,6 +36,7 @@ __all__ = [
     "POLICY_DENIED",
     "PROTECTED_PACKAGE",
     "PROVIDER_ERROR",
+    "PUBLICATION_BLOCKED",
     "QUOTA_EXCEEDED",
     "RESOLVE_CONFLICT",
     "SCAN_BLOCKED",
@@ -150,6 +152,18 @@ ARTIFACT_MISSING = ErrorCode(
 PROVIDER_ERROR = ErrorCode(
     "DL_ENV_PROVIDER_ERROR", "Unmapped provider failure", Retry.YES, "Retry; Datalayer is alerted"
 )
+BUILD_SECRET_UNAVAILABLE = ErrorCode(
+    "DL_ENV_BUILD_SECRET_UNAVAILABLE",
+    "A referenced build secret could not be resolved",
+    Retry.SOMETIMES,
+    "Retry once IAM is reachable, or check the secret still exists for this owner",
+)
+PUBLICATION_BLOCKED = ErrorCode(
+    "DL_ENV_PUBLICATION_BLOCKED",
+    "A private input keeps this version from being published to the Library",
+    Retry.NO,
+    "Remove the private input, or keep the version private (D-12)",
+)
 
 #: Every code, by its name, in the order of the taxonomy.
 ERROR_CODES: dict[str, ErrorCode] = {
@@ -168,6 +182,8 @@ ERROR_CODES: dict[str, ErrorCode] = {
         SMOKE_TEST_FAILED,
         ARTIFACT_MISSING,
         PROVIDER_ERROR,
+        BUILD_SECRET_UNAVAILABLE,
+        PUBLICATION_BLOCKED,
     )
 }
 

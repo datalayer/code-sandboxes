@@ -24,7 +24,9 @@ from code_sandboxes.environments.schema import main as schema_main
 from code_sandboxes.environments.schema import schema_text
 from code_sandboxes.environments.spec import (
     Environment,
+    assert_publishable,
     parse_environment,
+    publication_findings,
     spec_digest,
     spec_findings,
     validate_environment,
@@ -522,3 +524,37 @@ def test_a_spec_is_digested_the_same_from_the_environment_or_the_spec() -> None:
     environment = parse_environment(copy.deepcopy(document()))
     assert isinstance(environment, Environment)
     assert spec_digest(environment) == spec_digest(environment.spec)
+
+
+class TestPublicationFindings:
+    """D-12: a version with any build secret can never be published to the Library."""
+
+    def test_a_build_secret_blocks_publication(self) -> None:
+        environment = parse_environment(document())  # the example carries one buildSecret
+        findings = publication_findings(environment)
+        assert len(findings) == 1
+        assert findings[0].field == "spec.buildSecrets"
+        assert findings[0].code is errors.PUBLICATION_BLOCKED
+        assert "dlsec_01J8ZK" in findings[0].message
+
+    def test_assert_publishable_raises_that_code(self) -> None:
+        environment = parse_environment(document())
+        with pytest.raises(EnvironmentsError) as refused:
+            assert_publishable(environment)
+        assert refused.value.code is errors.PUBLICATION_BLOCKED
+        assert refused.value.detail["findings"][0]["field"] == "spec.buildSecrets"
+
+    def test_no_build_secret_is_publishable(self) -> None:
+        data = document()
+        del data["spec"]["buildSecrets"]
+        environment = parse_environment(data)
+        assert publication_findings(environment) == []
+        assert_publishable(environment)  # raises nothing
+
+    def test_a_private_build_with_a_secret_is_untouched(self) -> None:
+        """D-12's own words: a private environment with a build secret is
+        fine, since only its owner ever builds or launches it. Nothing here
+        stops `spec_findings`/`validate_environment` (buildability) from
+        accepting the same spec `publication_findings` refuses to publish."""
+        environment = parse_environment(document())
+        assert spec_findings(environment) == []

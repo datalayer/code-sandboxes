@@ -232,12 +232,52 @@ class TestTheDockerfileItGenerates:
         # Never the loose list: that is the whole point of resolving once.
         assert "geopandas==1.1.1" not in dockerfile
 
-    def test_a_build_secret_is_mounted_for_its_step_alone(self) -> None:
-        request = a_request(build_secret_ids=("dlsec_abc",))
+    def test_a_build_secret_is_mounted_for_the_postinstall_step_alone(self) -> None:
+        """Mounted on the `postInstall` `RUN` alone — never an `ARG`/`ENV`,
+        which bakes a value into the image's history, and never the
+        package-install or files steps, which name no secret (§4.1, D-11)."""
+        request = a_request(
+            spec={"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}]},
+            build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
+        )
         dockerfile = a_builder().dockerfile(request)
-        assert "--mount=type=secret,id=dlsec_abc" in dockerfile
-        # Nowhere else, and never in a layer.
-        assert dockerfile.count("dlsec_abc") == 2
+        lines = dockerfile.splitlines()
+        mount_lines = [line for line in lines if "--mount=type=secret" in line]
+        assert mount_lines == [
+            "RUN --network=none --mount=type=secret,id=dlsec_01J9BUILDSECRET0000000000,"
+            "env=PIP_TOKEN python -c 'import geopandas'"
+        ]
+        # Nowhere else in the Dockerfile: no `ARG`/`ENV` line, and no other
+        # `RUN` mentions the id or the value's own name.
+        assert not any(line.startswith(("ARG", "ENV")) and "PIP_TOKEN" in line for line in lines)
+        assert sum(1 for line in lines if "dlsec_01J9BUILDSECRET0000000000" in line) == 1
+
+    def test_a_file_mounted_build_secret_targets_run_secrets(self) -> None:
+        request = a_request(
+            spec={
+                "buildSecrets": [
+                    {
+                        "id": "dlsec_01J9BUILDSECRET0000000000",
+                        "name": "netrc",
+                        "mountAs": "file",
+                    }
+                ]
+            },
+            build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
+        )
+        dockerfile = a_builder().dockerfile(request)
+        assert (
+            "--mount=type=secret,id=dlsec_01J9BUILDSECRET0000000000,target=/run/secrets/netrc"
+            in dockerfile
+        )
+
+    def test_an_undeclared_build_secret_id_mounts_nothing(self) -> None:
+        """`build_secret_ids` names what this build resolved; an id the spec
+        never declared is not a secret this build can mount (a mismatch
+        between the two is a caller's bug, not something to render blindly)."""
+        request = a_request(build_secret_ids=("dlsec_not_in_the_spec00000",))
+        dockerfile = a_builder().dockerfile(request)
+        assert "--mount=type=secret" not in dockerfile
 
     def test_an_imported_image_bootstraps_uv_from_its_own_wheelhouse(self) -> None:
         """An imported image (E3-04) is not baked with `uv` or the fork's
@@ -410,6 +450,61 @@ class TestBuildingAndPushing:
         # The directory is gone by now; what matters is that it was the context
         # and that the argv named the Dockerfile beside it.
         assert f"dockerfile={buildctl.context}" in buildctl.argv
+
+    def test_a_build_secret_is_resolved_and_passed_to_buildctl_by_file(self) -> None:
+        """The value never sits in argv (a process listing could read it),
+        and the file is gone once `build` returns — in its own directory,
+        never the one `--local context=` also names, so a value cannot reach
+        `buildkitd` as ordinary context data alongside the secret channel."""
+        resolved: list[tuple[str, str]] = []
+        seen: dict[str, tuple[str, int]] = {}
+
+        def resolve_secret(secret, *, owner_uid):
+            resolved.append((secret.id, owner_uid))
+            return "s3cr3t-token-value"
+
+        class RecordingBuildctl(Buildctl):
+            def __call__(self, argv, **kwargs):
+                result = super().__call__(argv, **kwargs)
+                assert self.context is not None
+                secret_arg = next(
+                    value for value in argv if value.startswith("id=dlsec_01J9BUILDSECRET")
+                )
+                path = Path(secret_arg.split("src=", 1)[1])
+                assert path.parent != self.context  # never the build context
+                seen["file"] = (path.read_text(encoding="utf-8"), path.stat().st_mode & 0o777)
+                return result
+
+        request = a_request(
+            spec={"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}]},
+            build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
+        )
+        buildctl = RecordingBuildctl()
+        a_builder(run=buildctl, resolve_secret=resolve_secret).build(request)
+
+        assert resolved == [("dlsec_01J9BUILDSECRET0000000000", OWNER)]
+        assert seen["file"] == ("s3cr3t-token-value", 0o600)
+        argv = " ".join(buildctl.argv)
+        assert "--secret" in argv
+        assert "id=dlsec_01J9BUILDSECRET0000000000,src=" in argv
+        # Never the value itself, anywhere in argv.
+        assert "s3cr3t-token-value" not in argv
+
+    def test_a_build_never_starts_when_a_secret_cannot_be_resolved(self) -> None:
+        from code_sandboxes.environments.errors import BUILD_SECRET_UNAVAILABLE
+
+        def resolve_secret(secret, *, owner_uid):
+            raise EnvironmentsError(BUILD_SECRET_UNAVAILABLE, "IAM is unreachable")
+
+        request = a_request(
+            spec={"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}]},
+            build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
+        )
+        buildctl = Buildctl()
+        with pytest.raises(EnvironmentsError) as refused:
+            a_builder(run=buildctl, resolve_secret=resolve_secret).build(request)
+        assert refused.value.code is BUILD_SECRET_UNAVAILABLE
+        assert buildctl.argv == []  # never invoked: nothing half-built
 
     def test_a_retried_build_of_the_same_version_pushes_a_tag_of_its_own(self) -> None:
         first, second = Buildctl(), Buildctl(digest="sha256:" + "ee" * 32)

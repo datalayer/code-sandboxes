@@ -42,6 +42,9 @@ class Builder(ManagedBuilder):
     title = "E2B"
     #: Firecracker microVMs: no GPU passthrough.
     gpu = False
+    #: E0-04's spike found only a registry login for the private base, never
+    #: a per-step arbitrary named secret (E3-05): `buildSecrets` is refused.
+    supports_build_secrets = False
     #: E2B artifacts are regionless.
     regions = ()
     #: A template build is quicker than an image build: 47 s for the section

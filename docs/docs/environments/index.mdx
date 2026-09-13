@@ -111,6 +111,8 @@ Every failure is reported under one code, whichever provider it came from:
 | `DL_ENV_SMOKE_TEST_FAILED` | No | The contract violation is named |
 | `DL_ENV_ARTIFACT_MISSING` | Yes | Build it or pick another variant |
 | `DL_ENV_PROVIDER_ERROR` | Yes | Retry; Datalayer is alerted |
+| `DL_ENV_BUILD_SECRET_UNAVAILABLE` | Sometimes | Retry once IAM is reachable, or check the secret still exists |
+| `DL_ENV_PUBLICATION_BLOCKED` | No | Remove the private input (a build secret), or keep the version private |
 
 ## Checking an artifact
 
