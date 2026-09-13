@@ -237,11 +237,7 @@ class TestTheDockerfileItGenerates:
         which bakes a value into the image's history, and never the
         package-install or files steps, which name no secret (§4.1, D-11)."""
         request = a_request(
-            spec={
-                "buildSecrets": [
-                    {"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}
-                ]
-            },
+            spec={"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}]},
             build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
         )
         dockerfile = a_builder().dockerfile(request)
@@ -480,11 +476,7 @@ class TestBuildingAndPushing:
                 return result
 
         request = a_request(
-            spec={
-                "buildSecrets": [
-                    {"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}
-                ]
-            },
+            spec={"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}]},
             build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
         )
         buildctl = RecordingBuildctl()
@@ -505,11 +497,7 @@ class TestBuildingAndPushing:
             raise EnvironmentsError(BUILD_SECRET_UNAVAILABLE, "IAM is unreachable")
 
         request = a_request(
-            spec={
-                "buildSecrets": [
-                    {"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}
-                ]
-            },
+            spec={"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}]},
             build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
         )
         buildctl = Buildctl()
