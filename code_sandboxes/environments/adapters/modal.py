@@ -37,21 +37,25 @@ So, unlike Daytona (E2-04) and the Datalayer builder, **no `USER` line is
 emitted at all** — writing one would be dead code pretending to do
 something it cannot.
 
-**The contract's own doctor check is not run at build time — and this is
-not yet a closed gap, only a deliberately deferred one.** Every build step
-here runs as root (see above), so `doctor --json` baked into the image
+**The contract's own doctor check is not run at build time.** Every build
+step here runs as root (see above), so `doctor --json` baked into the image
 would report `uid: 0`, not the `1000:100` the contract asks for. Section
 11.4 item 6 says a live launch is where this gets fixed — "every exec
-re-asserts the user" with `setpriv --reuid=1000 --regid=100 --clear-groups`
-— but **found in review, 2026-09-13: `code_sandboxes/modal_sandbox.py` does
-not do this today.** `ModalSandbox` execs directly, with no `setpriv`
-wrapper anywhere in it, so an environment built here and launched through
-it runs as root right now, not `1000:100` — omitting the doctor check does
-not silently paper over a real contract violation, since nothing here
-claims the artifact passes it. Baking the check into the build would only
-report a *build-time* identity that was never going to match a *launch-time*
-one either way; the real fix is `modal_sandbox.py`'s own exec path, which is
-outside this item's own "Where" line and not attempted here.
+re-asserts the user" — and, since 2026-09-13, it does:
+`code_sandboxes.modal_sandbox.ModalSandbox._start_driver` sets
+`os.setgid(100)`/`os.setuid(1000)` inside the driver it starts, in place of
+the `setpriv` wrapper section 11.4 names, but only when `self._image_id` is
+set — that is, only when the sandbox was launched from a built Environments
+artifact, whose image this builder's own recipe (above) always chowns to
+`1000:100`, USER line ignored or not. A plain `ModalSandbox` — `debian_slim`,
+or anyone else's image, no `image_id` at all — never has this asked of it,
+so nothing about general Modal sandbox usage changes. Confirmed live: the
+same doctor check that used to report `uid: 0` now reports `1000:100`
+against a real launched sandbox. Baking the check into the build would
+still only report a *build-time* identity, never provable to match a
+*launch-time* one from inside the build itself — this stays a launch-time
+check, run by the live drills this item's own tests and E2-11's live matrix
+carry out, not a build step.
 
 **Neither the doctor nor the wheelhouse is copied in**, the same finding as
 Daytona's: the Datalayer base already bakes both (E1-05), confirmed live —
