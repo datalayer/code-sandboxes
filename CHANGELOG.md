@@ -8,6 +8,16 @@
 
 ## Unreleased
 
+- **A sandbox can be asked whether it is still alive, and the answer no longer
+  comes from a flag we set ourselves.** `CodeSandboxClient.is_alive()` returned
+  `is_started`, which records that `start()` ran in this process and nothing
+  else, so it kept answering `True` after the backend was gone. `Sandbox` now
+  carries an `is_alive()` that variants override; the Jupyter Server variant
+  looks its kernel id up on the server the way `_find_existing_kernel` lists
+  them, and the client asks the sandbox instead of reading its own flag.
+  Variants that have no way to ask their provider inherit the base answer,
+  `is_started`, which is all they can honestly say.
+
 ## 1.8.0
 
 - **The Datalayer builder** (`environments.adapters.datalayer`, PLAN_ENV.md

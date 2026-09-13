@@ -497,7 +497,14 @@ class CodeSandboxClient:
         return self._sandbox.interrupt()
 
     def is_alive(self) -> bool:
-        """Whether the sandbox is started and available for execution."""
+        """Whether the wrapped sandbox is still available for execution.
+
+        Asks the sandbox, which may check its provider. Sandboxes that expose
+        no liveness hook fall back to whether they report themselves started.
+        """
+        is_alive_fn = getattr(self._sandbox, "is_alive", None)
+        if callable(is_alive_fn):
+            return bool(is_alive_fn())
         return self.is_started
 
     def restart(self) -> None:

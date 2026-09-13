@@ -157,6 +157,31 @@ def test_variables_interrupt_and_restart_delegate_to_sandbox():
     assert client.is_alive() is True
 
 
+def test_a_sandbox_that_knows_it_is_gone_is_believed():
+    """`is_alive` reports what the sandbox can find out, not the local start
+    flag, so a backend that died under us is not reported as ready."""
+
+    class _DeadSandbox(_FakeSandbox):
+        def is_alive(self):
+            return False
+
+    sandbox = _DeadSandbox()
+    client = CodeSandboxClient(sandbox)
+    client.start()
+
+    assert client.is_started is True
+    assert client.is_alive() is False
+
+
+def test_a_sandbox_with_no_liveness_hook_falls_back_to_started():
+    """Minimal duck-typed sandboxes keep the old answer rather than raising."""
+
+    sandbox = SimpleNamespace(run_code=lambda *args, **kwargs: None)
+    client = CodeSandboxClient(sandbox)
+
+    assert client.is_alive() is True
+
+
 def test_execution_error_converts_to_error_output():
     execution = ExecutionResult(
         execution_ok=True,
