@@ -37,16 +37,21 @@ So, unlike Daytona (E2-04) and the Datalayer builder, **no `USER` line is
 emitted at all** — writing one would be dead code pretending to do
 something it cannot.
 
-**The contract's own doctor check is not run at build time, and that is
-deliberate.** Every build step here runs as root (see above), so `doctor
---json` baked into the image would report `uid: 0`, not the `1000:100` a
-real sandbox actually runs as — because at launch, `Sandbox.create`
-and `exec` take no user either (E0-04), so the sandbox launcher
-(`code_sandboxes/modal_sandbox.py`) re-asserts the sandbox's identity on
-every exec with `setpriv --reuid=1000 --regid=100 --clear-groups`, prefixed
-in front of the command. A doctor check that ran during the build would
-check the wrong identity; one that runs through `setpriv` at launch checks
-the real one — which is a live launch's job (E1-14), not this builder's.
+**The contract's own doctor check is not run at build time — and this is
+not yet a closed gap, only a deliberately deferred one.** Every build step
+here runs as root (see above), so `doctor --json` baked into the image
+would report `uid: 0`, not the `1000:100` the contract asks for. Section
+11.4 item 6 says a live launch is where this gets fixed — "every exec
+re-asserts the user" with `setpriv --reuid=1000 --regid=100 --clear-groups`
+— but **found in review, 2026-09-13: `code_sandboxes/modal_sandbox.py` does
+not do this today.** `ModalSandbox` execs directly, with no `setpriv`
+wrapper anywhere in it, so an environment built here and launched through
+it runs as root right now, not `1000:100` — omitting the doctor check does
+not silently paper over a real contract violation, since nothing here
+claims the artifact passes it. Baking the check into the build would only
+report a *build-time* identity that was never going to match a *launch-time*
+one either way; the real fix is `modal_sandbox.py`'s own exec path, which is
+outside this item's own "Where" line and not attempted here.
 
 **Neither the doctor nor the wheelhouse is copied in**, the same finding as
 Daytona's: the Datalayer base already bakes both (E1-05), confirmed live —
@@ -65,14 +70,21 @@ one variant's image concurrently in the same process.
 
 **The entrypoint must exec its arguments** (§6, §11.4 item 6): `Sandbox.create`
 passes its own command as the entrypoint's argv, so the entrypoint must
-`exec` it. `["/bin/sh", "-c", "exec $0 $@"]` does, without an embedded
-`"` — found live, 2026-09-13: `entrypoint()` does not escape a quote
-embedded in an argv element when it renders the Dockerfile's `ENTRYPOINT`
-array, so the more usual `exec "$@"` idiom came out as literal, broken
-`"exec "$@""`, and the sandbox it produced shut down within a couple of
-seconds. `$0` here is deliberately not a throwaway placeholder: with no
-`--` before it, it is the *first* real argument, and `$0 $@` together are
-every argument `Sandbox.create` was given.
+`exec` it, correctly, whatever that command's own arguments look like —
+which took two live attempts. A quoted `exec "$@"` given inline as
+`entrypoint(["/bin/sh", "-c", 'exec "$@"'])` came out of `entrypoint()`'s
+own Dockerfile rendering as literal, broken `"exec "$@""` — it does not
+escape a quote embedded in an argv element — and the sandbox it produced
+shut down within seconds. An unquoted `exec $0 $@` avoided that (nothing
+left to escape) but is not a correct forwarder either: unquoted `$@`
+word-splits and glob-expands each argument, so a command argument
+containing a space — a `python -c "…"` source, above all — arrives split
+into several arguments instead of one (found in review). The fix is a real
+script file, not an inline one-liner: `/opt/datalayer/bin/entrypoint.sh`,
+baked in with a plain `#!/bin/sh\nexec "$@"\n`, is real file *content*, so
+its own quotes need no Dockerfile-string escaping at all, and `exec "$@"`
+inside it is the correct, standard forwarder. `entrypoint()` is then given
+one bare path with nothing to escape.
 
 **A GPU size class is left buildable at `validate()`,** matching an existing
 test (`test_a_gpu_spec_is_buildable_on_modal_and_daytona`), and refused at
@@ -138,9 +150,11 @@ _CONTENT_DIR = "/home/datalayer/content"
 #: 3.13 (E0-04, confirmed live 2026-09-13): see the module docstring.
 _IMAGE_BUILDER_VERSION = "2025.06"
 
-#: A long-running process that execs its arguments (§6, §11.4 item 6): see
-#: the module docstring for why `$0 $@`, not the more usual `"$@"`.
-_ENTRYPOINT = ["/bin/sh", "-c", "exec $0 $@"]
+#: A real script file, not an inline one-liner (§6, §11.4 item 6): see the
+#: module docstring for why. `entrypoint()` is given this one bare path,
+#: nothing in it needing a Dockerfile-string escape.
+_ENTRYPOINT_PATH = "/opt/datalayer/bin/entrypoint.sh"
+_ENTRYPOINT_SCRIPT = '#!/bin/sh\nexec "$@"\n'
 
 
 def _modal_sdk() -> Any:
@@ -228,10 +242,17 @@ class Builder(ManagedBuilder):
             secrets = self._provider_secrets()
             token_id = secrets.get("MODAL_TOKEN_ID")
             token_secret = secrets.get("MODAL_TOKEN_SECRET")
-            if token_id and token_secret:
-                self._client_instance = sdk.Client.from_credentials(token_id, token_secret)
-            else:
-                self._client_instance = sdk.Client.from_env()
+            try:
+                if token_id and token_secret:
+                    self._client_instance = sdk.Client.from_credentials(token_id, token_secret)
+                else:
+                    self._client_instance = sdk.Client.from_env()
+            except Exception as error:
+                # `build`/`inspect`/`exists` all call this before their own
+                # `try`, so an auth failure here used to escape as a raw
+                # Modal exception instead of the adapter's own taxonomy
+                # (found in review).
+                raise self._provider_error("authenticate", error) from error
         return self._client_instance
 
     def _own_findings(
@@ -298,6 +319,19 @@ class Builder(ManagedBuilder):
                 "needs is E2-17's, not built yet",
                 detail={"variant": self.variant, "missing": "E2-17"},
             )
+        if request.build_secret_ids or spec.build_secrets:
+            # `_own_findings` already refuses this at `validate()` — this
+            # guard is `build()`'s own, the same way the GPU one above is,
+            # because nothing enforces that `build` is only ever called
+            # after a passing `validate` (found in review): a caller
+            # handing `build()` an already-resolved request could otherwise
+            # get a successful image with a required credential silently
+            # missing from it.
+            raise EnvironmentsError(
+                CAPABILITY_UNSUPPORTED,
+                "Modal's build secrets need `resolve_build_secret` (E3-05), not yet in this branch",
+                detail={"variant": self.variant, "missing": "E3-05"},
+            )
         sdk = self._modal_sdk()
         # Read from the process environment, not a per-call argument (see
         # the module docstring) — set before anything else touches the SDK.
@@ -328,10 +362,15 @@ class Builder(ManagedBuilder):
             with tempfile.TemporaryDirectory(prefix="dl-modal-build-") as scratch:
                 lock_file = Path(scratch) / "lock.txt"
                 lock_file.write_text(request.lock_text, encoding="utf-8")
+                entrypoint_file = Path(scratch) / "entrypoint.sh"
+                entrypoint_file.write_text(_ENTRYPOINT_SCRIPT, encoding="utf-8")
                 # `copy=True`: the default mounts the local file at runtime
                 # from this process's own filesystem, which is not what a
                 # baked, reusable artifact needs (found live, 2026-09-13).
                 image = image.add_local_file(str(lock_file), _LOCK_PATH, copy=True)
+                image = image.add_local_file(
+                    str(entrypoint_file), _ENTRYPOINT_PATH, copy=True
+                ).run_commands(f"chmod +x {_ENTRYPOINT_PATH}")
                 image = image.run_commands(
                     f'pip install --no-cache-dir "uv=={_UV_VERSION}"',
                     # Packages install as root: every Modal build step
@@ -345,7 +384,7 @@ class Builder(ManagedBuilder):
                     image = image.run_commands(command)
                 for command in spec.commands.post_install:
                     image = image.run_commands(command)
-                image = image.workdir(_CONTENT_DIR).entrypoint(_ENTRYPOINT)
+                image = image.workdir(_CONTENT_DIR).entrypoint([_ENTRYPOINT_PATH])
 
                 logged: list[str] = []
                 buffer = io.StringIO()
@@ -413,6 +452,14 @@ class Builder(ManagedBuilder):
         try:
             secret.hydrate(client=client)
         except Exception as error:
+            # `hydrate` is the RPC that creates the app-owned remote secret
+            # (see the module docstring): if it creates the secret and this
+            # process then observes a timeout or another error on the same
+            # call, the credential is left in the workspace with nothing
+            # local pointing at it unless cleanup is attempted here too
+            # (found in review) — best-effort, same as `_delete_secret`
+            # always is, and harmless if nothing was actually created.
+            self._delete_secret(sdk, client, secret)
             raise EnvironmentsError(
                 PROVIDER_ERROR,
                 f"Modal could not be given a pull credential for the base: {error}",

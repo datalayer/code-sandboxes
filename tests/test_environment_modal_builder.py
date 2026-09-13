@@ -171,23 +171,33 @@ class FakeImageFactory:
 
 
 class FakeSecret:
-    def __init__(self, env_dict: dict[str, str], *, object_id: str = "st-fake123") -> None:
+    def __init__(
+        self,
+        env_dict: dict[str, str],
+        *,
+        object_id: str = "st-fake123",
+        hydrate_error: Exception | None = None,
+    ) -> None:
         self.env_dict = env_dict
         self.object_id = object_id
         self.hydrate_calls: list[Any] = []
+        self._hydrate_error = hydrate_error
 
     def hydrate(self, *, client: Any = None) -> None:
         self.hydrate_calls.append(client)
+        if self._hydrate_error:
+            raise self._hydrate_error
 
 
 class FakeSecretFactory:
     """Stands in for `modal.Secret`."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, hydrate_error: Exception | None = None) -> None:
         self.from_dict_calls: list[FakeSecret] = []
+        self._hydrate_error = hydrate_error
 
     def from_dict(self, env_dict: dict[str, str]) -> FakeSecret:
-        secret = FakeSecret(env_dict)
+        secret = FakeSecret(env_dict, hydrate_error=self._hydrate_error)
         self.from_dict_calls.append(secret)
         return secret
 
@@ -217,17 +227,22 @@ class FakeClient:
 class FakeClientFactory:
     """Stands in for `modal.Client`: its two entry points."""
 
-    def __init__(self, client: FakeClient) -> None:
+    def __init__(self, client: FakeClient, *, error: Exception | None = None) -> None:
         self._client = client
+        self._error = error
         self.from_credentials_calls: list[tuple[str, str]] = []
         self.from_env_calls = 0
 
     def from_credentials(self, token_id: str, token_secret: str) -> FakeClient:
         self.from_credentials_calls.append((token_id, token_secret))
+        if self._error:
+            raise self._error
         return self._client
 
     def from_env(self) -> FakeClient:
         self.from_env_calls += 1
+        if self._error:
+            raise self._error
         return self._client
 
 
@@ -269,15 +284,17 @@ class FakeModalModule:
         self,
         *,
         client: FakeClient | None = None,
+        client_error: Exception | None = None,
         build_error: Exception | None = None,
+        secret_hydrate_error: Exception | None = None,
         existing_ids: set[str] | None = None,
         get_errors: dict[str, Exception] | None = None,
     ) -> None:
         self.client = client or FakeClient()
         self.app = object()
-        self.Client = FakeClientFactory(self.client)
+        self.Client = FakeClientFactory(self.client, error=client_error)
         self.App = FakeAppFactory(self.app)
-        self.Secret = FakeSecretFactory()
+        self.Secret = FakeSecretFactory(hydrate_error=secret_hydrate_error)
         self.Image = FakeImageFactory(
             build_error=build_error, existing_ids=existing_ids, get_errors=get_errors
         )
@@ -439,15 +456,25 @@ class TestBuildingAnImage:
         modal = FakeModalModule()
         a_builder(modal=modal).build(a_request())
         [image] = modal.Image.created
-        [lock_copy] = calls_named(image, "add_local_file")
-        assert lock_copy.args[1] == "/opt/datalayer/lock.txt"
+        # The only two files baked in are the lock and the entrypoint
+        # script — neither the doctor nor the wheelhouse.
+        copies = calls_named(image, "add_local_file")
+        assert {call.args[1] for call in copies} == {
+            "/opt/datalayer/lock.txt",
+            "/opt/datalayer/bin/entrypoint.sh",
+        }
+        [lock_copy] = [call for call in copies if call.args[1] == "/opt/datalayer/lock.txt"]
         assert lock_copy.kwargs["copy"] is True
 
     def test_the_lock_copied_in_is_the_requests_own(self) -> None:
         modal = FakeModalModule()
         a_builder(modal=modal).build(a_request(lock_text=LOCK))
         [image] = modal.Image.created
-        [lock_copy] = calls_named(image, "add_local_file")
+        [lock_copy] = [
+            call
+            for call in calls_named(image, "add_local_file")
+            if call.args[1] == "/opt/datalayer/lock.txt"
+        ]
         assert lock_copy.kwargs["content"] == LOCK.encode("utf-8")
 
     def test_uv_pip_sync_reaches_the_bases_own_shared_wheelhouse(self) -> None:
@@ -485,11 +512,29 @@ class TestBuildingAnImage:
         assert names[-3:] == ["workdir", "entrypoint", "build"]
 
     def test_the_entrypoint_execs_its_arguments(self) -> None:
+        """A bare script path, nothing for `entrypoint()`'s own Dockerfile
+        rendering to mis-escape (found in review of the first version of
+        this code, which used an inline, unquoted `$0 $@` forwarder)."""
         modal = FakeModalModule()
         a_builder(modal=modal).build(a_request())
         [image] = modal.Image.created
         [entrypoint_call] = calls_named(image, "entrypoint")
-        assert entrypoint_call.args[0] == ["/bin/sh", "-c", "exec $0 $@"]
+        assert entrypoint_call.args[0] == ["/opt/datalayer/bin/entrypoint.sh"]
+
+    def test_the_entrypoint_script_itself_quotes_its_forwarding(self) -> None:
+        modal = FakeModalModule()
+        a_builder(modal=modal).build(a_request())
+        [image] = modal.Image.created
+        [script_copy] = [
+            call
+            for call in calls_named(image, "add_local_file")
+            if call.args[1] == "/opt/datalayer/bin/entrypoint.sh"
+        ]
+        assert script_copy.kwargs["content"] == b'#!/bin/sh\nexec "$@"\n'
+        assert any(
+            "chmod +x /opt/datalayer/bin/entrypoint.sh" in str(call.args)
+            for call in calls_named(image, "run_commands")
+        )
 
     def test_the_image_builder_version_is_pinned(self) -> None:
         modal = FakeModalModule()
@@ -571,6 +616,19 @@ class TestTheEcrSecretIsCleanedUp:
         assert artifact.immutable_reference
         assert any("Could not delete the Modal secret" in line for line in logged)
 
+    def test_a_partially_hydrated_secret_is_still_cleaned_up_on_failure(self) -> None:
+        """`hydrate` is the RPC that creates the app-owned remote secret: if
+        it creates the secret and this process then observes an error on
+        the same call, the credential must not be left behind just because
+        nothing local ever confirmed success (found in review)."""
+        modal = FakeModalModule(secret_hydrate_error=RuntimeError("timeout"))
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder(modal=modal).build(a_request())
+        assert raised.value.code.code == PROVIDER_ERROR.code
+        [secret] = modal.Secret.from_dict_calls
+        [deleted] = modal.client.stub.secret_delete_calls
+        assert deleted.kwargs["secret_id"] == secret.object_id
+
 
 class TestWhatModalCannotBuildYet:
     def test_a_gpu_size_class_is_refused_at_build_time_naming_e2_17(self) -> None:
@@ -580,6 +638,19 @@ class TestWhatModalCannotBuildYet:
         assert raised.value.code.code == CAPABILITY_UNSUPPORTED.code
         assert raised.value.detail["missing"] == "E2-17"
         # Refused before any provider is touched.
+        assert modal.Secret.from_dict_calls == []
+        assert modal.Image.from_aws_ecr_calls == []
+
+    def test_a_build_secret_id_is_refused_at_build_time_too(self) -> None:
+        """`_own_findings` already refuses this at `validate()` — nothing
+        enforces that `build()` is only ever called after a passing
+        `validate()` (found in review), so `build()` guards it too, the
+        same way the GPU class above does."""
+        modal = FakeModalModule()
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder(modal=modal).build(a_request(build_secret_ids=("dlsec_abc123",)))
+        assert raised.value.code.code == CAPABILITY_UNSUPPORTED.code
+        assert raised.value.detail["missing"] == "E3-05"
         assert modal.Secret.from_dict_calls == []
         assert modal.Image.from_aws_ecr_calls == []
 
@@ -646,3 +717,11 @@ class TestReadingTheRegistry:
         builder.exists(an_artifact(provider_artifact_id="im-abc123"))
         builder.inspect(an_artifact(provider_artifact_id="im-abc123"))
         assert len(modal.Client.from_credentials_calls) == 1
+
+    def test_an_authentication_failure_is_a_provider_error_not_a_raw_exception(self) -> None:
+        """`_client` is called before `build`/`inspect`/`exists`'s own `try`
+        (found in review): an auth failure used to escape unmapped."""
+        modal = FakeModalModule(client_error=RuntimeError("bad token"))
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder(modal=modal).exists(an_artifact(provider_artifact_id="im-abc123"))
+        assert raised.value.code.code == PROVIDER_ERROR.code
