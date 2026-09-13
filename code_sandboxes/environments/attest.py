@@ -285,6 +285,17 @@ class Attestor:
             self._cosign,
             "sign",
             "--yes",
+            # Never the public transparency log: the digest and the
+            # repository of a private environment are nobody else's to read
+            # (matching clouder's own deploy-check, the one place this was
+            # already right — this adapter never had it). Found live,
+            # 2026-09-13: without this, `cosign sign` reaches for the public
+            # Rekor service by default and prompts for consent to publish an
+            # immutable record of the artifact — the wrong default for a
+            # private environment, and one a non-interactive worker cannot
+            # even answer. The matching verify-side omission is fixed in
+            # `datalayer_operator.services.environment_signatures`.
+            "--tlog-upload=false",
             "--key",
             self._key,
             reference,

@@ -55,7 +55,11 @@ def enhanced(
             "vulnerabilityId": identifier,
             "sourceUrl": f"https://nvd.nist.gov/vuln/detail/{identifier}",
             "vulnerablePackages": [
-                {"name": package, "version": version, **({"fixedInVersion": fixed} if fixed else {})}
+                {
+                    "name": package,
+                    "version": version,
+                    **({"fixedInVersion": fixed} if fixed else {}),
+                }
             ],
         },
     }
@@ -257,9 +261,7 @@ class TestTheScan:
         ecr = FakeEcr(statuses=("IN_PROGRESS",))
         clock = iter([0.0, 0.0, 10_000.0, 10_000.0, 10_000.0])
         with pytest.raises(EnvironmentsError) as raised:
-            an_attestor(ecr=ecr, now=lambda: next(clock)).scan(
-                repository=REPOSITORY, digest=DIGEST
-            )
+            an_attestor(ecr=ecr, now=lambda: next(clock)).scan(repository=REPOSITORY, digest=DIGEST)
         assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
         assert raised.value.code.retry.value != "no"
 
@@ -290,6 +292,11 @@ class TestTheSignature:
             "/usr/bin/cosign",
             "sign",
             "--yes",
+            # Never the public transparency log: found live 2026-09-13,
+            # a bare `cosign sign` reaches for the public Rekor service by
+            # default and prompts for consent to publish an immutable
+            # record — the wrong default for a private environment.
+            "--tlog-upload=false",
             "--key",
             KEY,
             f"{REGISTRY}/{REPOSITORY}@{DIGEST}",
@@ -361,9 +368,7 @@ class TestAttestingAnArtifact:
         cosign = Cosign()
         ecr = FakeEcr(findings=[enhanced("CVE-2026-1234", "CRITICAL", fixed="2.9.15")])
         with pytest.raises(EnvironmentsError) as raised:
-            attest_artifact(
-                artifact=self.an_artifact(), attestor=an_attestor(ecr=ecr, run=cosign)
-            )
+            attest_artifact(artifact=self.an_artifact(), attestor=an_attestor(ecr=ecr, run=cosign))
         assert raised.value.code.code == "DL_ENV_SCAN_BLOCKED"
         assert "CVE-2026-1234" in raised.value.message
         assert cosign.argv == [], "a blocked artifact must not be signed"
