@@ -483,9 +483,7 @@ class ModalSandbox(Sandbox):
             return None
         session.seq += 1
         try:
-            session.driver.stdin.write(
-                json_module.dumps({"seq": session.seq, "code": code}) + "\n"
-            )
+            session.driver.stdin.write(json_module.dumps({"seq": session.seq, "code": code}) + "\n")
             session.driver.stdin.drain()
         except Exception:
             logger.warning("The Modal session driver went away; restarting stateless.")

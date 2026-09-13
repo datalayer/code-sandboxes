@@ -89,12 +89,12 @@ def test_a_lost_sandbox_says_so_and_a_replacement_is_empty(provider: str) -> Non
     first.start()
     try:
         # 1. It executes, and it holds state.
-        assert _read_back(first, "x = 41\nprint(x + 1)") == "42", (
-            f"{provider}: a fresh sandbox could not run code"
-        )
-        assert _read_back(first, "print(x)") == "41", (
-            f"{provider}: the sandbox did not hold state between calls"
-        )
+        assert (
+            _read_back(first, "x = 41\nprint(x + 1)") == "42"
+        ), f"{provider}: a fresh sandbox could not run code"
+        assert (
+            _read_back(first, "print(x)") == "41"
+        ), f"{provider}: the sandbox did not hold state between calls"
     finally:
         # 2. Lose it. This is the kill: the sandbox goes away underneath the
         # session, which is what `on_lost` is about.
@@ -117,9 +117,9 @@ def test_a_lost_sandbox_says_so_and_a_replacement_is_empty(provider: str) -> Non
     second = CodeSandboxClient.create(variant=provider)
     second.start()
     try:
-        assert _read_back(second, "print(1 + 1)") == "2", (
-            f"{provider}: the replacement could not run code"
-        )
+        assert (
+            _read_back(second, "print(1 + 1)") == "2"
+        ), f"{provider}: the replacement could not run code"
         # Exactly `False`, not "False or nothing": the line above has already
         # proved this sandbox executes, so an empty answer here would mean the
         # assertion had stopped measuring anything.

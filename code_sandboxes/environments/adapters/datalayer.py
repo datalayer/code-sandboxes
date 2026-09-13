@@ -501,7 +501,7 @@ class Builder:
     def _describe(
         self, repository: str, digest: str | None = None, tag: str | None = None
     ) -> list[Mapping[str, Any]]:
-        image_id = {"imageDigest": digest} if digest else {"imageTag": tag}
+        image_id: dict[str, str | None] = {"imageDigest": digest} if digest else {"imageTag": tag}
         try:
             answer = self._client().describe_images(repositoryName=repository, imageIds=[image_id])
         except Exception as error:
@@ -625,7 +625,7 @@ class Builder:
 
     @staticmethod
     def _is_missing(error: BaseException) -> bool:
-        name = getattr(getattr(error, "response", {}), "get", lambda *_: {})("Error", {})
+        name: Any = getattr(getattr(error, "response", {}), "get", lambda *_: {})("Error", {})
         code = str((name or {}).get("Code") or "")
         return code in {
             "RepositoryNotFoundException",
@@ -635,7 +635,7 @@ class Builder:
 
     @staticmethod
     def _already_exists(error: BaseException) -> bool:
-        name = getattr(getattr(error, "response", {}), "get", lambda *_: {})("Error", {})
+        name: Any = getattr(getattr(error, "response", {}), "get", lambda *_: {})("Error", {})
         return (
             str((name or {}).get("Code") or "") == "RepositoryAlreadyExistsException"
             or type(error).__name__ == "RepositoryAlreadyExistsException"

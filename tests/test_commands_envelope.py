@@ -40,7 +40,11 @@ class FakeSandbox:
 
 
 def _envelope(exit_code: int, stdout: str, stderr: str = "") -> str:
-    return _ENVELOPE_START + json.dumps({"exit_code": exit_code, "stdout": stdout, "stderr": stderr}) + _ENVELOPE_END
+    return (
+        _ENVELOPE_START
+        + json.dumps({"exit_code": exit_code, "stdout": stdout, "stderr": stderr})
+        + _ENVELOPE_END
+    )
 
 
 def test_the_result_is_read_from_stdout_and_no_variable_is_needed() -> None:

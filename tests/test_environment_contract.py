@@ -109,9 +109,9 @@ def test_a_dockerfile_on_an_approved_base_passes() -> None:
 )
 def test_each_refusal_names_its_line(dockerfile: str, line: int, message: str) -> None:
     findings = validate_dockerfile(dockerfile)
-    assert any(finding.line == line and message in finding.message for finding in findings), (
-        findings
-    )
+    assert any(
+        finding.line == line and message in finding.message for finding in findings
+    ), findings
 
 
 def test_a_refused_dockerfile_is_capability_unsupported_with_every_finding() -> None:

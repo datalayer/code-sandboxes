@@ -125,6 +125,7 @@ class TestTheChainReachesAKernel:
 
         assert "_do_interrupt" in JupyterServerSandbox.__dict__
 
+
 class TestTheInterruptIsReached:
     """`_do_interrupt` was necessary and not sufficient, which the first
     measurement after deploying it said plainly: still 60.5 seconds.

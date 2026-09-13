@@ -34,9 +34,9 @@ from pathlib import Path
 from typing import Any
 
 from .base import Sandbox, marks_execution
-from .jupyter_ingress import interrupt_kernel_client
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
 from .interfaces import ISandboxClient
+from .jupyter_ingress import interrupt_kernel_client
 from .kaggle import KaggleKernelClient, parse_kaggle_channels_url
 from .kaggle_execute import KaggleKernelExecutor
 from .models import (

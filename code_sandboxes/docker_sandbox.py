@@ -10,19 +10,18 @@ through `jupyter-kernel-client` to execute code.
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 import time
 import uuid
 
-import logging
-
 import requests
 
 from .base import Sandbox, marks_execution
-from .jupyter_ingress import interrupt_kernel_client
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
 from .interfaces import ISandboxClient
+from .jupyter_ingress import interrupt_kernel_client
 from .models import (
     CodeError,
     Context,

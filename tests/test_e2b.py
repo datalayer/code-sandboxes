@@ -94,9 +94,7 @@ class _FakeE2BSandbox:
         # not both at the same time." The double refuses it too, or the fix
         # for check 14 of E0-04 would pass here and fail over there.
         if context is not None and language is not None:
-            raise ValueError(
-                "You can provide context or language, but not both at the same time"
-            )
+            raise ValueError("You can provide context or language, but not both at the same time")
         self.calls.append(
             {
                 "code": code,

@@ -1078,7 +1078,7 @@ class Sandbox(ABC):
             from .exceptions import VariableNotFoundError
 
             raise VariableNotFoundError(name)
-        return _json.loads(printed[start + len(self._STDOUT_START):end])
+        return _json.loads(printed[start + len(self._STDOUT_START) : end])
 
     def set_variable(self, name: str, value: Any, context: Context | None = None) -> None:
         """Set a variable in the sandbox.

@@ -101,9 +101,7 @@ def account_fingerprints(variant: str, secrets: Mapping[str, str] | None) -> tup
     """
     name = str(variant or "").strip().lower()
     held = {
-        str(key): str(value)
-        for key, value in (secrets or {}).items()
-        if str(value or "").strip()
+        str(key): str(value) for key, value in (secrets or {}).items() if str(value or "").strip()
     }
     if not held:
         return ()

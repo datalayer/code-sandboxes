@@ -26,7 +26,6 @@ from code_sandboxes import CodeSandboxClient
 from code_sandboxes.contents import ContentManifest
 from code_sandboxes.providers import get_provider
 
-
 # `pytestmark` is a *list*: assigning the filterwarnings mark on its own
 # replaced the `live` mark this module already carried, and `-m live` then
 # deselected every test — a run that reported `4 deselected` and nothing else.
@@ -39,14 +38,14 @@ pytestmark = [
     # died twice on notices about the laptop running the test.
     pytest.mark.filterwarnings("ignore::pydantic.warnings.PydanticDeprecatedSince20"),
     pytest.mark.filterwarnings(
-    # The client's own paths module warns about a platformdirs migration on
-    # first use, and this project promotes warnings to errors. That warning is
-    # the client's, raised in *this* process, and it failed the `datalayer`
-    # row of a matrix whose subject is what happens inside the sandbox — a
-    # real sandbox was created and the row died on a deprecation notice about
-    # where a config file lives on the laptop running the test.
-    "ignore:Datalayer is migrating its paths:DeprecationWarning"
-),
+        # The client's own paths module warns about a platformdirs migration on
+        # first use, and this project promotes warnings to errors. That warning is
+        # the client's, raised in *this* process, and it failed the `datalayer`
+        # row of a matrix whose subject is what happens inside the sandbox — a
+        # real sandbox was created and the row died on a deprecation notice about
+        # where a config file lives on the laptop running the test.
+        "ignore:Datalayer is migrating its paths:DeprecationWarning"
+    ),
 ]
 
 PROVIDERS = ("datalayer", "daytona", "e2b", "modal")

@@ -381,9 +381,8 @@ def _secrets(
 ) -> CheckResult:
     if not secret_values:
         return _result(9, True, gating=True, detail="the build used no secret")
-    in_metadata = bool(image_metadata) and any(
-        value and value in image_metadata for value in secret_values
-    )
+    metadata = image_metadata or ""
+    in_metadata = bool(metadata) and any(value and value in metadata for value in secret_values)
     fingerprints: dict[int, list[int]] = {}
     for length, digest in secret_fingerprints(secret_values):
         fingerprints.setdefault(length, []).append(digest)

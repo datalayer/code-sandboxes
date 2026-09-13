@@ -11,8 +11,7 @@
 ## 1.8.0
 
 - **The Datalayer builder** (`environments.adapters.datalayer`, PLAN_ENV.md
-  E1-07). The Dockerfile is generated from the lock — `uv pip sync
-  --require-hashes`, apt at the versions the lock recorded, `env` before
+  E1-07). The Dockerfile is generated from the lock — `uv pip sync --require-hashes`, apt at the versions the lock recorded, `env` before
   anything installs, `postInstall` as uid 1000 with no network — and the push
   is by digest with an SBOM and provenance attestation, under the operability
   tag `v<n>-<build_uid>` so a retried build cannot collide with the attempt
@@ -80,8 +79,7 @@
   pinned exceptions left.
 
 - A Datalayer sandbox says when it is running code, so an interrupt can reach
-  it. `Sandbox.interrupt` refuses before it delegates — `if not
-  self._executing_event.is_set(): return False` — and `run_code` never set that
+  it. `Sandbox.interrupt` refuses before it delegates — `if not self._executing_event.is_set(): return False` — and `run_code` never set that
   event, so `is_executing` was always False, every interrupt was refused at the
   door, and the refusal was reported as "no code was running" to a caller
   watching a cell run.

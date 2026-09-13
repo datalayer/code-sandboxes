@@ -284,7 +284,7 @@ print({_ENVELOPE_START!r} + __cmd_json__.dumps(__cmd_output__) + {_ENVELOPE_END!
                 duration=time.time() - start_time,
             )
         try:
-            result = json.loads(printed[start + len(_ENVELOPE_START):end])
+            result = json.loads(printed[start + len(_ENVELOPE_START) : end])
             return CommandResult(
                 exit_code=int(result["exit_code"]),
                 stdout=str(result["stdout"]),
