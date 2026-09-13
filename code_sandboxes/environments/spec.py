@@ -53,6 +53,7 @@ __all__ = [
     "BuildSpec",
     "Commands",
     "Compatibility",
+    "DependencyFileSpec",
     "Environment",
     "EnvironmentSpec",
     "FileEntry",
@@ -69,6 +70,7 @@ __all__ = [
     "VariantSet",
     "VersionStatus",
     "parse_environment",
+    "parse_requirements_txt",
     "spec_digest",
     "spec_findings",
     "validate_environment",
@@ -86,10 +88,13 @@ SIZE_CLASSES: tuple[str, ...] = ("small", "medium", "large", "gpu-small", "gpu-l
 GPU_SIZE_CLASSES: tuple[str, ...] = ("gpu-small", "gpu-large")
 
 BUILD_SOURCES: tuple[str, ...] = ("packages", "dependencyFile", "dockerfile", "image")
-#: What builds today; the other sources come with dependency files, Dockerfiles
-#: and image imports.
-SUPPORTED_BUILD_SOURCES: tuple[str, ...] = ("packages",)
+#: What builds today; the other sources come with Dockerfiles and image imports.
+SUPPORTED_BUILD_SOURCES: tuple[str, ...] = ("packages", "dependencyFile")
 SUPPORTED_PACKAGE_MANAGERS: tuple[str, ...] = ("uv", "pip")
+#: `requirements.txt` and `pyproject.toml`/`uv.lock` are archived on the
+#: version they resolved (E3-01); this bounds what a spec may carry inline,
+#: matching a single file's own cap (`MAX_FILE_BYTES`, below).
+MAX_DEPENDENCY_FILE_BYTES = 1024 * 1024
 
 RESERVED_NAME_PREFIXES: tuple[str, ...] = ("datalayer-", "dl-", "kube-", "system-")
 MAX_NAME_LENGTH = 63
@@ -204,8 +209,26 @@ class Compatibility(_Model):
     regions: list[str] = Field(default_factory=list)
 
 
+class DependencyFileSpec(_Model):
+    """A `requirements.txt`, or a `pyproject.toml` with its `uv.lock` (E3-01).
+
+    ``requirements`` resolves the way ``packages`` does — the protected
+    constraints merged in, the same solve. ``pyproject`` does not resolve at
+    all: its own ``uv.lock`` is verified against the current
+    ``pyproject.toml`` and exported, never re-solved, because a lock the
+    author already made is the whole point of bringing one.
+    """
+
+    source_format: Literal["requirements", "pyproject"] = "requirements"
+    #: The `requirements.txt` text, or the `pyproject.toml` text.
+    content: str = ""
+    #: The `uv.lock` text. Required, and only meaningful, for `pyproject`.
+    lock_content: str = ""
+
+
 class BuildSpec(_Model):
     source: Literal["packages", "dependencyFile", "dockerfile", "image"] = "packages"
+    dependency_file: DependencyFileSpec | None = None
 
 
 class EnvironmentSpec(_Model):
@@ -296,6 +319,68 @@ def _index_findings(field: str, url: str) -> list[SpecFinding]:
     return []
 
 
+def parse_requirements_txt(text: str) -> list[str]:
+    """The requirement lines of a `requirements.txt`, comments and blanks dropped.
+
+    A pip option line (`-r`, `--index-url`, and the like) is not a
+    requirement: `requirements.txt` sources take their indexes from
+    `spec.packages.python.indexes`, the same field a `packages` source uses,
+    so there is one place an index is named, not two that could disagree.
+    """
+    lines: list[str] = []
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line or line.startswith("-"):
+            continue
+        lines.append(line)
+    return lines
+
+
+def _dependency_file_findings(dependency_file: DependencyFileSpec | None) -> list[SpecFinding]:
+    field = "spec.build.dependencyFile"
+    if dependency_file is None:
+        return [SpecFinding(field, "is required when `spec.build.source` is `dependencyFile`")]
+    # `source_format`'s own type is the full set this phase supports, unlike
+    # `build.source`: nothing here is valid-but-not-yet-buildable, so there is
+    # no gap between what pydantic accepts and what a finding would refuse.
+    findings: list[SpecFinding] = []
+    if not dependency_file.content.strip():
+        name = (
+            "pyproject.toml" if dependency_file.source_format == "pyproject" else "requirements.txt"
+        )
+        findings.append(SpecFinding(f"{field}.content", f"is empty; it is the {name} text"))
+    elif dependency_file.source_format == "requirements":
+        for index, requirement in enumerate(parse_requirements_txt(dependency_file.content)):
+            problem = _requirement_problem(requirement)
+            if problem:
+                findings.append(
+                    SpecFinding(f"{field}.content[{index}]", f"`{requirement}`: {problem}")
+                )
+    if len(dependency_file.content.encode("utf-8")) > MAX_DEPENDENCY_FILE_BYTES:
+        findings.append(
+            SpecFinding(f"{field}.content", f"is over {MAX_DEPENDENCY_FILE_BYTES} bytes")
+        )
+    if dependency_file.source_format == "pyproject":
+        if not dependency_file.lock_content.strip():
+            findings.append(
+                SpecFinding(
+                    f"{field}.lockContent", "is empty; a pyproject source brings its own uv.lock"
+                )
+            )
+        elif len(dependency_file.lock_content.encode("utf-8")) > MAX_DEPENDENCY_FILE_BYTES:
+            findings.append(
+                SpecFinding(f"{field}.lockContent", f"is over {MAX_DEPENDENCY_FILE_BYTES} bytes")
+            )
+    elif dependency_file.lock_content.strip():
+        findings.append(
+            SpecFinding(
+                f"{field}.lockContent",
+                "is only read for a `pyproject` source; a `requirements` source resolves fresh",
+            )
+        )
+    return findings
+
+
 def spec_findings(
     environment: Environment, *, bases: Mapping[str, ApprovedBase] = APPROVED_BASES
 ) -> list[SpecFinding]:
@@ -353,6 +438,8 @@ def spec_findings(
                 CAPABILITY_UNSUPPORTED,
             )
         )
+    if spec.build.source == "dependencyFile":
+        findings.extend(_dependency_file_findings(spec.build.dependency_file))
 
     python = spec.packages.python
     if python.manager not in SUPPORTED_PACKAGE_MANAGERS:

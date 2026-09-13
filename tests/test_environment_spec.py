@@ -299,6 +299,95 @@ def test_an_invalid_field_outranks_something_unsupported() -> None:
     }
 
 
+# -- Dependency files (E3-01) --------------------------------------------------
+
+
+def a_dependency_file_document(**dependency_file: Any) -> dict[str, Any]:
+    data = mutated("spec.build.source", "dependencyFile")
+    data["spec"]["build"]["dependencyFile"] = {
+        "sourceFormat": "requirements",
+        "content": "geopandas==1.1.1\n",
+        **dependency_file,
+    }
+    return data
+
+
+class TestDependencyFiles:
+    def test_a_requirements_file_is_supported_now(self) -> None:
+        assert _codes(a_dependency_file_document()) == {}
+
+    def test_a_pyproject_file_with_its_lock_is_supported(self) -> None:
+        data = a_dependency_file_document(
+            sourceFormat="pyproject",
+            content='[project]\nname = "x"\ndependencies = ["geopandas==1.1.1"]\n',
+            lockContent="# a uv.lock\n",
+        )
+        assert _codes(data) == {}
+
+    def test_naming_no_dependency_file_at_all_is_invalid(self) -> None:
+        data = mutated("spec.build.source", "dependencyFile")
+        assert _codes(data) == {"spec.build.dependencyFile": INVALID}
+
+    def test_an_unsupported_source_format_is_invalid(self) -> None:
+        """`sourceFormat` is a closed set: pydantic refuses it before a
+        finding would even run, the same as any other field's literal type."""
+        data = a_dependency_file_document(sourceFormat="setup.py")
+        with pytest.raises(EnvironmentsError) as refused:
+            parse_environment(data)
+        assert refused.value.code is errors.SPEC_INVALID
+        assert "spec.build.dependencyFile.sourceFormat" in {
+            finding["field"] for finding in refused.value.detail["findings"]
+        }
+
+    def test_empty_content_is_invalid(self) -> None:
+        data = a_dependency_file_document(content="   \n")
+        assert _codes(data) == {"spec.build.dependencyFile.content": INVALID}
+
+    def test_content_over_the_byte_cap_is_invalid(self) -> None:
+        from code_sandboxes.environments.spec import MAX_DEPENDENCY_FILE_BYTES
+
+        data = a_dependency_file_document(content="x" * (MAX_DEPENDENCY_FILE_BYTES + 1))
+        assert _codes(data) == {"spec.build.dependencyFile.content": INVALID}
+
+    def test_a_pyproject_source_with_no_lock_is_invalid(self) -> None:
+        data = a_dependency_file_document(
+            sourceFormat="pyproject", content='[project]\nname = "x"\n'
+        )
+        assert _codes(data) == {"spec.build.dependencyFile.lockContent": INVALID}
+
+    def test_a_requirements_source_with_a_lock_is_invalid(self) -> None:
+        """`lockContent` is only read for `pyproject`; a `requirements` source resolves fresh."""
+        data = a_dependency_file_document(lockContent="# unexpected\n")
+        assert _codes(data) == {"spec.build.dependencyFile.lockContent": INVALID}
+
+    def test_an_unparseable_requirement_line_is_invalid_and_named(self) -> None:
+        data = a_dependency_file_document(content="geopandas>=>1\n")
+        assert _codes(data) == {"spec.build.dependencyFile.content[0]": INVALID}
+
+    def test_a_comment_and_a_blank_line_are_not_requirements(self) -> None:
+        data = a_dependency_file_document(content="# a comment\n\ngeopandas==1.1.1\n")
+        assert _codes(data) == {}
+
+
+class TestParsingARequirementsFile:
+    def test_comments_and_blank_lines_are_dropped(self) -> None:
+        from code_sandboxes.environments.spec import parse_requirements_txt
+
+        text = "# a header\n\ngeopandas==1.1.1  # inline\n\nrasterio==1.4.3\n"
+        assert parse_requirements_txt(text) == ["geopandas==1.1.1", "rasterio==1.4.3"]
+
+    def test_a_pip_option_line_is_not_a_requirement(self) -> None:
+        from code_sandboxes.environments.spec import parse_requirements_txt
+
+        text = "-r other.txt\n--index-url https://example/simple\nsix==1.16.0\n"
+        assert parse_requirements_txt(text) == ["six==1.16.0"]
+
+    def test_an_empty_file_has_no_requirements(self) -> None:
+        from code_sandboxes.environments.spec import parse_requirements_txt
+
+        assert parse_requirements_txt("\n\n# only comments\n") == []
+
+
 @pytest.mark.parametrize(
     ("data", "field"),
     [

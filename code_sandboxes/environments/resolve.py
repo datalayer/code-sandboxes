@@ -60,7 +60,7 @@ from .errors import (
     SPEC_INVALID,
     EnvironmentsError,
 )
-from .spec import Environment, parse_environment
+from .spec import DependencyFileSpec, Environment, parse_environment, parse_requirements_txt
 
 __all__ = [
     "APT_PIN_PREFIX",
@@ -100,6 +100,12 @@ CONSTRAINTS_PATH = Path(__file__).parent / "constraints" / "sandbox-contract-v1.
 #: ``--find-links``, preferring an index match and falling back to a local
 #: wheel only for what no index has.
 WHEELHOUSE_IMAGE_PATH = "/opt/datalayer/wheelhouse"
+#: The same wheelhouse, where this package carries it — for
+#: :class:`LocalResolveRunner`, which is not the base image and has no
+#: ``/opt/datalayer`` to read. Found live, 2026-09-13: without this, a local
+#: resolve of any spec fails on the fork exactly as a build once did, since a
+#: protected pin is forced into every resolve regardless of where it runs.
+WHEELHOUSE_PATH = Path(__file__).parent / "constraints" / "wheelhouse"
 
 #: How an apt pin is written in the lock. A comment, so every reader of a
 #: ``pip`` requirements file — the CLI's diff included — ignores it.
@@ -511,6 +517,8 @@ class LocalResolveRunner:
                 request.python_version,
                 "--constraint",
                 str(constraints),
+                "--find-links",
+                str(WHEELHOUSE_PATH),
                 *_index_options(request.indexes),
                 str(requirements),
             ]
@@ -825,6 +833,120 @@ def resolve_bases(
     return resolved
 
 
+#: `uv lock --dry-run`'s three shapes for what changed, none of which name
+#: only the package once: `Update six v1.16.0 -> v1.17.0`, `Add wheel
+#: v0.48.0`, `Remove six v1.16.0`. Exit code is 0 whichever it prints — the
+#: only way to know is to read the lines.
+_LOCK_DRIFT = re.compile(r"^(Update|Add|Remove) (\S+) v(\S+?)(?: -> v(\S+))?$")
+
+
+def _verified_pyproject_lock(
+    dependency_file: DependencyFileSpec,
+    *,
+    python_version: str,
+    uv: str | None,
+    log: Callable[[str], None],
+    run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+    timeout: float = 60.0,
+) -> dict[str, Any]:
+    """The author's own `uv.lock`, checked against `pyproject.toml` and exported (E3-01).
+
+    Never re-resolved: a `pyproject` source brings a lock the author already
+    made, and the whole point of bringing one is that Datalayer does not
+    remake it. What this does is prove the two still agree, the same
+    question ``uv lock --check`` answers for a human running it by hand.
+    """
+    resolved_uv = (shutil.which("uv") or "") if uv is None else uv
+    if not resolved_uv:
+        raise EnvironmentsError(
+            CAPABILITY_UNSUPPORTED,
+            "No `uv` to verify the lock with",
+            detail={"missing": "uv"},
+        )
+    invoke = run or subprocess.run
+    with tempfile.TemporaryDirectory(prefix="dl-pyproject-") as directory:
+        root = Path(directory)
+        (root / "pyproject.toml").write_text(dependency_file.content, encoding="utf-8")
+        (root / "uv.lock").write_text(dependency_file.lock_content, encoding="utf-8")
+        try:
+            checked = invoke(
+                [resolved_uv, "lock", "--dry-run"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as expired:
+            raise EnvironmentsError(
+                PROVIDER_ERROR,
+                f"Checking the lock did not finish within {timeout:.0f}s",
+                detail={"timeout": timeout},
+            ) from expired
+        drifted = [
+            match
+            for match in (_LOCK_DRIFT.match(line) for line in checked.stderr.splitlines())
+            if match
+        ]
+        if checked.returncode != 0 and not drifted:
+            for line in checked.stderr.splitlines():
+                log(line)
+            raise EnvironmentsError(
+                PROVIDER_ERROR,
+                "`uv lock --dry-run` could not check this pyproject.toml and uv.lock",
+                detail={"stderr": checked.stderr[-2000:]},
+            )
+        if drifted:
+            change, package, version, updated = drifted[0].groups()
+            said = {
+                "Update": f"is {version} in `uv.lock`, and {updated} once `pyproject.toml` "
+                "resolves again",
+                "Add": f"is not in `uv.lock`, and would be at {version} once `pyproject.toml` "
+                "resolves again",
+                "Remove": f"is {version} in `uv.lock`, and would not be there once "
+                "`pyproject.toml` resolves again",
+            }[change]
+            raise EnvironmentsError(
+                RESOLVE_CONFLICT,
+                f"`{package}` {said}: run `uv lock` and bring the updated `uv.lock`",
+                detail={
+                    "field": "spec.build.dependencyFile.lockContent",
+                    "package": package,
+                    "drifted": [m.group(0) for m in drifted],
+                },
+            )
+        log("uv.lock matches pyproject.toml; exporting it rather than re-resolving")
+        exported = invoke(
+            [resolved_uv, "export", "--locked", "--format", "requirements.txt"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if exported.returncode != 0:
+            for line in exported.stderr.splitlines():
+                log(line)
+            raise EnvironmentsError(
+                PROVIDER_ERROR,
+                "`uv export` could not export this uv.lock, after `--dry-run` found it current",
+                detail={"stderr": exported.stderr[-2000:]},
+            )
+    text = exported.stdout
+    if not text.endswith("\n"):
+        text += "\n"
+    packages = locked_versions(text)
+    digest = "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+    log(f"Verified and exported {len(packages)} packages from uv.lock as {digest}")
+    return {
+        "digest": digest,
+        "format": LOCK_FORMAT,
+        "content": text,
+        "python_version": python_version,
+        "package_count": len(packages),
+    }
+
+
 def resolve_environment(
     *,
     spec: Mapping[str, Any] | str | Environment,
@@ -834,6 +956,8 @@ def resolve_environment(
     runner: ResolveRunner | None = None,
     bases: dict[str, ApprovedBase] = APPROVED_BASES,
     resolved_at: datetime | None = None,
+    uv: str | None = None,
+    pyproject_run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> dict[str, Any]:
     """A version's lock, and the base each variant builds from.
 
@@ -859,6 +983,11 @@ def resolve_environment(
         published somewhere else.
     resolved_at
         The moment the lock records. Now by default.
+    uv, pyproject_run
+        A `pyproject` `dependencyFile` source's own verification (E3-01):
+        the `uv` to check and export with, and how it is run — injected by
+        tests, `uv` found on the PATH and `subprocess.run` otherwise. Unused
+        by every other source.
 
     Returns
     -------
@@ -876,12 +1005,13 @@ def resolve_environment(
     say = log or (lambda _line: None)
     environment = parse_environment(spec)
     python = environment.spec.packages.python
-    if environment.spec.build.source != "packages":
+    source = environment.spec.build.source
+    if source not in ("packages", "dependencyFile"):
         raise EnvironmentsError(
             CAPABILITY_UNSUPPORTED,
-            f"`{environment.spec.build.source}` is not resolved yet: only `packages` is, "
+            f"`{source}` is not resolved yet: only `packages` and `dependencyFile` are, "
             "in this phase",
-            detail={"field": "spec.build.source", "source": environment.spec.build.source},
+            detail={"field": "spec.build.source", "source": source},
         )
     if python.manager == "conda":
         raise EnvironmentsError(
@@ -892,7 +1022,25 @@ def resolve_environment(
         )
     wanted = sorted({str(variant) for variant in variants} or {"datalayer"})
     resolved_bases = resolve_bases(environment, wanted, bases, registry=_registry_of(credential))
-    merged = merge_requirements(python.dependencies, python.constraints)
+    dependency_file = environment.spec.build.dependency_file
+    if source == "dependencyFile" and dependency_file is not None:
+        if dependency_file.source_format == "pyproject":
+            # Verified, not re-resolved (E3-01): the author's own uv.lock is
+            # the answer, and this only proves it still matches pyproject.toml.
+            return {
+                **_verified_pyproject_lock(
+                    dependency_file,
+                    python_version=environment.spec.language.version,
+                    uv=uv,
+                    run=pyproject_run,
+                    log=say,
+                ),
+                "resolved_bases": resolved_bases,
+            }
+        dependencies = parse_requirements_txt(dependency_file.content)
+    else:
+        dependencies = python.dependencies
+    merged = merge_requirements(dependencies, python.constraints)
     for note in merged.notes:
         say(note)
     # Resolution runs in the Datalayer base when it is one of the variants —
