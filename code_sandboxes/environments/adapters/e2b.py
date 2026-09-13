@@ -39,22 +39,54 @@ none, so `postInstall` here can reach the network during the build, which
 E0-04's spike did not have reason to flag and which this box's own text
 does not ask this variant to close.
 
-**What remains before E2-03 ticks.** A live build (2026-09-13, this
-session, template and account deleted afterward) ran the whole chain
-through and produced a real `build_id` — but `code-interpreter-v1` already
-holds an account at uid 1000 or gid 100 of its own, so `datalayer` here
-lands on uid 1001, gid 1001, not the contract's `1000:100`, and the content
-directory — chowned to the numbers the account was asked for, not the ones
-it got — reads as not writable by it. `doctor --json` reports both,
-correctly, and fails the build on them, so a real build refuses today
-rather than shipping an artifact the contract's own check would not
-accept. Getting the numeric identity to match needs either finding what in
-`code-interpreter-v1` already holds 1000/100 and moving it, or asking E2B
-how they mean a template built on their own base to get a chosen uid:gid —
-neither attempted further here after three live builds each cost a real
-uid/gid guess and a few minutes: see `build`'s own comment for exactly
-what was tried and what broke. Untouched by this: `resolve`, `delete` and
-tag-drift reconciliation (section 11.2's own remaining items), still
+**The build-time identity and locale gaps are closed; a deeper runtime one
+was found underneath them.** Three earlier live builds (2026-09-13) landed
+`datalayer` at uid 1001, gid 1001, not the contract's `1000:100` —
+`code-interpreter-v1` already holds an account at uid 1000 (`user`) and a
+group at gid 100 (`users`) of its own, so `useradd -u 1000 -g 100 ...`
+silently fell back to the next free numbers instead of erroring. `build`'s
+own comment records exactly what was tried; the fix that actually works is
+not to create a second account at those numbers but to rename the one
+already there — confirmed on a live, build-free probe of
+`code-interpreter-v1` — and also close the account's now-orphaned former
+private group, which a live build only revealed *after* the identity fix,
+when it collided with E2B's own post-build "configuration script"
+recreating a default `user` account of its own. A second, separate gap
+found the same way: `code-interpreter-v1` sets no locale at all, so the
+doctor's own `locale` check failed until `LC_ALL`/`LANG=C.UTF-8` were set
+explicitly (the Datalayer base bakes this in at E1-05; Daytona and Modal
+inherit it for free by starting from that base, this builder does not).
+
+With both fixed, `doctor --json` passes **at build time** in full — but a
+live launch of that same artifact through the real launcher
+(`Sandbox.create`, not a hand-rolled build-time check) still fails the core
+tier's identity checks: the running kernel is `root`, not `datalayer`, and
+its cwd is `/home/user`, not the contract's content directory. The two are
+different code paths. `set_user`/`set_workdir` only set the *build chain's*
+own persistent default for later `run_cmd`/`copy` calls — they say nothing
+about the two `systemd` services that actually execute a launched
+sandbox's code, `jupyter.service` and `code-interpreter.service` (the
+FastAPI server on 49999 from the module docstring above), and a live probe
+of both units' files found neither names a `User=` at all, so both run as
+whichever user their own unit's default is: `root`. The cwd is a second,
+separate cause layered on top of the first — E2B's own private
+`/root/.jupyter/jupyter_server_config.py` (`c.ServerApp.root_dir =
+"/home/user"`) and `/root/.server/main.py` (`cwd = request.cwd or
+"/home/user"`) hardcode that path for every kernel and context, independent
+of which OS account runs the process. Closing this needs either patching
+those two `systemd` units (`User=`/`Group=`, plausible, since they are this
+build's own files to customize the same way `set_user`/`set_workdir`
+already customize the Docker layer) and reconciling the `/home/user` the
+FastAPI service still hardcodes with the contract's own content directory —
+by a filesystem trick such as a symlink, since the strings themselves live
+in E2B's private, unpublished source rather than anything this builder
+ships — or a fix from E2B upstream. Not attempted further here: it touches
+the actual execution engine every launched sandbox depends on, not a
+one-off build step, and getting it wrong risks a template that fails to
+start at all rather than one that starts as the wrong user — the same
+reasoning `modal_sandbox.py`'s own still-open `setpriv` gap (E2-05) was
+left at, for the same reason. Untouched by any of this: `resolve`, `delete`
+and tag-drift reconciliation (section 11.2's own remaining items), still
 refusing via the inherited `ManagedBuilder` methods.
 
 **The artifact is the build id.** A template name and its tags are mutable
@@ -131,6 +163,14 @@ _CONTENT_DIR = "/home/datalayer/content"
 #: template's persistent default; the steps that must run as root instead
 #: override it back with their own per-call `user="root"`.
 _CONTRACT_USER = "datalayer"
+
+#: The contract's own locale (D-4, §3). The Datalayer base bakes
+#: `LC_ALL=C.UTF-8` in (E1-05), and Daytona and Modal both start from it and
+#: inherit that for free — `code-interpreter-v1` is not that base and sets no
+#: locale at all, so the doctor's own `locale` check failed here (found
+#: live, 2026-09-13: `LC_ALL`/`LANG` both unset) until this was set
+#: explicitly.
+_CONTRACT_LOCALE = "C.UTF-8"
 
 
 def _e2b_template_cls() -> Any:
@@ -284,39 +324,52 @@ class Builder(ManagedBuilder):
                 # `user="root"` explicitly (found live, 2026-09-13: without
                 # it, `mkdir /home/datalayer` failed "Permission denied").
                 #
-                # Three things found live, 2026-09-13, in this exact order,
-                # each costing a real build to learn:
+                # **The uid/gid gap, found live, is now closed.** The
+                # `useradd -u 1000 -g 100 ...` this used to run here always
+                # landed the account at uid 1001, gid 1001 — not because
+                # `useradd` failed, but because both numbers were already
+                # taken: a direct probe of `code-interpreter-v1` (a plain
+                # sandbox, no build) found `user:x:1000:1000:...` in
+                # `/etc/passwd` and `users:x:100:user` in `/etc/group`, so
+                # `-u 1000 -g 100` silently fell back to the next free pair
+                # instead of erroring. The fix is not to create a second
+                # account at those numbers — it is to rename the one that is
+                # already there. `usermod -l datalayer -g 100 -d
+                # /home/datalayer -m user` on that same probe produced
+                # exactly `uid=1000(datalayer) gid=100(users)`: the existing
+                # account, kept at its own uid, moved onto the existing
+                # gid-100 group and given the contract's name and home.
+                # Read who currently holds uid 1000 rather than hardcoding
+                # `user`, so a future `code-interpreter-v1` that ships a
+                # different account name — or none at all — still works:
+                # renamed if one is there, created fresh (the original
+                # `useradd`) if not. `getent group 100` is created first for
+                # the same reason, in case a future base has no gid 100 at
+                # all.
                 #
-                # 1. `useradd`/`groupadd` first, `set_user` after, is the one
-                #    ordering that runs the whole chain through without a
-                #    crash. `set_user("datalayer")` called **before** a real
-                #    account exists — whether nothing had created one yet,
-                #    or a later root step tried to renumber whatever
-                #    `set_user` itself had just auto-created — left the
-                #    account unable to exec anything at all: the very next
-                #    step failed `/bin/sh: permission denied`, with nothing
-                #    more specific reported. Not explained; only avoided.
-                # 2. This `useradd -u 1000 -g 100 ...` is not believed to
-                #    take effect: the doctor consistently reports the final
-                #    account at uid 1001, gid 1001, not 1000:100 — some
-                #    account in `code-interpreter-v1` already holds one or
-                #    both numbers. `set_user("datalayer")` is what actually
-                #    makes the account usable; this `useradd` line's own
-                #    effect could not be confirmed independently of it.
-                # 3. Because of (2), this same command's own
-                #    `chown -R 1000:100` below chowns the content directory
-                #    to numbers the account never actually held, and the
-                #    doctor correctly reports the workdir as not writable.
-                #    Chowning by name instead (`chown -R datalayer:datalayer`)
-                #    would fix that — but only works once the account is
-                #    real, i.e. after `set_user`, which is exactly the
-                #    ordering (1) found unsafe. Left open rather than
-                #    guessed at further; see this method's own "what
-                #    remains" note in the module docstring.
+                # One thing the rename leaves behind: the renamed account's
+                # own former *private* group (`user`, gid 1000 on
+                # `code-interpreter-v1`), now with no member since its
+                # primary gid moved to 100. Found live, 2026-09-13, right
+                # after the identity and locale fixes above finally let a
+                # build get this far: E2B's own build pipeline runs a
+                # "configuration script" of its own *after* this chain,
+                # unconditionally recreating a default `user` account —
+                # and its `useradd` failed the whole build outright
+                # ("group user exists") because that leftover group was
+                # still there for it to collide with. Deleting it once
+                # nothing needs it anymore (never the gid-100 group itself)
+                # is what let E2B's own step proceed.
                 .run_cmd(
-                    f"groupadd -g 100 {_CONTRACT_USER} 2>/dev/null; "
-                    f"useradd -u 1000 -g 100 -m -d /home/{_CONTRACT_USER} -s /bin/bash "
-                    f"{_CONTRACT_USER} 2>/dev/null; "
+                    "getent group 100 >/dev/null 2>&1 || groupadd -g 100 users; "
+                    "existing_uid_1000=$(getent passwd 1000 | cut -d: -f1); "
+                    f'if [ -n "$existing_uid_1000" ]; then '
+                    'old_group=$(id -gn "$existing_uid_1000"); '
+                    f"usermod -l {_CONTRACT_USER} -g 100 -d /home/{_CONTRACT_USER} -m "
+                    '"$existing_uid_1000"; '
+                    '[ "$old_group" = "users" ] || groupdel "$old_group" 2>/dev/null || true; '
+                    f"else useradd -u 1000 -g 100 -m -d /home/{_CONTRACT_USER} -s /bin/bash "
+                    f"{_CONTRACT_USER}; fi; "
                     f"mkdir -p {_CONTENT_DIR} && chown -R 1000:100 /home/{_CONTRACT_USER}",
                     user="root",
                 )
@@ -328,8 +381,11 @@ class Builder(ManagedBuilder):
             # library found through an env var (`GDAL_DATA` and the like)
             # behaves differently without it. Found in review: this used to
             # run after uv's own install, too late for exactly that case.
-            if spec.env:
-                chain = chain.set_envs(dict(spec.env))
+            # The contract's own locale goes in unconditionally — merged
+            # first, so a spec naming `LC_ALL`/`LANG` itself still wins.
+            env = {"LC_ALL": _CONTRACT_LOCALE, "LANG": _CONTRACT_LOCALE}
+            env.update(spec.env)
+            chain = chain.set_envs(env)
             apt = apt_pins_in(request.lock_text)
             if apt:
                 # The lock's own apt versions (D-9), the same pins the

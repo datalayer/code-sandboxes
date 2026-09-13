@@ -188,7 +188,7 @@ def a_request(**changes) -> BuildRequest:
 
 def a_builder(template: FakeTemplate | None = None, **changes) -> Builder:
     options = {
-        "template_cls": lambda: (template or FakeTemplate()),
+        "template_cls": lambda: template or FakeTemplate(),
         "zipapp_builder": lambda target: Path(target).write_text("#!/usr/bin/env python3\n"),
         "team": "acme-team",
     }
@@ -234,23 +234,43 @@ class TestBuildingATemplate:
         assert "user" not in post_install.kwargs
 
     def test_the_datalayer_user_is_created_as_root_then_made_the_default(self) -> None:
-        """`useradd` as root, then `set_user("datalayer")` names it as the
-        default for every later step — found live, 2026-09-13, to be the one
+        """As root, rename whoever already holds uid 1000 onto the contract's
+        name/home/gid, then `set_user("datalayer")` names it as the default
+        for every later step — found live, 2026-09-13, to be the one
         ordering that runs the whole chain through cleanly: `set_user`
         before a real account exists left the account unable to exec
         anything at all ("/bin/sh: permission denied")."""
         fake = FakeTemplate()
         a_builder(fake).build(a_request())
         setup = next(
-            call for call in fake.calls if call.name == "run_cmd" and "useradd" in call.args[0]
+            call for call in fake.calls if call.name == "run_cmd" and "usermod" in call.args[0]
         )
         assert setup.kwargs["user"] == "root"
-        assert "groupadd -g 100 datalayer" in setup.args[0]
-        assert "-u 1000 -g 100 -m -d /home/datalayer" in setup.args[0]
+        # `code-interpreter-v1` already ships an account at uid 1000 (found
+        # live: named `user`, private group also 1000) and a group at gid
+        # 100 (`users`) — renaming that account is what lands the contract's
+        # 1000:100 exactly, rather than a fresh `useradd` silently falling
+        # back to the next free numbers (found live, 2026-09-13).
+        assert "getent group 100" in setup.args[0]
+        assert "getent passwd 1000 | cut -d: -f1" in setup.args[0]
+        assert "usermod -l datalayer -g 100 -d /home/datalayer -m" in setup.args[0]
+        # The renamed account's own former private group is deleted once
+        # nothing needs it — found live, 2026-09-13: E2B's own post-build
+        # "configuration script" unconditionally recreates a default `user`
+        # account, and its own `useradd` failed the whole build ("group
+        # user exists") when that leftover group was still there. Never the
+        # gid-100 group itself.
+        assert 'old_group=$(id -gn "$existing_uid_1000")' in setup.args[0]
+        assert '[ "$old_group" = "users" ] || groupdel "$old_group"' in setup.args[0]
+        # Still falls back to a plain useradd if some future base ships no
+        # account at uid 1000 at all.
+        assert (
+            "useradd -u 1000 -g 100 -m -d /home/datalayer -s /bin/bash datalayer" in (setup.args[0])
+        )
         set_user_calls = [call for call in fake.calls if call.name == "set_user"]
         assert set_user_calls[0].args == ("datalayer",)
-        # useradd comes before set_user, which comes before any copy/run_cmd
-        # that must run as root overrides it back per call.
+        # The rename comes before set_user, which comes before any
+        # copy/run_cmd that must run as root overrides it back per call.
         assert fake.calls.index(setup) < fake.calls.index(set_user_calls[0])
 
     def test_the_doctor_runs_at_build_time(self) -> None:
@@ -277,12 +297,25 @@ class TestBuildingATemplate:
         fake = FakeTemplate()
         a_builder(fake).build(a_request())
         set_envs = next(call for call in fake.calls if call.name == "set_envs")
-        assert set_envs.args == ({"GDAL_DATA": "/usr/share/gdal"},)
+        assert set_envs.args == (
+            {"LC_ALL": "C.UTF-8", "LANG": "C.UTF-8", "GDAL_DATA": "/usr/share/gdal"},
+        )
 
-    def test_no_env_call_when_the_spec_sets_none(self) -> None:
+    def test_the_contract_locale_is_set_even_when_the_spec_sets_no_env(self) -> None:
+        """`code-interpreter-v1` sets no locale at all (found live,
+        2026-09-13: the doctor's own `locale` check failed) — unlike the
+        Datalayer base Daytona and Modal both inherit it from (E1-05), so
+        this always runs, spec `env` or not."""
         fake = FakeTemplate()
         a_builder(fake).build(a_request(spec={"env": {}}))
-        assert not any(call.name == "set_envs" for call in fake.calls)
+        set_envs = next(call for call in fake.calls if call.name == "set_envs")
+        assert set_envs.args == ({"LC_ALL": "C.UTF-8", "LANG": "C.UTF-8"},)
+
+    def test_the_specs_own_locale_wins_over_the_contract_default(self) -> None:
+        fake = FakeTemplate()
+        a_builder(fake).build(a_request(spec={"env": {"LC_ALL": "en_US.UTF-8"}}))
+        set_envs = next(call for call in fake.calls if call.name == "set_envs")
+        assert set_envs.args == ({"LC_ALL": "en_US.UTF-8", "LANG": "C.UTF-8"},)
 
     def test_the_template_is_named_and_tagged_by_version_and_build(self) -> None:
         fake = FakeTemplate()
