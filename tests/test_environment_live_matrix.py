@@ -215,19 +215,23 @@ class TestDaytona:
 
 
 class TestModal:
-    """`xfail(strict=False)`: `modal_sandbox.py` execs as root today (no
-    `setpriv`), so check 1 (doctor) and check 2 (identity) are expected to
-    fail — confirmed live, 2026-09-13: checks 5 (imports) and 6 (filesystem)
-    also failed in the same run, each on the session driver refusing to
-    start against a sandbox that reported itself already shutting down,
-    while 3, 4, 7, 8 and 9 passed normally. Not chased further than
-    confirming the container itself stays alive throughout (checks 7 and 8
-    exercise a real stop/start and a real shutdown) — an `XPASS` here means
-    the identity gap closed and whatever else was riding on it besides."""
+    """`xfail(strict=False)`: checks 5 (imports) and 6 (filesystem) fail —
+    confirmed live, 2026-09-13, the session driver refusing to start
+    against a sandbox that reports itself already shutting down, while 1,
+    2, 3, 4, 7, 8 and 9 all pass. This used to be attributed to the
+    identity gap (checks 1/2 failed too, then) — closed since, live: a
+    contract-built artifact's `ModalSandbox` now drops its driver to
+    `1000:100` (`_start_driver`, gated on `image_id` so a plain
+    `ModalSandbox` is unaffected), and checks 1/2 pass with it. 5/6 turned
+    out to be a separate, still-unexplained issue: a plain, non-Environments
+    `ModalSandbox` runs several sequential snippets with no trouble at all
+    over the same span, so this is specific to a contract-built artifact's
+    image under repeated `exec`. An `XPASS` here means that's closed too."""
 
     @pytest.mark.xfail(
-        reason="modal_sandbox.py has no setpriv wrapper yet: execs run as root, not "
-        "the contract's 1000:100 — checks 1, 2, 5 and 6 all fail on it",
+        reason="checks 5 and 6 fail on a session driver restart the sandbox refuses, "
+        "specific to a contract-built artifact and not yet root-caused (identity, "
+        "checks 1 and 2, is fixed)",
         strict=False,
     )
     def test_build_launch_and_the_core_tier(self, real_lock: tuple[str, str]) -> None:
