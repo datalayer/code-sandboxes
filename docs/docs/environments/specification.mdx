@@ -42,7 +42,7 @@ A document is refused with `DL_ENV_SPEC_INVALID` when a field is wrong, and with
 | `compatibility.variants.required` | `[datalayer]` | At least one of `datalayer`, `e2b`, `daytona`, `modal`. |
 | `compatibility.variants.optional` | none | The same variants, none of them also required. |
 | `compatibility.regions` | none | Region names. |
-| `build.source` | `packages` | Only `packages` builds today; `dependencyFile`, `dockerfile` and `image` are refused until they do. |
+| `build.source` | `packages` | `packages`, `dependencyFile` (a `requirements.txt`, or a `pyproject.toml` whose own `uv.lock` is checked against Datalayer's protected pins and exported rather than re-resolved) and `image` (an existing image from a bootstrap registry allowlist, replacing the approved base) all resolve on the Datalayer variant; `image` from a private registry, and `dockerfile`, are refused until they do. |
 
 ## The spec digest
 
