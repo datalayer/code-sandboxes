@@ -1,0 +1,722 @@
+# Copyright (c) 2025-2026 Datalayer, Inc.
+#
+# BSD 3-Clause License
+
+"""The Daytona builder: a snapshot from the lock, and its id kept (E2-04).
+
+Nothing here reaches Daytona: the `daytona`/`daytona_api_client` SDKs are
+doubles that record what they were asked, the way `datalayer.py`'s own tests
+record `buildctl`'s argv without a daemon, and `test_environment_e2b_builder.py`
+records a `Template` chain without a real build. What is checked is what the
+declarative image *is* — the base by digest, `env` before any install, apt
+packages from the lock, `USER root` bracketing the install steps, no doctor or
+wheelhouse copied (the Datalayer base already bakes both, unlike E2B's), an
+explicit entrypoint and resources every build, and the registry entry this
+build's own base pull needs, made and torn down around it.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, ClassVar
+
+import pytest
+
+from code_sandboxes.environments.adapters.daytona import Builder
+from code_sandboxes.environments.builders import ArtifactReference, BuildRequest
+from code_sandboxes.environments.errors import (
+    ARTIFACT_MISSING,
+    BUILD_FAILED,
+    CAPABILITY_UNSUPPORTED,
+    PROVIDER_ERROR,
+    EnvironmentsError,
+)
+from code_sandboxes.environments.spec import parse_environment
+
+OWNER = "01k0wner000000000000000000"
+BASE = "environments/base/python-cpu@sha256:" + "bb" * 32
+LOCK = (
+    "# Resolved by Datalayer (PLAN_ENV.md D-9). Do not edit: a change makes a new version.\n"
+    "# python: 3.13\n"
+    "# datalayer-protected: ipykernel==7.3.0\n"
+    "geopandas==1.1.1 \\\n    --hash=sha256:" + "cd" * 32 + "\n"
+)
+APT_LOCK = LOCK + "# datalayer-apt: gdal-bin=3.8.4+dfsg-3build2\n"
+LOCK_DIGEST = "sha256:" + "dd" * 32
+
+
+class Credential:
+    """The build's owner secrets, as the workflow mints them (D-8, D-17, E2-01)."""
+
+    provider_secrets: ClassVar[dict[str, str]] = {"DAYTONA_API_KEY": "owners-daytona-key"}
+    registry: ClassVar[str] = "773842031886.dkr.ecr.us-east-1.amazonaws.com"
+    username: ClassVar[str] = "AWS"
+    password: ClassVar[str] = "ecr-token"
+
+
+class NoRegistryCredential:
+    """A credential with the owner's own key, but no base-reader login (D-18)."""
+
+    provider_secrets: ClassVar[dict[str, str]] = {"DAYTONA_API_KEY": "owners-daytona-key"}
+
+
+class Call:
+    """One method call a fake recorded: its name, arguments and keywords."""
+
+    def __init__(
+        self, name: str, args: tuple[Any, ...] = (), kwargs: dict[str, Any] | None = None
+    ) -> None:
+        self.name = name
+        self.args = args
+        self.kwargs = kwargs or {}
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"Call({self.name!r}, {self.args!r}, {self.kwargs!r})"
+
+
+class FakeImage:
+    """The declarative `Image` chain: every call recorded, in order, on one list."""
+
+    def __init__(self, calls: list[Call]) -> None:
+        self.calls = calls
+
+    @classmethod
+    def base(cls, ref: str) -> FakeImage:
+        return cls([Call("base", (ref,))])
+
+    def env(self, env_vars: dict[str, str]) -> FakeImage:
+        self.calls.append(Call("env", (env_vars,)))
+        return self
+
+    def dockerfile_commands(self, lines: list[str]) -> FakeImage:
+        self.calls.append(Call("dockerfile_commands", (lines,)))
+        return self
+
+    def run_commands(self, *commands: str) -> FakeImage:
+        self.calls.append(Call("run_commands", commands))
+        return self
+
+    def add_local_file(self, local_path: str, remote_path: str) -> FakeImage:
+        content = Path(local_path).read_bytes()
+        self.calls.append(Call("add_local_file", (local_path, remote_path), {"content": content}))
+        return self
+
+    def add_local_dir(self, local_path: str, remote_path: str) -> FakeImage:
+        self.calls.append(Call("add_local_dir", (local_path, remote_path)))
+        return self
+
+    def workdir(self, path: str) -> FakeImage:
+        self.calls.append(Call("workdir", (path,)))
+        return self
+
+
+class FakeResources:
+    def __init__(
+        self,
+        *,
+        cpu: int | None = None,
+        memory: int | None = None,
+        disk: int | None = None,
+        gpu: int | None = None,
+        gpu_type: Any = None,
+    ) -> None:
+        self.cpu = cpu
+        self.memory = memory
+        self.disk = disk
+        self.gpu = gpu
+        self.gpu_type = gpu_type
+
+
+class FakeCreateSnapshotParams:
+    def __init__(
+        self,
+        *,
+        name: str,
+        image: Any,
+        resources: Any = None,
+        entrypoint: list[str] | None = None,
+        region_id: str | None = None,
+        sandbox_class: Any = None,
+    ) -> None:
+        self.name = name
+        self.image = image
+        self.resources = resources
+        self.entrypoint = entrypoint
+        self.region_id = region_id
+        self.sandbox_class = sandbox_class
+
+
+class FakeDaytonaConfig:
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+
+
+class FakeDaytonaNotFoundError(Exception):
+    """Stands in for `daytona.DaytonaNotFoundError`."""
+
+
+class FakeSnapshot:
+    def __init__(
+        self,
+        *,
+        id: str = "snp-123",  # noqa: A002 - mirrors the SDK's own `Snapshot.id` field
+        name: str = "dl-geospatial-analysis-v3-bld-1",
+        created_at: Any = datetime(2026, 9, 13, 12, 0, 0, tzinfo=timezone.utc),
+        state: Any = "ACTIVE",
+    ) -> None:
+        self.id = id
+        self.name = name
+        self.created_at = created_at
+        self.state = state
+
+
+class FakeSnapshotService:
+    def __init__(
+        self,
+        *,
+        create_result: FakeSnapshot | None = None,
+        create_error: Exception | None = None,
+        get_results: dict[str, FakeSnapshot] | None = None,
+        get_errors: dict[str, Exception] | None = None,
+    ) -> None:
+        self.create_calls: list[Call] = []
+        self.get_calls: list[Call] = []
+        self._create_result = create_result
+        self._create_error = create_error
+        self._get_results = get_results or {}
+        self._get_errors = get_errors or {}
+
+    def create(
+        self, params: FakeCreateSnapshotParams, *, on_logs: Any = None, timeout: Any = None
+    ) -> FakeSnapshot:
+        self.create_calls.append(
+            Call("create", (params,), {"on_logs": on_logs, "timeout": timeout})
+        )
+        if on_logs:
+            on_logs(f"Creating snapshot {params.name} (SnapshotState.PENDING)")
+        if self._create_error:
+            raise self._create_error
+        return self._create_result or FakeSnapshot(name=params.name)
+
+    def get(self, name_or_id: str) -> FakeSnapshot:
+        self.get_calls.append(Call("get", (name_or_id,)))
+        if name_or_id in self._get_errors:
+            raise self._get_errors[name_or_id]
+        if name_or_id in self._get_results:
+            return self._get_results[name_or_id]
+        raise FakeDaytonaNotFoundError(f"no such snapshot {name_or_id}")
+
+
+class FakeDaytonaClient:
+    def __init__(self, *, snapshot_service: FakeSnapshotService | None = None) -> None:
+        #: A sentinel, never a real API client: `_register_base_pull` reaches
+        #: it only to hand it, opaquely, to `DockerRegistryApi`.
+        self._api_client = object()
+        self.snapshot = snapshot_service or FakeSnapshotService()
+
+
+class _DaytonaFactory:
+    """Stands in for the `Daytona` class itself: calling it records the config
+    it was given and hands back the one client every test inspects."""
+
+    def __init__(self, module: FakeDaytonaModule) -> None:
+        self._module = module
+
+    def __call__(self, config: FakeDaytonaConfig | None = None) -> FakeDaytonaClient:
+        self._module.daytona_calls.append(Call("Daytona", (config,)))
+        return self._module.client
+
+
+class FakeDaytonaModule:
+    """Stands in for `import daytona`."""
+
+    def __init__(self, *, client: FakeDaytonaClient | None = None) -> None:
+        self.client = client or FakeDaytonaClient()
+        self.daytona_calls: list[Call] = []
+        self.DaytonaNotFoundError = FakeDaytonaNotFoundError
+        self.Image = FakeImage
+        self.Resources = FakeResources
+        self.CreateSnapshotParams = FakeCreateSnapshotParams
+        self.DaytonaConfig = FakeDaytonaConfig
+        self.Daytona = _DaytonaFactory(self)
+
+
+class FakeCreatedRegistry:
+    def __init__(self, id: str = "reg-abc123") -> None:  # noqa: A002 - mirrors `DockerRegistry.id`
+        self.id = id
+
+
+class FakeCreateDockerRegistry:
+    def __init__(self, *, name: str, url: str, username: str, password: str) -> None:
+        self.name = name
+        self.url = url
+        self.username = username
+        self.password = password
+
+
+class FakeRegistryClient:
+    def __init__(
+        self,
+        *,
+        create_result: FakeCreatedRegistry | None = None,
+        create_error: Exception | None = None,
+        delete_error: Exception | None = None,
+    ) -> None:
+        self.create_calls: list[FakeCreateDockerRegistry] = []
+        self.delete_calls: list[str] = []
+        self._create_result = create_result
+        self._create_error = create_error
+        self._delete_error = delete_error
+
+    def create_registry(self, payload: FakeCreateDockerRegistry) -> FakeCreatedRegistry:
+        self.create_calls.append(payload)
+        if self._create_error:
+            raise self._create_error
+        return self._create_result or FakeCreatedRegistry()
+
+    def delete_registry(self, registry_id: str) -> None:
+        self.delete_calls.append(registry_id)
+        if self._delete_error:
+            raise self._delete_error
+
+
+class _DockerRegistryApiFactory:
+    """Stands in for the `DockerRegistryApi` class itself: calling it records
+    the `_api_client` it was given and hands back the one client every test
+    inspects."""
+
+    def __init__(self, sdk: FakeRegistrySdk) -> None:
+        self._sdk = sdk
+
+    def __call__(self, api_client: Any) -> FakeRegistryClient:
+        self._sdk.api_client_calls.append(api_client)
+        return self._sdk.client
+
+
+class FakeRegistrySdk:
+    """Stands in for `import daytona_api_client`."""
+
+    def __init__(self, *, client: FakeRegistryClient | None = None) -> None:
+        self.client = client or FakeRegistryClient()
+        self.api_client_calls: list[Any] = []
+        self.CreateDockerRegistry = FakeCreateDockerRegistry
+        self.DockerRegistryApi = _DockerRegistryApiFactory(self)
+
+
+def a_request(**changes: Any) -> BuildRequest:
+    spec = {
+        "apiVersion": "environments.datalayer.io/v1alpha1",
+        "kind": "Environment",
+        "metadata": {"name": "geospatial-analysis", "title": "Geospatial analysis"},
+        "spec": {
+            "language": {"name": "python", "version": "3.13"},
+            "base": {"ref": "datalayer/python-cpu", "channel": "2026.09"},
+            "packages": {"python": {"manager": "uv", "dependencies": ["geopandas==1.1.1"]}},
+            "env": {"GDAL_DATA": "/usr/share/gdal"},
+            "commands": {"postInstall": ["python -c 'import geopandas'"]},
+            "resources": {"sizeClass": "medium"},
+            "compatibility": {"variants": {"required": ["daytona"]}},
+            **changes.pop("spec", {}),
+        },
+    }
+    fields = {
+        "environment_uid": "01k0env0000000000000000000",
+        "version": 3,
+        "build_uid": "bld-1",
+        "owner_uid": OWNER,
+        "variant": "daytona",
+        "environment": parse_environment(spec),
+        "lock_text": LOCK,
+        "lock_digest": LOCK_DIGEST,
+        "resolved_base": BASE,
+        "region": "us",
+        "size_class": "medium",
+    }
+    fields.update(changes)
+    return BuildRequest(**fields)
+
+
+def a_builder(
+    *,
+    daytona: FakeDaytonaModule | None = None,
+    registry: FakeRegistrySdk | None = None,
+    **changes: Any,
+) -> Builder:
+    options: dict[str, Any] = {
+        "daytona_sdk": lambda: daytona or FakeDaytonaModule(),
+        "registry_sdk": lambda: registry or FakeRegistrySdk(),
+        "credential": Credential(),
+    }
+    options.update(changes)
+    return Builder(**options)
+
+
+def an_artifact(**changes: Any) -> ArtifactReference:
+    fields = {
+        "variant": "daytona",
+        "immutable_reference": "snp-123",
+        "provider_artifact_id": "snp-123",
+        "region": "us",
+        "size_class": "medium",
+        "mutable_alias": "dl-geospatial-analysis-v3-bld-1",
+        "contract_version": "sandbox-contract/v1",
+    }
+    fields.update(changes)
+    return ArtifactReference(**fields)
+
+
+def calls_named(image: FakeImage, name: str) -> list[Call]:
+    return [call for call in image.calls if call.name == name]
+
+
+class TestBuildingASnapshot:
+    def test_it_starts_from_the_resolved_base(self) -> None:
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request())
+        [snapshot_call] = daytona.client.snapshot.create_calls
+        image = snapshot_call.args[0].image
+        assert image.calls[0].name == "base"
+        assert image.calls[0].args[0] == BASE
+
+    def test_env_is_set_before_any_install_step(self) -> None:
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request())
+        image = daytona.client.snapshot.create_calls[0].args[0].image
+        names = [call.name for call in image.calls]
+        install = next(
+            i
+            for i, call in enumerate(image.calls)
+            if call.name == "run_commands" and "uv pip sync" in call.args[0]
+        )
+        assert names.index("env") < install
+
+    def test_apt_packages_from_the_lock_are_installed(self) -> None:
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request(lock_text=APT_LOCK))
+        image = daytona.client.snapshot.create_calls[0].args[0].image
+        installs = [
+            call for call in calls_named(image, "run_commands") if "apt-get install" in call.args[0]
+        ]
+        assert len(installs) == 1
+        assert "gdal-bin=3.8.4+dfsg-3build2" in installs[0].args[0]
+
+    def test_no_apt_step_when_the_lock_pins_none(self) -> None:
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request())
+        image = daytona.client.snapshot.create_calls[0].args[0].image
+        assert not any(
+            "apt-get install" in call.args[0] for call in calls_named(image, "run_commands")
+        )
+
+    def test_neither_the_doctor_nor_the_wheelhouse_is_copied(self) -> None:
+        """The Datalayer base already bakes both (E1-05, found live 2026-09-13):
+        copying either again would only duplicate what is already there."""
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request())
+        image = daytona.client.snapshot.create_calls[0].args[0].image
+        assert calls_named(image, "add_local_dir") == []
+        [lock_copy] = calls_named(image, "add_local_file")
+        assert lock_copy.args[1] == "/opt/datalayer/lock.txt"
+
+    def test_the_lock_copied_in_is_the_requests_own(self) -> None:
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request(lock_text=LOCK))
+        image = daytona.client.snapshot.create_calls[0].args[0].image
+        [lock_copy] = calls_named(image, "add_local_file")
+        assert lock_copy.kwargs["content"] == LOCK.encode("utf-8")
+
+    def test_uv_pip_sync_reaches_the_bases_own_shared_wheelhouse(self) -> None:
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request())
+        image = daytona.client.snapshot.create_calls[0].args[0].image
+        [sync] = [
+            call for call in calls_named(image, "run_commands") if "uv pip sync" in call.args[0]
+        ]
+        assert "--require-hashes" in sync.args[0]
+        assert "--find-links /opt/datalayer/wheelhouse" in sync.args[0]
+
+    def test_user_root_brackets_the_install_steps(self) -> None:
+        """Daytona honours the base's `USER`, unlike E2B (E0-04): no synthetic
+        account, just `USER root` around what needs it."""
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request())
+        image = daytona.client.snapshot.create_calls[0].args[0].image
+        root_at = next(
+            i
+            for i, call in enumerate(image.calls)
+            if call.name == "dockerfile_commands" and call.args[0] == ["USER root"]
+        )
+        contract_user_at = next(
+            i
+            for i, call in enumerate(image.calls)
+            if call.name == "dockerfile_commands" and call.args[0][0].startswith("USER 1000:100")
+        )
+        sync_at = next(
+            i
+            for i, call in enumerate(image.calls)
+            if call.name == "run_commands" and "uv pip sync" in call.args[0]
+        )
+        assert root_at < sync_at < contract_user_at
+
+    def test_post_install_and_the_doctor_check_run_after_user_is_restored(self) -> None:
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request())
+        image = daytona.client.snapshot.create_calls[0].args[0].image
+        contract_user_at = next(
+            i
+            for i, call in enumerate(image.calls)
+            if call.name == "dockerfile_commands" and call.args[0][0].startswith("USER 1000:100")
+        )
+        post_install_at = next(
+            i
+            for i, call in enumerate(image.calls)
+            if call.name == "run_commands" and "import geopandas" in call.args[0]
+        )
+        doctor_at = next(
+            i
+            for i, call in enumerate(image.calls)
+            if call.name == "run_commands" and "doctor --json" in call.args[0]
+        )
+        assert contract_user_at < post_install_at < doctor_at
+
+    def test_the_chain_ends_with_workdir(self) -> None:
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request())
+        image = daytona.client.snapshot.create_calls[0].args[0].image
+        assert image.calls[-1].name == "workdir"
+        assert image.calls[-1].args[0] == "/home/datalayer/content"
+
+    def test_the_entrypoint_is_always_set(self) -> None:
+        """Daytona's own default, unset, is `sleep infinity` with no PID 1 (§11.3
+        item 3): a real one is set every build."""
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request())
+        params = daytona.client.snapshot.create_calls[0].args[0]
+        assert params.entrypoint == ["tini", "--", "sleep", "infinity"]
+
+    @pytest.mark.parametrize(
+        "size_class,cpu,memory,disk",
+        [("small", 1, 2, 10), ("medium", 4, 8, 20), ("large", 8, 16, 40)],
+    )
+    def test_resources_come_from_the_size_class(
+        self, size_class: str, cpu: int, memory: int, disk: int
+    ) -> None:
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request(size_class=size_class))
+        resources = daytona.client.snapshot.create_calls[0].args[0].resources
+        assert (resources.cpu, resources.memory, resources.disk) == (cpu, memory, disk)
+
+    def test_the_region_is_passed_through(self) -> None:
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request(region="eu"))
+        params = daytona.client.snapshot.create_calls[0].args[0]
+        assert params.region_id == "eu"
+
+    def test_the_snapshot_is_named_after_the_environment_and_version(self) -> None:
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request())
+        params = daytona.client.snapshot.create_calls[0].args[0]
+        assert params.name == "dl-geospatial-analysis-v3-bld-1"
+
+    def test_build_logs_reach_the_log(self) -> None:
+        logged: list[str] = []
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona, log=logged.append).build(a_request())
+        assert any("Creating snapshot" in line for line in logged)
+
+    def test_the_artifact_is_the_snapshot_id(self) -> None:
+        daytona = FakeDaytonaModule(
+            client=FakeDaytonaClient(
+                snapshot_service=FakeSnapshotService(
+                    create_result=FakeSnapshot(id="snp-999", name="dl-geospatial-analysis-v3-bld-1")
+                )
+            )
+        )
+        artifact = a_builder(daytona=daytona).build(a_request())
+        assert artifact.variant == "daytona"
+        assert artifact.immutable_reference == "snp-999"
+        assert artifact.provider_artifact_id == "snp-999"
+        assert artifact.mutable_alias == "dl-geospatial-analysis-v3-bld-1"
+        assert artifact.region == "us"
+        assert artifact.size_class == "medium"
+        assert artifact.contract_version
+
+    def test_provider_account_is_populated_from_the_credential(self) -> None:
+        daytona = FakeDaytonaModule()
+        artifact = a_builder(daytona=daytona).build(a_request())
+        assert artifact.provider_account and artifact.provider_account.startswith("daytona:")
+
+    def test_provider_account_is_none_with_no_credential(self) -> None:
+        daytona = FakeDaytonaModule()
+        artifact = a_builder(daytona=daytona, credential=None).build(a_request())
+        assert artifact.provider_account is None
+
+    def test_a_build_failure_is_reported_with_the_log(self) -> None:
+        daytona = FakeDaytonaModule(
+            client=FakeDaytonaClient(
+                snapshot_service=FakeSnapshotService(create_error=RuntimeError("quota exceeded"))
+            )
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder(daytona=daytona).build(a_request())
+        assert raised.value.code.code == BUILD_FAILED.code
+        assert "quota exceeded" in str(raised.value)
+        assert raised.value.detail["log"]
+
+
+class TestTheBuildsOwnRegistryEntry:
+    def test_a_registry_entry_is_made_for_the_build(self) -> None:
+        registry = FakeRegistrySdk()
+        a_builder(registry=registry).build(a_request())
+        [created] = registry.client.create_calls
+        assert created.url == Credential.registry
+        assert created.username == "AWS"
+        assert created.password == "ecr-token"
+
+    def test_it_is_deleted_by_id_not_by_the_name_it_was_given(self) -> None:
+        """`delete_registry` takes the id, not the name (found live, 2026-09-13:
+        a first attempt deleted by name and got `NotFoundException`)."""
+        registry = FakeRegistrySdk(
+            client=FakeRegistryClient(create_result=FakeCreatedRegistry(id="reg-xyz"))
+        )
+        a_builder(registry=registry).build(a_request())
+        assert registry.client.delete_calls == ["reg-xyz"]
+        [created] = registry.client.create_calls
+        assert created.name != "reg-xyz"
+
+    def test_it_is_deleted_even_when_the_build_fails(self) -> None:
+        daytona = FakeDaytonaModule(
+            client=FakeDaytonaClient(
+                snapshot_service=FakeSnapshotService(create_error=RuntimeError("no"))
+            )
+        )
+        registry = FakeRegistrySdk(
+            client=FakeRegistryClient(create_result=FakeCreatedRegistry(id="reg-xyz"))
+        )
+        with pytest.raises(EnvironmentsError):
+            a_builder(daytona=daytona, registry=registry).build(a_request())
+        assert registry.client.delete_calls == ["reg-xyz"]
+
+    def test_no_registry_entry_with_no_pull_credential(self) -> None:
+        registry = FakeRegistrySdk()
+        a_builder(registry=registry, credential=NoRegistryCredential()).build(a_request())
+        assert registry.client.create_calls == []
+        assert registry.client.delete_calls == []
+
+    def test_a_registry_create_failure_is_a_provider_error(self) -> None:
+        registry = FakeRegistrySdk(
+            client=FakeRegistryClient(create_error=RuntimeError("forbidden"))
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder(registry=registry).build(a_request())
+        assert raised.value.code.code == PROVIDER_ERROR.code
+
+    def test_a_registry_delete_failure_does_not_hide_a_successful_build(self) -> None:
+        """Best-effort cleanup: the build's own result matters more (logged, not raised)."""
+        logged: list[str] = []
+        registry = FakeRegistrySdk(
+            client=FakeRegistryClient(delete_error=RuntimeError("already gone"))
+        )
+        artifact = a_builder(registry=registry, log=logged.append).build(a_request())
+        assert artifact.immutable_reference
+        assert any("Could not delete the Daytona registry entry" in line for line in logged)
+
+
+class TestWhatDaytonaCannotBuildYet:
+    def test_a_gpu_size_class_is_refused_at_build_time_naming_e2_17(self) -> None:
+        daytona = FakeDaytonaModule()
+        registry = FakeRegistrySdk()
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder(daytona=daytona, registry=registry).build(a_request(size_class="gpu-large"))
+        assert raised.value.code.code == CAPABILITY_UNSUPPORTED.code
+        assert raised.value.detail["missing"] == "E2-17"
+        # Refused before any provider is touched: no registry, no snapshot.
+        assert registry.client.create_calls == []
+        assert daytona.client.snapshot.create_calls == []
+
+
+class TestReadingTheRegistry:
+    def test_inspect_reads_the_snapshot_by_id(self) -> None:
+        snapshot = FakeSnapshot(id="snp-123", name="dl-geo-v3", state="ACTIVE")
+        daytona = FakeDaytonaModule(
+            client=FakeDaytonaClient(
+                snapshot_service=FakeSnapshotService(get_results={"snp-123": snapshot})
+            )
+        )
+        metadata = a_builder(daytona=daytona).inspect(an_artifact(provider_artifact_id="snp-123"))
+        assert metadata.provider_state == "ACTIVE"
+        assert metadata.labels["name"] == "dl-geo-v3"
+        assert metadata.created_at == "2026-09-13T12:00:00+00:00"
+
+    def test_inspect_refuses_artifact_missing_once_the_snapshot_is_gone(self) -> None:
+        daytona = FakeDaytonaModule()
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder(daytona=daytona).inspect(an_artifact(provider_artifact_id="snp-gone"))
+        assert raised.value.code.code == ARTIFACT_MISSING.code
+
+    def test_inspect_maps_other_failures_to_a_provider_error(self) -> None:
+        daytona = FakeDaytonaModule(
+            client=FakeDaytonaClient(
+                snapshot_service=FakeSnapshotService(
+                    get_errors={"snp-123": RuntimeError("timeout")}
+                )
+            )
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder(daytona=daytona).inspect(an_artifact(provider_artifact_id="snp-123"))
+        assert raised.value.code.code == PROVIDER_ERROR.code
+
+    def test_exists_true_when_the_snapshot_is_there(self) -> None:
+        snapshot = FakeSnapshot(id="snp-123")
+        daytona = FakeDaytonaModule(
+            client=FakeDaytonaClient(
+                snapshot_service=FakeSnapshotService(get_results={"snp-123": snapshot})
+            )
+        )
+        assert (
+            a_builder(daytona=daytona).exists(an_artifact(provider_artifact_id="snp-123")) is True
+        )
+
+    def test_exists_false_once_the_snapshot_is_gone(self) -> None:
+        daytona = FakeDaytonaModule()
+        assert (
+            a_builder(daytona=daytona).exists(an_artifact(provider_artifact_id="snp-gone")) is False
+        )
+
+    def test_exists_maps_other_failures_to_a_provider_error(self) -> None:
+        daytona = FakeDaytonaModule(
+            client=FakeDaytonaClient(
+                snapshot_service=FakeSnapshotService(
+                    get_errors={"snp-123": RuntimeError("timeout")}
+                )
+            )
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder(daytona=daytona).exists(an_artifact(provider_artifact_id="snp-123"))
+        assert raised.value.code.code == PROVIDER_ERROR.code
+
+    def test_inspect_and_exists_pass_the_owners_key_too(self) -> None:
+        daytona = FakeDaytonaModule(
+            client=FakeDaytonaClient(
+                snapshot_service=FakeSnapshotService(
+                    get_results={"snp-123": FakeSnapshot(id="snp-123")}
+                )
+            )
+        )
+        a_builder(daytona=daytona).inspect(an_artifact(provider_artifact_id="snp-123"))
+        [config] = [call.args[0] for call in daytona.daytona_calls]
+        assert config.kwargs["api_key"] == "owners-daytona-key"
+
+    def test_the_client_is_built_once_and_reused(self) -> None:
+        daytona = FakeDaytonaModule(
+            client=FakeDaytonaClient(
+                snapshot_service=FakeSnapshotService(
+                    get_results={"snp-999": FakeSnapshot(id="snp-999")}
+                )
+            )
+        )
+        builder = a_builder(daytona=daytona)
+        builder.build(a_request())
+        builder.exists(an_artifact(provider_artifact_id="snp-999"))
+        assert len(daytona.daytona_calls) == 1

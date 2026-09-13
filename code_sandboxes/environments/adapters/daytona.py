@@ -18,16 +18,83 @@ It also rejects `latest`, `lts` and `stable` as the tag of a snapshot's source
 image, and prefers a digest — which is what the Datalayer base channel
 resolves to anyway (D-9).
 
-The build itself is E2-04; until then every operation that reaches Daytona
-refuses by name.
+**The base is pulled through a private registry entry made for this build**
+(D-17, D-18): Daytona's own ECR option (`from_aws_registry`-equivalent) takes
+only a standing role, which is not what a per-build credential is, so the
+base-reader session's login token is registered as a Docker registry entry
+instead — `AWS` and the token, the same shape E2B's `from_image` takes
+(E0-04). The entry is organization-wide and never returns its password once
+written, so it is named uniquely per build and deleted in a `finally`,
+whether the build succeeded or not: no standing credential is left in an
+account Datalayer does not control (D-18).
+
+**No `useradd`/`set_user` dance, unlike E2B (E2-03).** E0-04 found Daytona
+*honours* the image's `USER 1000:100`, `HOME` and `WORKDIR` — the Datalayer
+base already carries all three (E1-05) — so this builder only needs `USER
+root` around the steps that must run as root, mirroring the Datalayer
+builder's own Dockerfile discipline, never a synthetic account.
+
+**Neither the doctor nor the wheelhouse is copied in, unlike E2B.** The
+Datalayer base already bakes `/opt/datalayer/bin/datalayer-sandbox` and
+`WHEELHOUSE_IMAGE_PATH` (E1-05) — confirmed live, 2026-09-13: a spike that
+added this package's own bundled wheelhouse at the same path came back with
+*both* files in the built snapshot, the base's own wheel alongside the
+freshly-copied one, because a directory `COPY` merges into what is already
+there rather than replacing it. Copying either again would only duplicate
+bytes the base already has, so this builder copies the lock and nothing
+else, the same as the Datalayer builder's own `dockerfile()` does for a
+`packages` build source.
+
+**The entrypoint is set explicitly, every build.** Daytona defaults an
+unset one to `sleep infinity` (§4.1, §11.3 item 3), which is alive but is
+not PID 1 correctly reaping children or forwarding `SIGTERM` (the contract's
+own "Signals" row) — the Datalayer base itself bakes no `ENTRYPOINT` of its
+own (the platform supplies the runtime pod's command instead, E0-04), so
+Daytona's default would otherwise be exactly what runs. `tini -- sleep
+infinity` is set instead: long-running, and a real PID 1.
+
+**GPU classes are not built here.** `gpu = True` on this builder is a true
+capability (Daytona's own hardware runs one, D-20), and `validate` leaves a
+GPU size class buildable rather than refusing it — the constraint table of
+section 6 has nothing against it, and an existing test
+(`test_a_gpu_spec_is_buildable_on_modal_and_daytona`) already pins that
+answer. What actually stops a GPU build today is upstream: the CUDA base
+channel is E2-17's to publish, and `bases.py` has no digest to resolve
+`python-cuda` to yet, so a `BuildRequest` for one cannot be constructed in
+practice. `build()` itself still guards it explicitly, refusing plainly
+rather than baking an unsourced guess at a GPU type and count into a
+snapshot, in case that ever changes before the real numbers do (section 11.3
+item 7).
 
 @module code_sandboxes.environments.adapters.daytona
 """
 
 from __future__ import annotations
 
-from ..builders import CapabilityFinding
-from ..spec import Environment
+import tempfile
+import uuid
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from ..accounts import provider_account
+from ..builders import (
+    ArtifactMetadata,
+    ArtifactReference,
+    BuildRequest,
+    CapabilityFinding,
+)
+from ..contract import SANDBOX_CONTRACT_V1
+from ..errors import (
+    ARTIFACT_MISSING,
+    BUILD_FAILED,
+    CAPABILITY_UNSUPPORTED,
+    PROVIDER_ERROR,
+    EnvironmentsError,
+)
+from ..files import files_step
+from ..resolve import WHEELHOUSE_IMAGE_PATH, apt_pins_in
+from ..spec import GPU_SIZE_CLASSES, Environment
 from .managed import ManagedBuilder
 
 __all__ = ["Builder"]
@@ -35,14 +102,65 @@ __all__ = ["Builder"]
 #: Tags Daytona refuses for a snapshot's source image: each moves.
 MOVING_TAGS = ("latest", "lts", "stable")
 
+#: `uv`, pinned the same way every other builder's bootstrap is (E1-04/E3-04).
+_UV_VERSION = "0.12.11"
+
+_DOCTOR_PATH = "/opt/datalayer/bin/datalayer-sandbox"
+_LOCK_PATH = "/opt/datalayer/lock.txt"
+_CONTENT_DIR = "/home/datalayer/content"
+
+#: A long-running PID 1 (§11.3 item 3, contract's "Entrypoint" and "Signals"
+#: rows): the Datalayer base bakes none of its own, and Daytona's own default
+#: (`sleep infinity` with no `tini`) does not reap children or forward
+#: `SIGTERM`.
+_CONTRACT_ENTRYPOINT = ["tini", "--", "sleep", "infinity"]
+
+#: The CPU classes' resources (D-4), duplicated here rather than imported:
+#: this package publishes to PyPI and `datalayer_common.size_classes` — the
+#: canonical table — does not (found while implementing this item). Kept in
+#: step with that table by hand; disk is this adapter's own choice, since D-4
+#: prices CPU and memory only. GPU classes are refused in `_own_findings`
+#: instead of guessed at here (E2-17).
+_CPU_RESOURCES: dict[str, dict[str, int]] = {
+    "small": {"cpu": 1, "memory": 2, "disk": 10},
+    "medium": {"cpu": 4, "memory": 8, "disk": 20},
+    "large": {"cpu": 8, "memory": 16, "disk": 40},
+}
+
+
+def _daytona_sdk() -> Any:
+    try:
+        import daytona
+    except ImportError as error:  # pragma: no cover - exercised by the extra
+        raise EnvironmentsError(
+            PROVIDER_ERROR,
+            "No `daytona` SDK to build a snapshot with: install `code-sandboxes[daytona]`",
+            detail={"missing": "daytona"},
+        ) from error
+    return daytona
+
+
+def _daytona_registry_sdk() -> Any:
+    try:
+        import daytona_api_client
+    except ImportError as error:  # pragma: no cover - exercised by the extra
+        raise EnvironmentsError(
+            PROVIDER_ERROR,
+            "No `daytona` SDK to register a base's registry with: "
+            "install `code-sandboxes[daytona]`",
+            detail={"missing": "daytona_api_client"},
+        ) from error
+    return daytona_api_client
+
 
 class Builder(ManagedBuilder):
-    """Daytona: the capability half, with the build waiting on E2-04."""
+    """Daytona: the capability half, and the build (E2-04)."""
 
     variant = "daytona"
     item = "E2-04"
     title = "Daytona"
     #: Daytona runs GPUs, on its own hardware and the owner's account (E2-17).
+    #: This builder does not build one yet: see `_own_findings`.
     gpu = True
     #: The targets the owner's organization may build in. Empty until E2-04
     #: reads them from the organization: refusing a region nobody has listed
@@ -51,6 +169,43 @@ class Builder(ManagedBuilder):
     #: 37.4 s for the section 4.1 example in E0-04, plus the wait for the
     #: snapshot to reach `Active`, which is asynchronous.
     max_build_seconds = 30 * 60
+
+    def __init__(
+        self,
+        *,
+        log: Callable[[str], None] | None = None,
+        credential: Any = None,
+        daytona_sdk: Any = None,
+        registry_sdk: Any = None,
+    ) -> None:
+        super().__init__(log=log, credential=credential)
+        self._daytona_sdk = daytona_sdk or _daytona_sdk
+        self._registry_sdk = registry_sdk or _daytona_registry_sdk
+        self._client_instance: Any = None
+
+    def _provider_secrets(self) -> dict[str, str]:
+        """The owner's Daytona secrets the build credential carries (D-8, E2-01).
+
+        `BuildCredential.provider_secrets`, the same way the E2B builder
+        reads it — an owner's own `DAYTONA_API_KEY`, never logged, held for
+        this build alone.
+        """
+        secrets = getattr(self._credential, "provider_secrets", None)
+        return dict(secrets) if secrets else {}
+
+    def _client(self, sdk: Any) -> Any:
+        """The owner's own Daytona client (D-8), built once and reused.
+
+        With no `DAYTONA_API_KEY` on the credential, the SDK's own
+        constructor falls back to the ambient environment — fine for a
+        single-owner worker or a test, wrong for a real multi-owner one,
+        the same fallback the E2B builder documents for its own key.
+        """
+        if self._client_instance is None:
+            api_key = self._provider_secrets().get("DAYTONA_API_KEY") or None
+            config = sdk.DaytonaConfig(api_key=api_key) if api_key else None
+            self._client_instance = sdk.Daytona(config)
+        return self._client_instance
 
     def _own_findings(
         self, environment: Environment, lock_text: str | None
@@ -84,4 +239,237 @@ class Builder(ManagedBuilder):
                     field="spec.compatibility.regions",
                 )
             )
+        # A GPU class is left buildable here on purpose (`gpu = True`,
+        # D-20): the CUDA base E2-17 has not published yet, so a GPU
+        # `BuildRequest` cannot reach `build()` in practice — `bases.py`'s
+        # own resolver has no digest to resolve `python-cuda` to, and
+        # refuses first. `build()` itself still guards it explicitly (see
+        # its own docstring), so a spec that somehow got a `resolved_base`
+        # anyway is refused plainly rather than baking an unsourced guess
+        # at a GPU type and count into a snapshot.
         return findings
+
+    # -- Building -------------------------------------------------------------
+
+    def build(self, request: BuildRequest) -> ArtifactReference:
+        """Build a snapshot from the resolved lock, and keep its id.
+
+        The base is pulled through a registry entry made for this build
+        alone (D-17, D-18, see the module docstring); `USER root` brackets
+        the steps that need it, the same discipline the Datalayer builder's
+        own Dockerfile keeps, because Daytona honours the base's `USER`,
+        `HOME` and `WORKDIR` rather than overriding them the way E2B does
+        (E0-04).
+        """
+        spec = request.environment.spec
+        if request.size_class in GPU_SIZE_CLASSES:
+            # `validate` leaves a GPU class buildable (`gpu = True`, D-20):
+            # `bases.py` has no CUDA digest to resolve yet, so this cannot
+            # be reached in practice — refused plainly here rather than
+            # baking an unsourced guess at a GPU type and count into a
+            # snapshot (E2-17 is what will give this real numbers).
+            raise EnvironmentsError(
+                CAPABILITY_UNSUPPORTED,
+                f"Daytona runs `{request.size_class}` on its own GPUs, but the CUDA base "
+                "and the GPU resource shape this needs are E2-17's, not built yet",
+                detail={"variant": self.variant, "missing": "E2-17"},
+            )
+        sdk = self._daytona_sdk()
+        client = self._client(sdk)
+        name = f"dl-{request.environment.metadata.name}-v{request.version}-{request.build_uid}"
+
+        registry_id = self._register_base_pull(client, request.resolved_base)
+        try:
+            with tempfile.TemporaryDirectory(prefix="dl-daytona-build-") as scratch:
+                lock_file = Path(scratch) / "lock.txt"
+                lock_file.write_text(request.lock_text, encoding="utf-8")
+
+                image = sdk.Image.base(request.resolved_base)
+                # `env` before anything installs, the same order the
+                # Datalayer and E2B builders keep: a package that compiles
+                # against a library found through an env var behaves
+                # differently without it.
+                if spec.env:
+                    image = image.env(dict(spec.env))
+                image = image.dockerfile_commands(["USER root"])
+                apt = apt_pins_in(request.lock_text)
+                if apt:
+                    pinned = " ".join(f"{pkg}={apt[pkg]}" for pkg in sorted(apt))
+                    image = image.run_commands(
+                        "apt-get update -qq && apt-get install -y --no-install-recommends "
+                        f"{pinned} && rm -rf /var/lib/apt/lists/*"
+                    )
+                # Neither the doctor nor the wheelhouse is copied: the
+                # Datalayer base already bakes both (E1-05), confirmed live,
+                # 2026-09-13 — a `datalayer-sandbox` COPY would have landed
+                # on top of one already there, and a wheelhouse `COPY`
+                # merges into the base's own directory rather than
+                # replacing it, so copying this package's bundled
+                # wheelhouse again would only duplicate what `uv pip sync`
+                # can already reach at `WHEELHOUSE_IMAGE_PATH`. Only the
+                # lock is genuinely per-build.
+                image = (
+                    image.add_local_file(str(lock_file), _LOCK_PATH)
+                    .run_commands(f'pip install --no-cache-dir "uv=={_UV_VERSION}"')
+                    # Packages install as root, the same reason the
+                    # Datalayer and E2B builders give: a user install lands
+                    # under the content directory's own home, which the
+                    # runtime mounts over.
+                    .run_commands(
+                        "uv pip sync --system --require-hashes "
+                        f"--find-links {WHEELHOUSE_IMAGE_PATH} {_LOCK_PATH}"
+                    )
+                )
+                image = image.dockerfile_commands([f"USER 1000:100\nWORKDIR {_CONTENT_DIR}"])
+                for command in files_step(request.environment, variant=self.variant):
+                    image = image.run_commands(command)
+                for command in spec.commands.post_install:
+                    image = image.run_commands(command)
+                # The contract's own check, in the image, at build time —
+                # the same last layer every other builder ends on.
+                image = image.run_commands(f"{_DOCTOR_PATH} doctor --json")
+                image = image.workdir(_CONTENT_DIR)
+
+                logged: list[str] = []
+
+                def on_logs(line: str) -> None:
+                    logged.append(line)
+                    self._log(line)
+
+                resources = self._resources(sdk, request.size_class)
+                try:
+                    snapshot = client.snapshot.create(
+                        sdk.CreateSnapshotParams(
+                            name=name,
+                            image=image,
+                            resources=resources,
+                            entrypoint=_CONTRACT_ENTRYPOINT,
+                            region_id=request.region,
+                        ),
+                        on_logs=on_logs,
+                        timeout=self.max_build_seconds,
+                    )
+                except Exception as error:
+                    raise EnvironmentsError(
+                        BUILD_FAILED,
+                        f"The Daytona build failed: {error}",
+                        detail={"variant": self.variant, "name": name, "log": logged[-20:]},
+                    ) from error
+        finally:
+            # No standing credential is left in an account Datalayer does
+            # not control, whether the build above succeeded or not (D-18).
+            self._unregister_base_pull(client, registry_id)
+
+        return ArtifactReference(
+            variant=self.variant,
+            immutable_reference=snapshot.id,
+            provider_artifact_id=snapshot.id,
+            region=request.region,
+            size_class=request.size_class,
+            # The name kept for people and dashboards; never launched from —
+            # a snapshot id cannot move, but a name can be reused once its
+            # snapshot is deleted (E0-04).
+            mutable_alias=snapshot.name,
+            provider_account=provider_account(self.variant, self._provider_secrets()) or None,
+            contract_version=spec.contract or SANDBOX_CONTRACT_V1.version,
+        )
+
+    def _resources(self, sdk: Any, size_class: str) -> Any:
+        """The CPU resources a size class bakes into the snapshot (§11.3 item 4)."""
+        shape = _CPU_RESOURCES.get(size_class, _CPU_RESOURCES["small"])
+        return sdk.Resources(cpu=shape["cpu"], memory=shape["memory"], disk=shape["disk"])
+
+    def _register_base_pull(self, client: Any, resolved_base: str) -> str | None:
+        """A private registry entry for this build's base pull (D-17, D-18).
+
+        Returns the entry's **id**, not the name given it: `delete_registry`
+        (and `get_registry`) take the id (found live, 2026-09-13 — a first
+        attempt deleted by name and got `NotFoundException`, the registry
+        left behind until a second call read it back by name to find its
+        id). `None` when the credential carries no registry login: the base
+        is then whatever the ambient Daytona organization can already
+        reach, the same fallback the client itself takes with no
+        `DAYTONA_API_KEY`.
+        """
+        registry_host = str(getattr(self._credential, "registry", "") or "")
+        username = str(getattr(self._credential, "username", "") or "")
+        password = str(getattr(self._credential, "password", "") or "")
+        if not (registry_host and username and password):
+            return None
+        registry_sdk = self._registry_sdk()
+        # Unique per build: the entry is organization-wide, so two builds at
+        # once must not collide, and a name in use is refused (E0-04).
+        name = f"dl-build-{uuid.uuid4().hex[:20]}"
+        # `Daytona` exposes `.snapshot`, `.secret` and `.volume` as public
+        # services, all built from this one client's `_api_client` — but not
+        # a registry service, so the same `_api_client` is reached for
+        # directly, confirmed live to work the same way (2026-09-13).
+        api = registry_sdk.DockerRegistryApi(client._api_client)
+        try:
+            created = api.create_registry(
+                registry_sdk.CreateDockerRegistry(
+                    name=name, url=registry_host, username=username, password=password
+                )
+            )
+        except Exception as error:
+            raise EnvironmentsError(
+                PROVIDER_ERROR,
+                f"Daytona could not be given a pull credential for the base: {error}",
+                detail={"variant": self.variant},
+            ) from error
+        return str(created.id)
+
+    def _unregister_base_pull(self, client: Any, registry_id: str | None) -> None:
+        if not registry_id:
+            return
+        registry_sdk = self._registry_sdk()
+        api = registry_sdk.DockerRegistryApi(client._api_client)
+        try:
+            api.delete_registry(registry_id)
+        except Exception as error:
+            # Best-effort: the build's own result matters more than this
+            # cleanup, and a left-behind entry is the owner's organization's
+            # to remove by hand — logged, never raised over a build result.
+            self._log(f"Could not delete the Daytona registry entry {registry_id}: {error}")
+
+    # -- Reading the registry ---------------------------------------------------
+
+    def inspect(self, artifact: ArtifactReference) -> ArtifactMetadata:
+        sdk = self._daytona_sdk()
+        client = self._client(sdk)
+        try:
+            snapshot = client.snapshot.get(artifact.provider_artifact_id)
+        except sdk.DaytonaNotFoundError as error:
+            raise EnvironmentsError(
+                ARTIFACT_MISSING,
+                f"`{artifact.immutable_reference}` is not a Daytona snapshot",
+                detail={"variant": self.variant, "reference": artifact.immutable_reference},
+            ) from error
+        except Exception as error:
+            raise self._provider_error("read the snapshot", error) from error
+        created = getattr(snapshot, "created_at", None)
+        state = getattr(snapshot, "state", None)
+        return ArtifactMetadata(
+            reference=artifact,
+            created_at=created.isoformat() if hasattr(created, "isoformat") else None,
+            provider_state=str(getattr(state, "value", state) or "") or None,
+            labels={"name": str(getattr(snapshot, "name", ""))},
+        )
+
+    def exists(self, artifact: ArtifactReference) -> bool:
+        sdk = self._daytona_sdk()
+        client = self._client(sdk)
+        try:
+            client.snapshot.get(artifact.provider_artifact_id)
+        except sdk.DaytonaNotFoundError:
+            return False
+        except Exception as error:
+            raise self._provider_error("ask whether the snapshot exists", error) from error
+        return True
+
+    def _provider_error(self, what: str, error: BaseException) -> EnvironmentsError:
+        return EnvironmentsError(
+            PROVIDER_ERROR,
+            f"Daytona could not {what}: {error}",
+            detail={"variant": self.variant},
+        )
