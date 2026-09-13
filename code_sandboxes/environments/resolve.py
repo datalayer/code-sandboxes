@@ -60,6 +60,12 @@ from .errors import (
     SPEC_INVALID,
     EnvironmentsError,
 )
+from .image_import import (
+    DEFAULT_ALLOWED_REGISTRIES,
+    parse_image_reference,
+    refuse_unless_allowed,
+    resolve_image_digest,
+)
 from .spec import DependencyFileSpec, Environment, parse_environment, parse_requirements_txt
 
 __all__ = [
@@ -302,6 +308,11 @@ class ResolveRequest:
 
     registry_auth: Mapping[str, str] | None = None
     """What the registry needs to be read, when the runner pulls the base."""
+
+    bootstrap_uv: bool = False
+    """Install `uv` before compiling (E3-04). An approved Datalayer base
+    already has it baked in (E1-05); an imported image is somebody else's,
+    and cannot be assumed to."""
 
 
 @dataclass
@@ -574,15 +585,24 @@ class BuildkitResolveRunner:
 
     def dockerfile(self, request: ResolveRequest) -> str:
         """The solve, as the frontend reads it: resolve, then pin apt, then export both."""
-        lines = [
-            f"FROM {request.base_reference} AS solve",
-            "USER root",
-            "WORKDIR /solve",
+        # An imported image (E3-04) is not baked with `uv` or the wheelhouse
+        # the way an approved base is (E1-05): both are brought to the solve
+        # instead of assumed already there. An approved base needs neither,
+        # so this changes nothing about a build that already works.
+        find_links = WHEELHOUSE_IMAGE_PATH
+        lines = [f"FROM {request.base_reference} AS solve", "USER root", "WORKDIR /solve"]
+        if request.bootstrap_uv:
+            find_links = "/solve/wheelhouse"
+            lines += [
+                "COPY wheelhouse/ ./wheelhouse/",
+                'RUN pip install --no-cache-dir "uv==0.12.11"',
+            ]
+        lines += [
             "COPY requirements.in constraints.txt ./",
             "RUN --mount=type=cache,target=/root/.cache/uv "
             f"uv pip compile --quiet --no-header --generate-hashes "
             f"--python-version {request.python_version} --constraint constraints.txt "
-            f"--find-links {WHEELHOUSE_IMAGE_PATH} "
+            f"--find-links {find_links} "
             + " ".join(_index_options(request.indexes))
             + " requirements.in -o /solve/lock.txt",
         ]
@@ -636,6 +656,11 @@ class BuildkitResolveRunner:
             (root / "constraints.txt").write_text(
                 "\n".join(request.constraints) + "\n", encoding="utf-8"
             )
+            if request.bootstrap_uv:
+                wheelhouse = root / "wheelhouse"
+                wheelhouse.mkdir()
+                for wheel in WHEELHOUSE_PATH.glob("*.whl"):
+                    (wheelhouse / wheel.name).write_bytes(wheel.read_bytes())
             (root / "Dockerfile").write_text(self.dockerfile(request), encoding="utf-8")
             out = root / "out"
             command = [
@@ -833,6 +858,38 @@ def resolve_bases(
     return resolved
 
 
+def resolve_image_base(
+    environment: Environment,
+    variants: Sequence[str],
+    *,
+    allowlist: tuple[str, ...] = DEFAULT_ALLOWED_REGISTRIES,
+    transport: Any = None,
+) -> dict[str, str]:
+    """Every wanted variant's base, from an imported image rather than an approved one (E3-04).
+
+    One digest for every variant asked: an imported image is one manifest,
+    never a per-variant table the way an approved base's channel is, and
+    every variant this phase builds for is `linux/amd64` regardless (D-9's
+    own bases are single-arch too). Only a registry in ``allowlist`` is ever
+    resolved — `spec_findings` already refuses the rest before a build is
+    asked for; this is the same rule kept here for whatever resolves directly
+    without validating first, so nothing that reaches the network was never
+    checked.
+    """
+    image = environment.spec.build.image
+    if image is None or not image.reference.strip():
+        raise EnvironmentsError(
+            SPEC_INVALID,
+            "an `image` source names the image to import",
+            detail={"field": "spec.build.image.reference"},
+        )
+    parsed = parse_image_reference(image.reference)
+    refuse_unless_allowed(parsed, allowlist)
+    digest = resolve_image_digest(parsed, transport=transport)
+    reference = f"{parsed.registry}/{parsed.repository}@{digest}"
+    return dict.fromkeys(variants, reference)
+
+
 #: `uv lock --dry-run`'s three shapes for what changed, none of which name
 #: only the package once: `Update six v1.16.0 -> v1.17.0`, `Add wheel
 #: v0.48.0`, `Remove six v1.16.0`. Exit code is 0 whichever it prints — the
@@ -958,6 +1015,7 @@ def resolve_environment(
     resolved_at: datetime | None = None,
     uv: str | None = None,
     pyproject_run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+    image_transport: Any = None,
 ) -> dict[str, Any]:
     """A version's lock, and the base each variant builds from.
 
@@ -988,6 +1046,11 @@ def resolve_environment(
         the `uv` to check and export with, and how it is run — injected by
         tests, `uv` found on the PATH and `subprocess.run` otherwise. Unused
         by every other source.
+    image_transport
+        An `image` source's own digest lookup (E3-04): the `httpx` transport
+        the registry request runs over — injected by tests
+        (`httpx.MockTransport`), the real network otherwise. Unused by every
+        other source.
 
     Returns
     -------
@@ -1006,11 +1069,11 @@ def resolve_environment(
     environment = parse_environment(spec)
     python = environment.spec.packages.python
     source = environment.spec.build.source
-    if source not in ("packages", "dependencyFile"):
+    if source not in ("packages", "dependencyFile", "image"):
         raise EnvironmentsError(
             CAPABILITY_UNSUPPORTED,
-            f"`{source}` is not resolved yet: only `packages` and `dependencyFile` are, "
-            "in this phase",
+            f"`{source}` is not resolved yet: only `packages`, `dependencyFile` and `image` "
+            "are, in this phase",
             detail={"field": "spec.build.source", "source": source},
         )
     if python.manager == "conda":
@@ -1021,7 +1084,11 @@ def resolve_environment(
             detail={"field": "spec.packages.python.manager", "manager": "conda"},
         )
     wanted = sorted({str(variant) for variant in variants} or {"datalayer"})
-    resolved_bases = resolve_bases(environment, wanted, bases, registry=_registry_of(credential))
+    resolved_bases = (
+        resolve_image_base(environment, wanted, transport=image_transport)
+        if source == "image"
+        else resolve_bases(environment, wanted, bases, registry=_registry_of(credential))
+    )
     dependency_file = environment.spec.build.dependency_file
     if source == "dependencyFile" and dependency_file is not None:
         if dependency_file.source_format == "pyproject":
@@ -1055,6 +1122,7 @@ def resolve_environment(
         apt=tuple(environment.spec.packages.system.apt),
         base_reference=solving_in,
         registry_auth=_registry_auth(credential),
+        bootstrap_uv=(source == "image"),
     )
     outcome = (runner or BuildkitResolveRunner()).solve(request, say)
     document = lock_document(

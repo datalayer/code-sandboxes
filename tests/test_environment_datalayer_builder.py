@@ -259,10 +259,41 @@ class TestWhatItSaysItCannotBuild:
         assert any("modal or daytona" in finding.message for finding in report.findings)
         assert all(finding.field == "spec.resources.sizeClass" for finding in report.findings)
 
-    def test_a_form_that_is_not_packages_is_a_finding(self) -> None:
+    def test_a_form_that_is_not_built_yet_is_a_finding(self) -> None:
         request = a_request(spec={"build": {"source": "dockerfile"}})
         report = a_builder().validate(request.environment)
         assert [finding.field for finding in report.findings] == ["spec.build.source"]
+
+    def test_a_dependency_file_source_is_supported(self) -> None:
+        """E3-01 resolves it the same way `packages` does; this builder never
+        refused it on its own — until this box, its own `validate` still did."""
+        request = a_request(
+            spec={
+                "packages": {},
+                "build": {
+                    "source": "dependencyFile",
+                    "dependencyFile": {
+                        "sourceFormat": "requirements",
+                        "content": "geopandas==1.1.1\n",
+                    },
+                },
+            }
+        )
+        report = a_builder().validate(request.environment, lock_text=LOCK)
+        assert report.supported
+
+    def test_an_image_source_is_supported(self) -> None:
+        request = a_request(
+            spec={
+                "packages": {},
+                "build": {
+                    "source": "image",
+                    "image": {"reference": "python:3.12-slim-bookworm"},
+                },
+            }
+        )
+        report = a_builder().validate(request.environment, lock_text=LOCK)
+        assert report.supported
 
     def test_an_empty_lock_is_a_finding_because_the_build_installs_from_it(self) -> None:
         report = a_builder().validate(a_request().environment, lock_text="# nothing\n")
@@ -274,7 +305,7 @@ class TestWhatItSaysItCannotBuild:
     def test_this_variant_has_no_gpu_yet(self) -> None:
         capabilities = a_builder().capabilities()
         assert capabilities.supports_gpu is False
-        assert capabilities.build_sources == ("packages",)
+        assert capabilities.build_sources == ("packages", "dependencyFile", "image")
         assert capabilities.package_managers == ("uv", "pip")
 
 

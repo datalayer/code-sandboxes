@@ -15,6 +15,7 @@ from __future__ import annotations
 import subprocess
 from datetime import datetime, timezone
 
+import httpx
 import pytest
 
 from code_sandboxes.environments.bases import ApprovedBase, BaseChannelUnpublishedError
@@ -34,6 +35,7 @@ from code_sandboxes.environments.resolve import (
     protected_pins,
     resolve_bases,
     resolve_environment,
+    resolve_image_base,
 )
 
 # -- What uv wrote ------------------------------------------------------------
@@ -685,6 +687,112 @@ class TestAPyprojectFile:
         assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
 
 
+# -- An imported image (E3-04) -------------------------------------------------
+
+
+IMAGE_DIGEST = "sha256:" + "9" * 64
+
+
+def an_image_spec(**image: object) -> dict[str, object]:
+    """An `image` source, with whatever this test changes about it."""
+    return a_spec(
+        packages={},
+        base={"ref": "n/a", "channel": "n/a"},
+        build={
+            "source": "image",
+            "image": {"reference": "python:3.12-slim-bookworm", **image},
+        },
+    )
+
+
+def anonymous_manifest_transport(digest: str = IMAGE_DIGEST) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"Docker-Content-Digest": digest})
+
+    return httpx.MockTransport(handler)
+
+
+class TestAnImportedImage:
+    def test_the_image_is_the_base_for_every_variant_asked(self) -> None:
+        from code_sandboxes.environments.spec import parse_environment
+
+        resolved = resolve_image_base(
+            parse_environment(an_image_spec()),
+            ["datalayer", "modal"],
+            transport=anonymous_manifest_transport(),
+        )
+        assert resolved == {
+            "datalayer": f"docker.io/library/python@{IMAGE_DIGEST}",
+            "modal": f"docker.io/library/python@{IMAGE_DIGEST}",
+        }
+
+    def test_a_reference_already_pinned_by_digest_needs_no_network_call(self) -> None:
+        from code_sandboxes.environments.spec import parse_environment
+
+        def unreachable(request: httpx.Request) -> httpx.Response:
+            raise AssertionError("a pinned reference must never be looked up")
+
+        resolved = resolve_image_base(
+            parse_environment(an_image_spec(reference=f"python@{IMAGE_DIGEST}")),
+            ["datalayer"],
+            transport=httpx.MockTransport(unreachable),
+        )
+        assert resolved == {"datalayer": f"docker.io/library/python@{IMAGE_DIGEST}"}
+
+    def test_a_disallowed_registry_is_policy_denied(self) -> None:
+        from code_sandboxes.environments.spec import parse_environment
+
+        with pytest.raises(EnvironmentsError) as raised:
+            resolve_image_base(
+                parse_environment(an_image_spec(reference="evil.example.com/x:y")),
+                ["datalayer"],
+            )
+        assert raised.value.code.code == "DL_ENV_POLICY_DENIED"
+
+    def test_resolve_environment_uses_the_images_digest_as_the_base(self) -> None:
+        runner = RecordedRunner(A_LOCK)
+        document = resolve_environment(
+            spec=an_image_spec(),
+            variants=["datalayer"],
+            runner=runner,
+            image_transport=anonymous_manifest_transport(),
+        )
+        assert document["resolved_bases"] == {
+            "datalayer": f"docker.io/library/python@{IMAGE_DIGEST}"
+        }
+        assert runner.request is not None
+        assert runner.request.base_reference == f"docker.io/library/python@{IMAGE_DIGEST}"
+        # The contract layer, the same as every other source: nothing about
+        # an import skips Datalayer's own protected pins.
+        assert "ipykernel==7.3.0" in runner.request.requirements
+
+    def test_resolve_environment_asks_uv_to_be_bootstrapped_for_an_image_source(self) -> None:
+        runner = RecordedRunner(A_LOCK)
+        resolve_environment(
+            spec=an_image_spec(),
+            variants=["datalayer"],
+            runner=runner,
+            image_transport=anonymous_manifest_transport(),
+        )
+        assert runner.request is not None
+        assert runner.request.bootstrap_uv is True
+
+    def test_a_packages_source_never_bootstraps_uv(self) -> None:
+        runner = RecordedRunner(A_LOCK)
+        resolve_environment(spec=a_spec(), variants=["datalayer"], runner=runner, bases=BASES)
+        assert runner.request is not None
+        assert runner.request.bootstrap_uv is False
+
+    def test_an_unlisted_source_still_refuses_the_way_it_always_has(self) -> None:
+        with pytest.raises(EnvironmentsError) as raised:
+            resolve_environment(
+                spec=a_spec(build={"source": "dockerfile"}),
+                variants=["datalayer"],
+                bases=BASES,
+            )
+        assert raised.value.code.code == "DL_ENV_CAPABILITY_UNSUPPORTED"
+
+
 # -- The runners --------------------------------------------------------------
 
 
@@ -738,6 +846,82 @@ class TestTheBuildkitRunner:
         # Exported, not left in the image: the lock is the only output.
         assert "FROM scratch" in dockerfile
         assert "COPY --from=solve /solve/lock.txt /lock.txt" in dockerfile
+
+    def test_an_imported_image_bootstraps_uv_from_its_own_wheelhouse(self) -> None:
+        """An imported image is not baked with `uv` or the fork's wheel (E3-04):
+        both are brought to the solve instead of assumed already there."""
+        from code_sandboxes.environments.resolve import BuildkitResolveRunner
+
+        dockerfile = BuildkitResolveRunner(buildctl="/usr/bin/true").dockerfile(
+            ResolveRequest(
+                python_version="3.13",
+                requirements=("ipykernel==7.3.0",),
+                constraints=(),
+                indexes=(),
+                base_reference="docker.io/library/python@sha256:" + "9" * 64,
+                bootstrap_uv=True,
+            )
+        )
+        assert 'RUN pip install --no-cache-dir "uv==0.12.11"' in dockerfile
+        assert "COPY wheelhouse/ ./wheelhouse/" in dockerfile
+        assert "--find-links /solve/wheelhouse" in dockerfile
+        assert "/opt/datalayer/wheelhouse" not in dockerfile
+
+    def test_an_approved_base_never_copies_a_wheelhouse_in(self) -> None:
+        """`bootstrap_uv` defaults to `False`: an approved base's own solve is
+        unchanged by this, since it already has both (E1-05)."""
+        from code_sandboxes.environments.resolve import BuildkitResolveRunner
+
+        dockerfile = BuildkitResolveRunner(buildctl="/usr/bin/true").dockerfile(
+            ResolveRequest(
+                python_version="3.13",
+                requirements=(),
+                constraints=(),
+                indexes=(),
+                base_reference="environments/base/python-cpu@sha256:" + "11" * 32,
+            )
+        )
+        assert "wheelhouse/ ./wheelhouse/" not in dockerfile
+        assert "uv==0.12.11" not in dockerfile
+
+    def test_the_solve_copies_the_wheelhouse_into_the_build_context_when_asked(
+        self, monkeypatch
+    ) -> None:
+        """The context `--local context=<dir>` names holds the wheelhouse
+        `COPY wheelhouse/` reads, written before `buildctl` is ever run — so
+        it is only there to see while that subprocess call is live."""
+        import subprocess as subprocess_module
+        from pathlib import Path
+
+        from code_sandboxes.environments import resolve as resolve_module
+        from code_sandboxes.environments.resolve import (
+            WHEELHOUSE_PATH,
+            BuildkitResolveRunner,
+        )
+
+        expected = {wheel.name for wheel in WHEELHOUSE_PATH.glob("*.whl")}
+        assert expected, "the package's own wheelhouse must not be empty"
+        seen: dict[str, set[str]] = {}
+
+        def fake_run(command, **kwargs):
+            context = Path(command[command.index("--local") + 1].removeprefix("context="))
+            seen["wheelhouse"] = {path.name for path in (context / "wheelhouse").glob("*.whl")}
+            return subprocess_module.CompletedProcess(command, 1, "", "boom")
+
+        monkeypatch.setattr(resolve_module.subprocess, "run", fake_run)
+        runner = BuildkitResolveRunner(buildctl="/usr/bin/true")
+        with pytest.raises(EnvironmentsError):
+            runner.solve(
+                ResolveRequest(
+                    python_version="3.13",
+                    requirements=("ipykernel==7.3.0",),
+                    constraints=(),
+                    indexes=(),
+                    base_reference="docker.io/library/python@sha256:" + "9" * 64,
+                    bootstrap_uv=True,
+                )
+            )
+        assert seen["wheelhouse"] == expected
 
     def test_it_refuses_a_base_that_is_not_pinned_by_digest(self) -> None:
         from code_sandboxes.environments.resolve import BuildkitResolveRunner

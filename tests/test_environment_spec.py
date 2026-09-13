@@ -283,7 +283,7 @@ def test_all_baked_files_together_are_capped() -> None:
 
 
 def test_an_invalid_field_outranks_something_unsupported() -> None:
-    data = mutated("spec.build.source", "image")
+    data = mutated("spec.build.source", "dockerfile")
     assert _codes(data) == {"spec.build.source": UNSUPPORTED}
     with pytest.raises(EnvironmentsError) as unsupported:
         validate_environment(data)
@@ -366,6 +366,50 @@ class TestDependencyFiles:
 
     def test_a_comment_and_a_blank_line_are_not_requirements(self) -> None:
         data = a_dependency_file_document(content="# a comment\n\ngeopandas==1.1.1\n")
+        assert _codes(data) == {}
+
+
+# -- An imported image (E3-04) -------------------------------------------------
+
+
+def an_image_document(**image: Any) -> dict[str, Any]:
+    data = mutated("spec.build.source", "image")
+    data["spec"]["build"]["image"] = {"reference": "python:3.12-slim-bookworm", **image}
+    return data
+
+
+DENIED = "DL_ENV_POLICY_DENIED"
+
+
+class TestImageSources:
+    def test_a_public_image_is_supported_now(self) -> None:
+        assert _codes(an_image_document()) == {}
+
+    def test_pinned_by_digest_is_supported_too(self) -> None:
+        data = an_image_document(reference="python@" + "sha256:" + "a" * 64)
+        assert _codes(data) == {}
+
+    def test_naming_no_image_at_all_is_invalid(self) -> None:
+        data = mutated("spec.build.source", "image")
+        assert _codes(data) == {"spec.build.image": INVALID}
+
+    def test_an_empty_reference_is_invalid(self) -> None:
+        data = an_image_document(reference="   ")
+        assert _codes(data) == {"spec.build.image.reference": INVALID}
+
+    def test_an_unparseable_reference_is_invalid(self) -> None:
+        data = an_image_document(reference="not a reference@@")
+        assert _codes(data) == {"spec.build.image.reference": INVALID}
+
+    def test_a_registry_off_the_allowlist_is_policy_denied(self) -> None:
+        data = an_image_document(reference="evil.example.com/x:y")
+        assert _codes(data) == {"spec.build.image.reference": DENIED}
+
+    def test_the_approved_base_is_not_checked_for_this_source(self) -> None:
+        """`spec.base` is meaningless for an import: the image is the base,
+        so an unapproved or mismatched one refuses nothing here."""
+        data = an_image_document()
+        data["spec"]["base"] = {"ref": "not-approved-at-all", "channel": "n/a"}
         assert _codes(data) == {}
 
 

@@ -149,7 +149,11 @@ class Builder:
     def capabilities(self) -> CapabilitySet:
         return CapabilitySet(
             variant=self.variant,
-            build_sources=("packages",),
+            # `dependencyFile` resolves the same way `packages` does (E3-01);
+            # `image` resolves from an imported reference instead of an
+            # approved base (E3-04). Neither changes how this builder itself
+            # builds, once the resolver has done its part.
+            build_sources=("packages", "dependencyFile", "image"),
             package_managers=("uv", "pip"),
             # Nothing is forbidden by the builder itself: BuildKit is the
             # reference implementation of a Dockerfile, and what the contract
@@ -167,11 +171,11 @@ class Builder:
         """Whether this variant can build this spec, before anything is queued."""
         findings: list[CapabilityFinding] = []
         source = environment.spec.build.source
-        if source != "packages":
+        if source not in ("packages", "dependencyFile", "image"):
             findings.append(
                 CapabilityFinding(
                     code=CAPABILITY_UNSUPPORTED.code,
-                    message=f"the Datalayer builder builds `packages`, not `{source}`",
+                    message=f"the Datalayer builder does not build `{source}` yet",
                     field="spec.build.source",
                 )
             )
