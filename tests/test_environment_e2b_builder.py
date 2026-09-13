@@ -15,12 +15,13 @@ afterwards.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
 from code_sandboxes.environments.adapters.e2b import CODE_INTERPRETER_BASE_TEMPLATE, Builder
 from code_sandboxes.environments.builders import ArtifactReference, BuildRequest
-from code_sandboxes.environments.errors import BUILD_FAILED, EnvironmentsError
+from code_sandboxes.environments.errors import BUILD_FAILED, PROVIDER_ERROR, EnvironmentsError
 from code_sandboxes.environments.spec import parse_environment
 
 OWNER = "01k0wner000000000000000000"
@@ -31,7 +32,17 @@ LOCK = (
     "# datalayer-protected: ipykernel==7.3.0\n"
     "geopandas==1.1.1 \\\n    --hash=sha256:" + "cd" * 32 + "\n"
 )
+APT_LOCK = LOCK + "# datalayer-apt: gdal-bin=3.8.4+dfsg-3build2\n"
 LOCK_DIGEST = "sha256:" + "dd" * 32
+
+
+class Credential:
+    """The build's owner secrets, as the workflow mints them (D-8, E2-01)."""
+
+    provider_secrets: ClassVar[dict[str, str]] = {
+        "E2B_API_KEY": "owners-e2b-key",
+        "E2B_TEAM_ID": "acme-org",
+    }
 
 
 class Call:
@@ -100,31 +111,43 @@ class FakeTemplate:
         build_error: Exception | None = None,
         tags: list[Tag] | None = None,
         existing_names: set[str] | None = None,
+        get_tags_error: Exception | None = None,
+        exists_error: Exception | None = None,
     ) -> None:
         self.calls: list[Call] = []
         self.build_calls: list[Call] = []
+        self.get_tags_calls: list[Call] = []
+        self.exists_calls: list[Call] = []
         self._build_id = build_id
         self._template_id = template_id
         self._build_error = build_error
         self._tags = tags if tags is not None else []
         self._existing_names = existing_names if existing_names is not None else {template_id}
+        self._get_tags_error = get_tags_error
+        self._exists_error = exists_error
 
     def __call__(self, *, file_context_path: str | None = None) -> FakeTemplateBuilder:
         self.file_context_path = file_context_path
         return FakeTemplateBuilder(self.calls)
 
-    def build(self, chain, name, *, tags=None, on_build_logs=None):
-        self.build_calls.append(Call("build", (chain, name), {"tags": tags}))
+    def build(self, chain, name, *, tags=None, on_build_logs=None, **opts):
+        self.build_calls.append(Call("build", (chain, name), {"tags": tags, **opts}))
         if on_build_logs is not None:
             on_build_logs(type("Entry", (), {"level": "info", "message": "solved"})())
         if self._build_error is not None:
             raise self._build_error
         return BuildInfo(self._template_id, self._build_id, name)
 
-    def get_tags(self, template_id_or_name):
+    def get_tags(self, template_id_or_name, **opts):
+        self.get_tags_calls.append(Call("get_tags", (template_id_or_name,), opts))
+        if self._get_tags_error is not None:
+            raise self._get_tags_error
         return self._tags
 
-    def exists(self, template_id_or_name):
+    def exists(self, template_id_or_name, **opts):
+        self.exists_calls.append(Call("exists", (template_id_or_name,), opts))
+        if self._exists_error is not None:
+            raise self._exists_error
         return template_id_or_name in self._existing_names
 
 
@@ -295,6 +318,97 @@ class TestBuildingATemplate:
         assert "quota exceeded" in raised.value.message
         assert raised.value.detail["log"]
 
+    def test_env_is_set_before_any_package_install(self) -> None:
+        """A package that compiles against a library found through an env
+        var behaves differently without it (E1-07's own reasoning, found in
+        review to apply here too — `set_envs` used to run after `uv pip
+        sync`, too late for exactly that case)."""
+        fake = FakeTemplate()
+        a_builder(fake).build(a_request())
+        names = [call.name for call in fake.calls]
+        set_envs_at = names.index("set_envs")
+        first_install_at = next(
+            i
+            for i, call in enumerate(fake.calls)
+            if call.name == "run_cmd"
+            and ("pip install" in call.args[0] or "uv pip" in call.args[0])
+        )
+        assert set_envs_at < first_install_at
+
+    def test_apt_packages_from_the_lock_are_installed(self) -> None:
+        fake = FakeTemplate()
+        a_builder(fake).build(a_request(lock_text=APT_LOCK))
+        apt_run = next(
+            call for call in fake.calls if call.name == "run_cmd" and "apt-get" in call.args[0]
+        )
+        assert apt_run.kwargs["user"] == "root"
+        assert "gdal-bin=3.8.4+dfsg-3build2" in apt_run.args[0]
+        # Before the packages are installed, same as the Datalayer builder.
+        apt_at = fake.calls.index(apt_run)
+        uv_sync_at = next(
+            i
+            for i, call in enumerate(fake.calls)
+            if call.name == "run_cmd" and "uv pip sync" in call.args[0]
+        )
+        assert apt_at < uv_sync_at
+
+    def test_no_apt_step_when_the_lock_pins_none(self) -> None:
+        fake = FakeTemplate()
+        a_builder(fake).build(a_request())
+        assert not any(call.name == "run_cmd" and "apt-get" in call.args[0] for call in fake.calls)
+
+    def test_the_owners_credential_is_passed_to_the_sdk(self) -> None:
+        """D-8: a build must run in the *environment owner's* team, never
+        whichever team the worker process itself happens to be configured
+        for (found in review: this was never threaded through at all)."""
+        fake = FakeTemplate()
+        a_builder(fake, credential=Credential()).build(a_request())
+        assert fake.build_calls[0].kwargs["api_key"] == "owners-e2b-key"
+
+    def test_with_no_credential_no_api_key_is_passed(self) -> None:
+        """Falls back to the SDK's own ambient `E2B_API_KEY`, the way a
+        single-owner worker or a test already relies on."""
+        fake = FakeTemplate()
+        a_builder(fake, credential=None).build(a_request())
+        assert "api_key" not in fake.build_calls[0].kwargs
+
+    def test_provider_account_is_populated_from_the_credential(self) -> None:
+        """E2-01: an artifact with no recorded account can never be matched
+        against a caller's — found in review, this was always left unset."""
+        fake = FakeTemplate()
+        artifact = a_builder(fake, credential=Credential()).build(a_request())
+        assert artifact.provider_account == "e2b:acme-org"
+
+    def test_provider_account_is_none_with_no_credential(self) -> None:
+        fake = FakeTemplate()
+        artifact = a_builder(fake, credential=None).build(a_request())
+        assert artifact.provider_account is None
+
+
+class TestWhatE2BCannotBuild:
+    def test_a_build_secret_is_refused_before_anything_is_queued(self) -> None:
+        """E0-04's spike found only a registry login for E2B's private
+        base, never a per-step arbitrary named secret — `build()` has no
+        mechanism to mount one (found in review)."""
+        report = Builder().validate(
+            parse_environment(
+                {
+                    "apiVersion": "environments.datalayer.io/v1alpha1",
+                    "kind": "Environment",
+                    "metadata": {"name": "geo"},
+                    "spec": {
+                        "language": {"version": "3.13"},
+                        "base": {"ref": "datalayer/python-cpu", "channel": "2026.09"},
+                        "buildSecrets": [
+                            {"id": "dlsec_01J9BUILDSECRET0000000000", "name": "TOKEN"}
+                        ],
+                    },
+                }
+            )
+        )
+        assert report.supported is False
+        assert "spec.buildSecrets" in [finding.field for finding in report.findings]
+
 
 class TestReadingTheRegistry:
     def _an_artifact(self, template_id="tpl-1", build_id="bld-1") -> ArtifactReference:
@@ -325,3 +439,27 @@ class TestReadingTheRegistry:
     def test_exists_is_false_once_the_template_itself_is_gone(self) -> None:
         fake = FakeTemplate(tags=[Tag("v3-bld-1", "bld-1")], existing_names=set())
         assert a_builder(fake).exists(self._an_artifact()) is False
+
+    def test_inspect_and_exists_pass_the_owners_credential_too(self) -> None:
+        fake = FakeTemplate(tags=[Tag("v3-bld-1", "bld-1")], existing_names={"tpl-1"})
+        a_builder(fake, credential=Credential()).inspect(self._an_artifact())
+        a_builder(fake, credential=Credential()).exists(self._an_artifact())
+        assert fake.get_tags_calls[0].kwargs["api_key"] == "owners-e2b-key"
+        assert fake.exists_calls[0].kwargs["api_key"] == "owners-e2b-key"
+
+    def test_a_get_tags_failure_is_a_provider_error_not_a_raw_exception(self) -> None:
+        """Found in review: this used to escape as whatever the SDK raises,
+        unlike the Datalayer registry adapter's own provider calls, all of
+        which map into `DL_ENV_PROVIDER_ERROR`."""
+        fake = FakeTemplate(get_tags_error=RuntimeError("connection reset"))
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder(fake).inspect(self._an_artifact())
+        assert raised.value.code is PROVIDER_ERROR
+        assert "connection reset" in raised.value.message
+
+    def test_an_exists_failure_is_a_provider_error_not_a_raw_exception(self) -> None:
+        fake = FakeTemplate(exists_error=RuntimeError("unauthorized"))
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder(fake).exists(self._an_artifact())
+        assert raised.value.code is PROVIDER_ERROR
+        assert "unauthorized" in raised.value.message

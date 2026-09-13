@@ -92,6 +92,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ..accounts import provider_account
 from ..builders import (
     ArtifactMetadata,
     ArtifactReference,
@@ -106,7 +107,7 @@ from ..errors import (
     EnvironmentsError,
 )
 from ..files import files_step
-from ..resolve import WHEELHOUSE_PATH
+from ..resolve import WHEELHOUSE_PATH, apt_pins_in
 from ..spec import Environment
 from .managed import ManagedBuilder
 
@@ -152,6 +153,9 @@ class Builder(ManagedBuilder):
     title = "E2B"
     #: Firecracker microVMs: no GPU passthrough.
     gpu = False
+    #: E0-04's spike found only a registry login for the private base, never
+    #: a per-step arbitrary named secret (E3-05): `buildSecrets` is refused.
+    supports_build_secrets = False
     #: E2B artifacts are regionless.
     regions = ()
     #: A template build is quicker than an image build: 47 s for the section
@@ -178,6 +182,29 @@ class Builder(ManagedBuilder):
         #: needs a real filesystem write to be checked.
         self._zipapp_builder = zipapp_builder or _default_zipapp_builder()
 
+    def _provider_secrets(self) -> dict[str, str]:
+        """The owner's E2B secrets the build credential carries (D-8, E2-01).
+
+        `BuildCredential.provider_secrets` the same way the Datalayer builder
+        reads `.registry`/`.username`/`.password` off it — an owner's own
+        `E2B_API_KEY` (and `E2B_TEAM_ID`, when configured), never logged,
+        held for this build alone.
+        """
+        secrets = getattr(self._credential, "provider_secrets", None)
+        return dict(secrets) if secrets else {}
+
+    def _api_key(self) -> str | None:
+        """The owner's own E2B key, passed to every SDK call that needs one.
+
+        Without it, `Template.build`/`get_tags`/`exists` fall back to the
+        ambient `E2B_API_KEY` (found live, 2026-09-13, is what let this
+        adapter's own live drill run at all) — fine for a single-owner
+        worker or a test, wrong for a real multi-owner one, where a build
+        must run in the *environment owner's* team, not whichever team the
+        worker process itself happens to be configured for.
+        """
+        return self._provider_secrets().get("E2B_API_KEY") or None
+
     def _own_findings(
         self, environment: Environment, lock_text: str | None
     ) -> list[CapabilityFinding]:
@@ -196,6 +223,24 @@ class Builder(ManagedBuilder):
                         "Remove it, or drop e2b from the variants"
                     ),
                     field="spec.env.HOME",
+                )
+            )
+        if environment.spec.build_secrets:
+            # E0-04's spike found only a registry login for the private
+            # base, never a per-step arbitrary named secret — build() has
+            # no mechanism to mount one, so a spec naming one is refused
+            # here rather than silently built without it (found in review).
+            ids = ", ".join(secret.id for secret in environment.spec.build_secrets)
+            findings.append(
+                CapabilityFinding(
+                    code="DL_ENV_CAPABILITY_UNSUPPORTED",
+                    message=(
+                        f"E2B has no per-step secret mechanism E0-04 could find — only a "
+                        f"registry login, never an arbitrary named secret — so `buildSecrets` "
+                        f"({ids}) cannot be injected. Build datalayer or modal, which mount one "
+                        "per step, or drop the secret"
+                    ),
+                    field="spec.buildSecrets",
                 )
             )
         return findings
@@ -277,7 +322,29 @@ class Builder(ManagedBuilder):
                 )
                 .set_user(_CONTRACT_USER)
                 .set_workdir(_CONTENT_DIR)
-                .copy("datalayer-sandbox", _DOCTOR_PATH, mode=0o755, user="root")
+            )
+            # `env` before anything installs, the same order the Datalayer
+            # builder keeps (E1-07): a package that compiles against a
+            # library found through an env var (`GDAL_DATA` and the like)
+            # behaves differently without it. Found in review: this used to
+            # run after uv's own install, too late for exactly that case.
+            if spec.env:
+                chain = chain.set_envs(dict(spec.env))
+            apt = apt_pins_in(request.lock_text)
+            if apt:
+                # The lock's own apt versions (D-9), the same pins the
+                # Datalayer builder installs — found in review: this chain
+                # had never installed them at all, so a spec naming a system
+                # package reported as buildable and silently shipped without
+                # it.
+                pinned = " ".join(f"{name}={apt[name]}" for name in sorted(apt))
+                chain = chain.run_cmd(
+                    "apt-get update -qq && apt-get install -y --no-install-recommends "
+                    f"{pinned} && rm -rf /var/lib/apt/lists/*",
+                    user="root",
+                )
+            chain = (
+                chain.copy("datalayer-sandbox", _DOCTOR_PATH, mode=0o755, user="root")
                 .copy("wheelhouse", _WHEELHOUSE_PATH, user="root")
                 .copy("lock.txt", _LOCK_PATH, user="root")
                 .run_cmd(f'pip install --no-cache-dir "uv=={_UV_VERSION}"', user="root")
@@ -289,8 +356,6 @@ class Builder(ManagedBuilder):
                     user="root",
                 )
             )
-            if spec.env:
-                chain = chain.set_envs(dict(spec.env))
             for command in files_step(request.environment, variant=self.variant):
                 chain = chain.run_cmd(command)
             for command in spec.commands.post_install:
@@ -314,8 +379,18 @@ class Builder(ManagedBuilder):
                 logged.append(message)
                 self._log(message)
 
+            build_kwargs: dict[str, Any] = {}
+            api_key = self._api_key()
+            if api_key:
+                # The owner's own key (D-8), never the worker's ambient one:
+                # found in review — this call took no credential at all
+                # before, so a multi-owner worker would have built in
+                # whichever team `E2B_API_KEY` happened to name.
+                build_kwargs["api_key"] = api_key
             try:
-                info = template_cls.build(chain, name, tags=[tag], on_build_logs=on_build_logs)
+                info = template_cls.build(
+                    chain, name, tags=[tag], on_build_logs=on_build_logs, **build_kwargs
+                )
             except Exception as error:
                 raise EnvironmentsError(
                     BUILD_FAILED,
@@ -334,6 +409,10 @@ class Builder(ManagedBuilder):
             # `exists` and `delete` need no extra round trip to resolve a
             # name to an id.
             mutable_alias=f"{info.template_id}:{info.name}",
+            # The non-secret fingerprint of the account this build ran in
+            # (E2-01) — found in review: this was left unset, so a launch
+            # could never tell this artifact's account from another's.
+            provider_account=provider_account(self.variant, self._provider_secrets()) or None,
             contract_version=spec.contract or SANDBOX_CONTRACT_V1.version,
         )
 
@@ -345,10 +424,29 @@ class Builder(ManagedBuilder):
         template_id, _, name = alias.partition(":")
         return template_id, name
 
+    def _get_tags(self, template_cls: Any, id_or_name: str) -> list[Any]:
+        """`Template.get_tags`, with the owner's key and the taxonomy's own
+        error for anything that is not simply "no such template" (found in
+        review: an auth or network failure here used to escape as a raw SDK
+        exception, unlike the Datalayer registry adapter's own provider
+        calls, which all map into `DL_ENV_PROVIDER_ERROR`)."""
+        try:
+            return list(template_cls.get_tags(id_or_name, **self._api_key_kwargs()))
+        except Exception as error:
+            raise EnvironmentsError(
+                PROVIDER_ERROR,
+                f"E2B could not be asked for {id_or_name}'s tags: {error}",
+                detail={"variant": self.variant, "id_or_name": id_or_name},
+            ) from error
+
+    def _api_key_kwargs(self) -> dict[str, Any]:
+        api_key = self._api_key()
+        return {"api_key": api_key} if api_key else {}
+
     def inspect(self, artifact: ArtifactReference) -> ArtifactMetadata:
         template_cls = self._template_cls()
         template_id, name = self._ids(artifact)
-        tags = template_cls.get_tags(template_id or name)
+        tags = self._get_tags(template_cls, template_id or name)
         found = next(
             (
                 tag
@@ -372,9 +470,17 @@ class Builder(ManagedBuilder):
     def exists(self, artifact: ArtifactReference) -> bool:
         template_cls = self._template_cls()
         template_id, name = self._ids(artifact)
-        if not template_cls.exists(template_id or name):
+        try:
+            found = template_cls.exists(template_id or name, **self._api_key_kwargs())
+        except Exception as error:
+            raise EnvironmentsError(
+                PROVIDER_ERROR,
+                f"E2B could not be asked whether {template_id or name} exists: {error}",
+                detail={"variant": self.variant},
+            ) from error
+        if not found:
             return False
-        tags = template_cls.get_tags(template_id or name)
+        tags = self._get_tags(template_cls, template_id or name)
         return any(getattr(tag, "build_id", None) == artifact.provider_artifact_id for tag in tags)
 
 
