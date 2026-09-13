@@ -34,6 +34,9 @@ if TYPE_CHECKING:
 __all__ = [
     "CORE_CHECKS",
     "EXTENDED_CHECKS",
+    "cross_variant_packages",
+    "drifted_from",
+    "package_versions_of",
     "run_conformance",
     "run_core_tier",
     "run_extended_tier",
@@ -246,7 +249,17 @@ def _imports(sandbox: Sandbox, expected: Mapping[str, str], timeout: float | Non
         "        _dl_entry['version'] = _dl_md.version(_dl_dist)\n"
         "    except _dl_md.PackageNotFoundError:\n"
         "        _dl_entry['error'] = 'not installed'\n"
-        "    for _dl_module in sorted(_dl_modules.get(_dl_dist, []), key=len)[:1]:\n"
+        # `packages_distributions()` is what to trust when it answers — it
+        # reads the distribution's own RECORD, so it is right about a
+        # `cv2`/`opencv-python`-style mismatch too — but its first release
+        # (Python 3.10.0) answers nothing for some real, correctly installed
+        # distributions (pydantic among them; fixed in later 3.10 point
+        # releases and 3.11+). The naive guess every other distribution's
+        # import name already is — the name with `-` as `_` — is the
+        # fallback only when the metadata gave nothing to try at all.
+        "    _dl_candidates = sorted(_dl_modules.get(_dl_dist, []), key=len)[:1] or ["
+        "_dl_dist.replace('-', '_')]\n"
+        "    for _dl_module in _dl_candidates:\n"
         "        try:\n"
         "            _dl_il.import_module(_dl_module)\n"
         "            _dl_entry['imported'] = _dl_module\n"
@@ -378,9 +391,8 @@ def _secrets(
 ) -> CheckResult:
     if not secret_values:
         return _result(9, True, gating=True, detail="the build used no secret")
-    in_metadata = bool(image_metadata) and any(
-        value and value in image_metadata for value in secret_values
-    )
+    metadata = image_metadata or ""
+    in_metadata = bool(metadata) and any(value and value in metadata for value in secret_values)
     fingerprints: dict[int, list[int]] = {}
     for length, digest in secret_fingerprints(secret_values):
         fingerprints.setdefault(length, []).append(digest)
@@ -649,7 +661,84 @@ def run_conformance(
         secret_roots=secret_roots,
         timeout=timeout,
     )
+    # `contract` and `timeout` are `run_conformance`'s own to decide for both
+    # tiers; `extended` is for the tier's own options (`egress_allowed`,
+    # `cuda_version`, ...). Spread first and override after, so a caller that
+    # also put either of those two in `extended` gets the shared one rather
+    # than `run_extended_tier() got multiple values for keyword argument`
+    # (found on PR #27's Copilot review).
     recorded = run_extended_tier(
-        sandbox, contract=contract, timeout=timeout, **dict(extended or {})
+        sandbox, **{**dict(extended or {}), "contract": contract, "timeout": timeout}
     )
     return ValidationResult(contract_version=contract.version, checks=core.checks + recorded.checks)
+
+
+# --- One dependency set everywhere (PLAN_ENV.md E2-08) ----------------------------
+
+#: Check 5's own id, the one `package_versions_of` reads out of a `ValidationResult`.
+_IMPORTS_CHECK_ID = "conformance:5"
+
+
+def package_versions_of(validation: ValidationResult) -> dict[str, str]:
+    """One variant's check 5, reduced to `{package: version}`.
+
+    `_imports` already records the full answer — the imported module, the
+    error, the version — as check 5's `data["packages"]`; this is the one
+    field a *cross*-variant comparison needs; a version differing is the
+    only way one variant's build can disagree with another's when both
+    installed from the same lock (a variant that could not import the
+    package at all failed check 5 on its own, in its own sandbox, and is not
+    this function's concern).
+    """
+    for check in validation.checks:
+        if check.id == _IMPORTS_CHECK_ID:
+            packages = check.data.get("packages") or {}
+            return {
+                str(name): str(entry.get("version"))
+                for name, entry in packages.items()
+                if isinstance(entry, Mapping) and entry.get("version")
+            }
+    return {}
+
+
+def drifted_from(
+    stored: Mapping[str, Mapping[str, str]], variant: str, versions: Mapping[str, str]
+) -> tuple[str, str, str] | None:
+    """The first package this variant's versions disagree with another variant's, or `None`.
+
+    `stored` is `{other_variant: {package: version}}` for every variant that
+    has already built this version — the version's own running record, not
+    this build's. Every variant installs from the *same* lock (section 5), so
+    a real disagreement means something about the base or the provider's own
+    layer let a different transitive version in despite it; this is Appendix
+    B check 5's whole purpose, run *across* variants rather than only within
+    one.
+
+    Returns `(package, this variant's version, the other's)` for the first
+    disagreement found, so the refusal can name both — never a bare "check 5
+    failed" for a build that, on its own, imported everything the lock named.
+    """
+    for name, version in versions.items():
+        for other_variant, other_versions in stored.items():
+            if other_variant == variant:
+                continue
+            other_version = other_versions.get(name)
+            if other_version and other_version != version:
+                return name, version, other_version
+    return None
+
+
+def cross_variant_packages(
+    stored: Mapping[str, Mapping[str, str]], variant: str, versions: Mapping[str, str]
+) -> dict[str, dict[str, str]]:
+    """`stored`, with this variant's own versions folded in.
+
+    The report a version keeps is this — every variant's `{package: version}`
+    together — so that once every declared variant has built, the one
+    question "does this environment's dependency set agree everywhere" has
+    one place to be read from, identical no matter which variant's build is
+    read last.
+    """
+    merged = {name: dict(found) for name, found in stored.items()}
+    merged[variant] = dict(versions)
+    return merged

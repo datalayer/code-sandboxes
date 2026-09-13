@@ -41,6 +41,11 @@ code-sandboxes = "code_sandboxes.cli:main"
 # `datalayer-core` carries the frame protocol both ends speak.
 bridge = ["datalayer-core>=1.1.65", "fusepy>=3.0", "websockets>=12"]
 cloudflare = ["httpx>=0.27"]
+# What the Datalayer Environment builder needs where it RUNS — the durable
+# worker (PLAN_ENV.md E1-07): the ECR API for the owner's repository, the
+# artifact and its scan; `httpx` for an imported image's own registry (E3-04).
+# `buildctl` is a binary in that image, not a package.
+environments-builder = ["boto3>=1.34", "httpx>=0.27"]
 coreweave = ["cwsandbox>=1.6"]
 datalayer = ["agent_runtimes>=1.0.16"]
 daytona = ["daytona>=0.205.1"]
@@ -62,6 +67,7 @@ all = [
   "modal>=1.5.2",
 ]
 test = [
+  "httpx>=0.27",
   "ipykernel",
   "jupyter-server>=1.6,<3",
   "pytest>=7.0",
@@ -173,3 +179,7 @@ ignore = [
 "code_sandboxes/environments/canonical.py" = ["C901"]
 "code_sandboxes/environments/contract.py" = ["C901"]
 "code_sandboxes/environments/spec.py" = ["C901"]
+# uv writes its refusals in a box: the `×` and `╰─▶` are the resolver's own
+# characters, and the parser and its recordings quote them exactly.
+"code_sandboxes/environments/resolve.py" = ["RUF001"]
+"tests/test_environment_resolve.py" = ["RUF001"]

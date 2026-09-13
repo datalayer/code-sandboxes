@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 import yaml
 
-from code_sandboxes.environments import errors
+from code_sandboxes.environments import builders, errors
 from code_sandboxes.environments.builders import (
     ArtifactMetadata,
     ArtifactReference,
@@ -148,7 +148,24 @@ def test_a_variant_that_is_not_one_has_no_builder() -> None:
     assert refused.value.code is errors.CAPABILITY_UNSUPPORTED
 
 
-def test_a_variant_whose_builder_is_not_shipped_is_unsupported_not_an_import_error() -> None:
+def test_every_variant_ships_a_builder_that_honours_the_interface() -> None:
+    """Since E2-06: a spec is answered for on every variant, whatever half of
+    that variant's builder has landed. `test_environment_managed_builders.py`
+    is where each one's answers live."""
+    from code_sandboxes.environments.spec import VARIANTS
+
+    for variant in VARIANTS:
+        assert builder_contract_violations(get_builder(variant), variant=variant) == [], variant
+
+
+def test_a_variant_whose_builder_is_not_shipped_is_unsupported_not_an_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A release that drops an adapter answers "this release cannot", not a
+    traceback about a module a caller has never heard of."""
+    monkeypatch.setitem(
+        builders.BUILDER_MODULES, "modal", "code_sandboxes.environments.adapters.nowhere"
+    )
     with pytest.raises(EnvironmentsError) as refused:
         get_builder("Modal")
     assert refused.value.code is errors.CAPABILITY_UNSUPPORTED
@@ -279,3 +296,111 @@ def test_the_neutral_modules_import_no_provider_sdk() -> None:
         [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
     )
     assert completed.returncode == 0, completed.stderr
+
+
+class TestLaunchingAnArtifact:
+    """One neutral reference, translated into the argument its variant takes (E2-02).
+
+    A caller holding an Environment's artifact should not have to know that
+    E2B calls it a template, Daytona a snapshot and Modal an image id.
+    """
+
+    def an_artifact(self, variant: str, reference: str) -> builders.ArtifactReference:
+        return builders.ArtifactReference(
+            variant=variant,
+            immutable_reference=reference,
+            provider_artifact_id=reference,
+            contract_version="sandbox-contract/v1",
+        )
+
+    def test_each_managed_variant_gets_its_own_argument(self) -> None:
+        assert builders.launch_arguments(self.an_artifact("e2b", "dl/geo:bld-1")) == {
+            "template": "dl/geo:bld-1"
+        }
+        assert builders.launch_arguments(self.an_artifact("daytona", "snap-1")) == {
+            "snapshot": "snap-1"
+        }
+        assert builders.launch_arguments(self.an_artifact("modal", "im-123")) == {
+            "image_id": "im-123"
+        }
+
+    def test_a_mapping_is_read_either_way_round(self) -> None:
+        """What a route answers is camelCase; what a model holds is snake."""
+        assert builders.launch_arguments(
+            {
+                "variant": "e2b",
+                "immutableReference": "dl/geo:bld-2",
+                "providerArtifactId": "bld-2",
+                "contractVersion": "sandbox-contract/v1",
+            }
+        ) == {"template": "dl/geo:bld-2"}
+
+    def test_the_datalayer_variant_is_launched_by_naming_its_version(self) -> None:
+        """A client passing a digest could name somebody else's artifact."""
+        from code_sandboxes.environments.errors import EnvironmentsError
+
+        artifact = self.an_artifact(
+            "datalayer", "123456789012.dkr.ecr.us-east-1.amazonaws.com/e@sha256:" + "a" * 64
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            builders.launch_arguments(artifact)
+        assert raised.value.code.code == "DL_ENV_CAPABILITY_UNSUPPORTED"
+        assert "only Runtimes may call" in raised.value.message
+
+    def test_every_variant_with_an_artifact_has_an_argument(self) -> None:
+        """A variant added without a line in LAUNCH_ARGUMENTS launches nothing."""
+        from code_sandboxes.environments.spec import VARIANTS
+
+        assert set(VARIANTS) - {"datalayer"} == set(builders.LAUNCH_ARGUMENTS)
+
+    def test_something_that_is_not_an_artifact_is_refused(self) -> None:
+        from code_sandboxes.environments.errors import EnvironmentsError
+
+        with pytest.raises(EnvironmentsError) as raised:
+            builders.launch_arguments("dl/geo:bld-1")
+        assert raised.value.code.code == "DL_ENV_SPEC_INVALID"
+
+    def test_create_hands_the_artifact_to_the_variant(self) -> None:
+        """`Sandbox.create(artifact=…)` reaches the adapter's own argument."""
+        from code_sandboxes.base import Sandbox
+
+        sandbox = Sandbox.create(variant="e2b", artifact=self.an_artifact("e2b", "dl/geo:bld-1"))
+        assert sandbox._template == "dl/geo:bld-1"
+
+    def test_what_the_caller_passed_wins_over_the_artifact(self) -> None:
+        from code_sandboxes.base import Sandbox
+
+        sandbox = Sandbox.create(
+            variant="daytona",
+            artifact=self.an_artifact("daytona", "snap-1"),
+            snapshot="snap-chosen",
+        )
+        assert sandbox._snapshot == "snap-chosen"
+
+    def test_a_modal_artifact_reaches_its_image_id(self) -> None:
+        from code_sandboxes.base import Sandbox
+
+        sandbox = Sandbox.create(variant="modal", artifact=self.an_artifact("modal", "im-123"))
+        assert sandbox._image_id == "im-123"
+
+    def test_an_artifact_of_another_variant_is_refused(self) -> None:
+        """`launch_arguments` maps by the *artifact's own* variant, not the
+        caller's: asking for `modal` with an `e2b` artifact used to translate
+        it into Modal's own keyword regardless, silently launching Modal's
+        default image instead of the artifact named (found on PR #27's
+        Copilot review)."""
+        from code_sandboxes.environments.errors import EnvironmentsError
+
+        with pytest.raises(EnvironmentsError) as raised:
+            builders.launch_arguments(
+                self.an_artifact("e2b", "dl/geo:bld-1"), expected_variant="modal"
+            )
+        assert raised.value.code.code == "DL_ENV_SPEC_INVALID"
+        assert raised.value.detail == {"variant": "modal", "artifact_variant": "e2b"}
+
+    def test_create_refuses_an_artifact_of_another_variant(self) -> None:
+        from code_sandboxes.base import Sandbox
+        from code_sandboxes.environments.errors import EnvironmentsError
+
+        with pytest.raises(EnvironmentsError):
+            Sandbox.create(variant="modal", artifact=self.an_artifact("e2b", "dl/geo:bld-1"))

@@ -8,7 +8,9 @@ description: Define an environment once, resolve it once, and build an immutable
 An **Environment** says what a Code Sandbox runs with: a Python version on an approved base, the packages to install, a few files to bake in, and the variants — Datalayer, E2B, Daytona, Modal — it must build for. You write it once. It is resolved once into a lock, and every variant builds from that same lock, so the four sandboxes install the same package versions.
 
 :::info Preview
-`code_sandboxes.environments` holds what every party to an Environment shares: the specification, the sandbox contract, the version lifecycle, the error codes, the builder interface, the doctor and the conformance suite. The builders for each variant, and Datalayer's build service, arrive with the Environments feature of the Datalayer platform.
+`code_sandboxes.environments` holds what every party to an Environment shares: the specification, the sandbox contract, the version lifecycle, the error codes, the builder interface, the doctor and the conformance suite.
+
+On the Datalayer platform, the registry, the pages and the `datalayer envs` CLI are in place: an environment is written, versioned, validated, promoted, rolled back and launched by version. The resolver and the per-variant builders are not built yet, so no version reaches `ready` there yet — the states below are the ones it will move through, and a step that has no implementation refuses with `DL_ENV_CAPABILITY_UNSUPPORTED`, naming what is missing rather than failing obscurely.
 :::
 
 ## Three objects
@@ -130,3 +132,36 @@ with Sandbox.create(variant="datalayer", environment="acme/geospatial-analysis")
     for check in result.failures:
         print(check.id, check.detail)
 ```
+
+## From the Datalayer platform
+
+The same objects, through the platform that builds and runs them. An
+environment is named `account/name` and a version `account/name@<number>`:
+
+```bash
+datalayer envs create --file geospatial.yaml
+datalayer envs validate acme/geospatial-analysis@1
+datalayer envs resolve acme/geospatial-analysis@1
+datalayer envs build acme/geospatial-analysis@1 --follow
+datalayer envs try acme/geospatial-analysis@1
+datalayer envs promote acme/geospatial-analysis@1
+```
+
+A launch names a version, or leaves it out for the promoted one:
+
+```python
+from code_sandboxes import CodeSandboxClient
+
+sandbox = CodeSandboxClient.create(
+    variant="datalayer",
+    environment="acme/geospatial-analysis",
+    environment_version=1,
+)
+```
+
+Only the Datalayer variant has versions: naming one for E2B, Daytona or Modal
+is refused rather than quietly run on that provider's latest image. The whole
+flow, with what each step costs and what a refusal means, is in the
+[User Environments guide](https://datalayer.ai/docs/environments-user), and
+every field of the document is in the
+[Environment specification](https://datalayer.ai/docs/environments-spec).

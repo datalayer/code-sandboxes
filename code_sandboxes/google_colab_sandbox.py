@@ -20,10 +20,10 @@ import time
 import uuid
 
 from .base import Sandbox, marks_execution
-from .jupyter_ingress import interrupt_kernel_client
 from .exceptions import SandboxConfigurationError, SandboxNotStartedError
 from .google_colab import GoogleColabKernelClient, parse_google_colab_channels_url
 from .interfaces import ISandboxClient
+from .jupyter_ingress import interrupt_kernel_client
 from .models import (
     CodeError,
     Context,

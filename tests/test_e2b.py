@@ -90,7 +90,20 @@ class _FakeE2BSandbox:
         timeout=None,
         **_,
     ):
-        self.calls.append({"code": code, "context": context, "envs": envs, "timeout": timeout})
+        # E2B refuses both at once: "You can provide context or language, but
+        # not both at the same time." The double refuses it too, or the fix
+        # for check 14 of E0-04 would pass here and fail over there.
+        if context is not None and language is not None:
+            raise ValueError("You can provide context or language, but not both at the same time")
+        self.calls.append(
+            {
+                "code": code,
+                "context": context,
+                "language": language,
+                "envs": envs,
+                "timeout": timeout,
+            }
+        )
         key = context.context_id if context is not None else None
         namespace = self.namespaces.setdefault(key, {"__name__": "__main__"})
         out, err = io.StringIO(), io.StringIO()
@@ -396,3 +409,41 @@ def test_the_sdk_is_only_needed_when_the_sandbox_starts():
 
     assert isinstance(sandbox, E2BSandbox)
     assert not sandbox.is_started
+
+
+def test_a_context_scoped_run_passes_the_context_and_not_a_language():
+    """E2B takes one or the other, and a context carries its own language.
+
+    Check 14 of E0-04: this passed `language="python"` beside the context, and
+    the SDK refused the call (PLAN_ENV E2-02).
+    """
+    sandbox = _started()
+    context = sandbox.create_context("analysis")
+
+    sandbox.run_code("x = 41", context=context)
+    execution = sandbox.run_code("print(x + 1)", context=context)
+
+    assert execution.stdout.strip() == "42"
+    asked = sandbox._sandbox.calls[-1]
+    assert asked["language"] is None
+    assert asked["context"] is not None
+
+
+def test_a_run_with_no_context_still_names_the_language():
+    sandbox = _started()
+
+    execution = sandbox.run_code("print('hello')")
+
+    assert execution.stdout.strip() == "hello"
+    asked = sandbox._sandbox.calls[-1]
+    assert (asked["language"], asked["context"]) == ("python", None)
+
+
+def test_the_default_context_is_the_sandboxs_own_kernel():
+    """`default` is the same namespace as no context: it names no E2B context."""
+    sandbox = _started()
+
+    sandbox.run_code("y = 1", context=sandbox.create_context("default"))
+
+    assert sandbox._sandbox.calls[-1]["context"] is None
+    assert sandbox._sandbox.calls[-1]["language"] == "python"

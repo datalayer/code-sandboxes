@@ -361,7 +361,9 @@ def test_a_launched_sandbox_is_named_by_its_runtimes_uid(monkeypatch):
 
     class _Launcher:
         def create_runtime(self, **kwargs):
-            return _Launched(uid="01LAUNCHED", runtime_name="01launched", name=kwargs.get("name", ""))
+            return _Launched(
+                uid="01LAUNCHED", runtime_name="01launched", name=kwargs.get("name", "")
+            )
 
     import agent_runtimes.client as client_module
 

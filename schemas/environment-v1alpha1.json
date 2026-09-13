@@ -84,6 +84,28 @@
     "BuildSpec": {
       "additionalProperties": false,
       "properties": {
+        "dependencyFile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DependencyFileSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "image": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ImageSourceSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "source": {
           "default": "packages",
           "enum": [
@@ -128,6 +150,33 @@
         }
       },
       "title": "Compatibility",
+      "type": "object"
+    },
+    "DependencyFileSpec": {
+      "additionalProperties": false,
+      "description": "A `requirements.txt`, or a `pyproject.toml` with its `uv.lock` (E3-01).\n\n``requirements`` resolves the way ``packages`` does \u2014 the protected\nconstraints merged in, the same solve. ``pyproject`` does not resolve at\nall: its own ``uv.lock`` is verified against the current\n``pyproject.toml`` and exported, never re-solved, because a lock the\nauthor already made is the whole point of bringing one.",
+      "properties": {
+        "content": {
+          "default": "",
+          "title": "Content",
+          "type": "string"
+        },
+        "lockContent": {
+          "default": "",
+          "title": "Lockcontent",
+          "type": "string"
+        },
+        "sourceFormat": {
+          "default": "requirements",
+          "enum": [
+            "requirements",
+            "pyproject"
+          ],
+          "title": "Sourceformat",
+          "type": "string"
+        }
+      },
+      "title": "DependencyFileSpec",
       "type": "object"
     },
     "EnvironmentSpec": {
@@ -234,6 +283,32 @@
         "contentRef"
       ],
       "title": "FileEntry",
+      "type": "object"
+    },
+    "ImageSourceSpec": {
+      "additionalProperties": false,
+      "description": "An existing OCI image, imported as the build's base (E3-04).\n\n``docker.io/library/python:3.12-slim-bookworm``, or pinned by digest \u2014\nresolution pins whichever is given to a digest (D-9), the same way an\napproved base is. Only a registry in ``image_import``'s allowlist is\naccepted while this is public-registries only; ``spec.base`` is not\nvalidated against the approved bases for this source, since the image\nreplaces it.\n\n``credentialSecretId`` names a private registry's credential the same\nway ``BuildSecret.id`` names a build secret \u2014 a spec may reference one,\nwhich is what lets a registry outside the public allowlist through\n``spec_findings`` at all. Nothing yet resolves it into a real credential\nto pull with: that is E3-05's mechanism (build secrets), not built for\nanything today, so a spec that references one still fails at the\nregistry, honestly, rather than pretend private registries work.",
+      "properties": {
+        "credentialSecretId": {
+          "anyOf": [
+            {
+              "pattern": "^dlsec_[0-9A-Za-z]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Credentialsecretid"
+        },
+        "reference": {
+          "default": "",
+          "title": "Reference",
+          "type": "string"
+        }
+      },
+      "title": "ImageSourceSpec",
       "type": "object"
     },
     "Language": {

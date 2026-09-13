@@ -192,7 +192,9 @@ class Host:
         if not os.path.isdir("/proc/1"):
             return None
         try:
-            subprocess.Popen(["sh", "-c", "sleep 0.1 &"]).wait(timeout=5)  # noqa: S607 - the sandbox's own sh
+            # A fixed argv, run in the sandbox's own /bin/sh: not untrusted input.
+            command = ["sh", "-c", "sleep 0.1 &"]
+            subprocess.Popen(command).wait(timeout=5)  # noqa: S603
         except (OSError, subprocess.TimeoutExpired):
             return None
         time.sleep(0.6)

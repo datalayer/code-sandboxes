@@ -35,7 +35,18 @@ from pydantic.alias_generators import to_camel
 from .bases import APPROVED_BASES, ApprovedBase
 from .canonical import canonical_digest
 from .contract import SANDBOX_CONTRACT_V1, SUPPORTED_CONTRACTS
-from .errors import CAPABILITY_UNSUPPORTED, SPEC_INVALID, EnvironmentsError, ErrorCode
+from .errors import (
+    CAPABILITY_UNSUPPORTED,
+    POLICY_DENIED,
+    SPEC_INVALID,
+    EnvironmentsError,
+    ErrorCode,
+)
+from .image_import import (
+    DEFAULT_ALLOWED_REGISTRIES,
+    image_registry_allowed,
+    parse_image_reference,
+)
 from .lifecycle import VersionState
 
 __all__ = [
@@ -53,9 +64,11 @@ __all__ = [
     "BuildSpec",
     "Commands",
     "Compatibility",
+    "DependencyFileSpec",
     "Environment",
     "EnvironmentSpec",
     "FileEntry",
+    "ImageSourceSpec",
     "Language",
     "LockStatus",
     "Metadata",
@@ -69,6 +82,7 @@ __all__ = [
     "VariantSet",
     "VersionStatus",
     "parse_environment",
+    "parse_requirements_txt",
     "spec_digest",
     "spec_findings",
     "validate_environment",
@@ -86,10 +100,13 @@ SIZE_CLASSES: tuple[str, ...] = ("small", "medium", "large", "gpu-small", "gpu-l
 GPU_SIZE_CLASSES: tuple[str, ...] = ("gpu-small", "gpu-large")
 
 BUILD_SOURCES: tuple[str, ...] = ("packages", "dependencyFile", "dockerfile", "image")
-#: What builds today; the other sources come with dependency files, Dockerfiles
-#: and image imports.
-SUPPORTED_BUILD_SOURCES: tuple[str, ...] = ("packages",)
+#: What builds today; `dockerfile` is the one source still to come.
+SUPPORTED_BUILD_SOURCES: tuple[str, ...] = ("packages", "dependencyFile", "image")
 SUPPORTED_PACKAGE_MANAGERS: tuple[str, ...] = ("uv", "pip")
+#: `requirements.txt` and `pyproject.toml`/`uv.lock` are archived on the
+#: version they resolved (E3-01); this bounds what a spec may carry inline,
+#: matching a single file's own cap (`MAX_FILE_BYTES`, below).
+MAX_DEPENDENCY_FILE_BYTES = 1024 * 1024
 
 RESERVED_NAME_PREFIXES: tuple[str, ...] = ("datalayer-", "dl-", "kube-", "system-")
 MAX_NAME_LENGTH = 63
@@ -114,6 +131,10 @@ _CREDENTIAL_VALUE = re.compile(
     r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+|dlsec_[0-9A-Za-z]+"
 )
 _URL_CREDENTIALS = re.compile(r"^[a-z][a-z0-9+.-]*://[^/@\s]+:[^/@\s]*@", re.IGNORECASE)
+#: A control character in an `env` value: the Dockerfile `ENV` line it
+#: becomes is one line, and an embedded newline ends it and starts another
+#: instruction of the value's own choosing (found on PR #27's Copilot review).
+_CONTROL_CHARACTER = re.compile(r"[\x00-\x1f\x7f]")
 
 
 class _Model(BaseModel):
@@ -204,8 +225,50 @@ class Compatibility(_Model):
     regions: list[str] = Field(default_factory=list)
 
 
+class DependencyFileSpec(_Model):
+    """A `requirements.txt`, or a `pyproject.toml` with its `uv.lock` (E3-01).
+
+    ``requirements`` resolves the way ``packages`` does — the protected
+    constraints merged in, the same solve. ``pyproject`` does not resolve at
+    all: its own ``uv.lock`` is verified against the current
+    ``pyproject.toml`` and exported, never re-solved, because a lock the
+    author already made is the whole point of bringing one.
+    """
+
+    source_format: Literal["requirements", "pyproject"] = "requirements"
+    #: The `requirements.txt` text, or the `pyproject.toml` text.
+    content: str = ""
+    #: The `uv.lock` text. Required, and only meaningful, for `pyproject`.
+    lock_content: str = ""
+
+
+class ImageSourceSpec(_Model):
+    """An existing OCI image, imported as the build's base (E3-04).
+
+    ``docker.io/library/python:3.12-slim-bookworm``, or pinned by digest —
+    resolution pins whichever is given to a digest (D-9), the same way an
+    approved base is. Only a registry in ``image_import``'s allowlist is
+    accepted while this is public-registries only; ``spec.base`` is not
+    validated against the approved bases for this source, since the image
+    replaces it.
+
+    ``credentialSecretId`` names a private registry's credential the same
+    way ``BuildSecret.id`` names a build secret — a spec may reference one,
+    which is what lets a registry outside the public allowlist through
+    ``spec_findings`` at all. Nothing yet resolves it into a real credential
+    to pull with: that is E3-05's mechanism (build secrets), not built for
+    anything today, so a spec that references one still fails at the
+    registry, honestly, rather than pretend private registries work.
+    """
+
+    reference: str = ""
+    credential_secret_id: str | None = Field(default=None, pattern=r"^dlsec_[0-9A-Za-z]+$")
+
+
 class BuildSpec(_Model):
     source: Literal["packages", "dependencyFile", "dockerfile", "image"] = "packages"
+    dependency_file: DependencyFileSpec | None = None
+    image: ImageSourceSpec | None = None
 
 
 class EnvironmentSpec(_Model):
@@ -296,6 +359,98 @@ def _index_findings(field: str, url: str) -> list[SpecFinding]:
     return []
 
 
+def parse_requirements_txt(text: str) -> list[str]:
+    """The requirement lines of a `requirements.txt`, comments and blanks dropped.
+
+    A pip option line (`-r`, `--index-url`, and the like) is not a
+    requirement: `requirements.txt` sources take their indexes from
+    `spec.packages.python.indexes`, the same field a `packages` source uses,
+    so there is one place an index is named, not two that could disagree.
+    """
+    lines: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("#"):
+            continue
+        # A `#` is only a comment when whitespace sets it off from what came
+        # before — pip's own rule. A direct reference's own `#egg=…` or
+        # `#sha256=…` fragment has no whitespace in front of it and is part
+        # of the requirement, not a comment to drop.
+        line = re.split(r"\s#", line, maxsplit=1)[0].strip()
+        if not line or line.startswith("-"):
+            continue
+        lines.append(line)
+    return lines
+
+
+def _dependency_file_findings(dependency_file: DependencyFileSpec | None) -> list[SpecFinding]:
+    field = "spec.build.dependencyFile"
+    if dependency_file is None:
+        return [SpecFinding(field, "is required when `spec.build.source` is `dependencyFile`")]
+    # `source_format`'s own type is the full set this phase supports, unlike
+    # `build.source`: nothing here is valid-but-not-yet-buildable, so there is
+    # no gap between what pydantic accepts and what a finding would refuse.
+    findings: list[SpecFinding] = []
+    if not dependency_file.content.strip():
+        name = (
+            "pyproject.toml" if dependency_file.source_format == "pyproject" else "requirements.txt"
+        )
+        findings.append(SpecFinding(f"{field}.content", f"is empty; it is the {name} text"))
+    elif dependency_file.source_format == "requirements":
+        for index, requirement in enumerate(parse_requirements_txt(dependency_file.content)):
+            problem = _requirement_problem(requirement)
+            if problem:
+                findings.append(
+                    SpecFinding(f"{field}.content[{index}]", f"`{requirement}`: {problem}")
+                )
+    if len(dependency_file.content.encode("utf-8")) > MAX_DEPENDENCY_FILE_BYTES:
+        findings.append(
+            SpecFinding(f"{field}.content", f"is over {MAX_DEPENDENCY_FILE_BYTES} bytes")
+        )
+    if dependency_file.source_format == "pyproject":
+        if not dependency_file.lock_content.strip():
+            findings.append(
+                SpecFinding(
+                    f"{field}.lockContent", "is empty; a pyproject source brings its own uv.lock"
+                )
+            )
+        elif len(dependency_file.lock_content.encode("utf-8")) > MAX_DEPENDENCY_FILE_BYTES:
+            findings.append(
+                SpecFinding(f"{field}.lockContent", f"is over {MAX_DEPENDENCY_FILE_BYTES} bytes")
+            )
+    elif dependency_file.lock_content.strip():
+        findings.append(
+            SpecFinding(
+                f"{field}.lockContent",
+                "is only read for a `pyproject` source; a `requirements` source resolves fresh",
+            )
+        )
+    return findings
+
+
+def _image_findings(image: ImageSourceSpec | None) -> list[SpecFinding]:
+    field = "spec.build.image"
+    if image is None:
+        return [SpecFinding(field, "is required when `spec.build.source` is `image`")]
+    if not image.reference.strip():
+        return [SpecFinding(f"{field}.reference", "is empty; it names the image to import")]
+    try:
+        parsed = parse_image_reference(image.reference)
+    except EnvironmentsError as error:
+        return [SpecFinding(f"{field}.reference", error.message)]
+    if not image_registry_allowed(parsed) and not image.credential_secret_id:
+        return [
+            SpecFinding(
+                f"{field}.reference",
+                f"`{parsed.registry}` is not an allowed registry; allowed: "
+                + ", ".join(DEFAULT_ALLOWED_REGISTRIES)
+                + ", or reference a credential for a private one",
+                POLICY_DENIED,
+            )
+        ]
+    return []
+
+
 def spec_findings(
     environment: Environment, *, bases: Mapping[str, ApprovedBase] = APPROVED_BASES
 ) -> list[SpecFinding]:
@@ -326,23 +481,27 @@ def spec_findings(
             )
         )
 
-    base = bases.get(spec.base.ref)
-    if base is None:
-        findings.append(
-            SpecFinding(
-                "spec.base.ref",
-                f"`{spec.base.ref}` is not an approved base; approved: " + ", ".join(bases),
+    # An `image` source brings its own base (E3-04): `spec.base` names
+    # nothing Datalayer approved, so checking it against the table would
+    # refuse every import for the one reason imports exist to avoid.
+    if spec.build.source != "image":
+        base = bases.get(spec.base.ref)
+        if base is None:
+            findings.append(
+                SpecFinding(
+                    "spec.base.ref",
+                    f"`{spec.base.ref}` is not an approved base; approved: " + ", ".join(bases),
+                )
             )
-        )
-    elif spec.language.version not in base.python_versions:
-        findings.append(
-            SpecFinding(
-                "spec.language.version",
-                f"Python {spec.language.version} is not what `{base.ref}` provides "
-                f"({', '.join(base.python_versions)}); "
-                "it is validated against the base, not replaced",
+        elif spec.language.version not in base.python_versions:
+            findings.append(
+                SpecFinding(
+                    "spec.language.version",
+                    f"Python {spec.language.version} is not what `{base.ref}` provides "
+                    f"({', '.join(base.python_versions)}); "
+                    "it is validated against the base, not replaced",
+                )
             )
-        )
 
     if spec.build.source not in SUPPORTED_BUILD_SOURCES:
         findings.append(
@@ -353,6 +512,10 @@ def spec_findings(
                 CAPABILITY_UNSUPPORTED,
             )
         )
+    if spec.build.source == "dependencyFile":
+        findings.extend(_dependency_file_findings(spec.build.dependency_file))
+    elif spec.build.source == "image":
+        findings.extend(_image_findings(spec.build.image))
 
     python = spec.packages.python
     if python.manager not in SUPPORTED_PACKAGE_MANAGERS:
@@ -432,6 +595,10 @@ def spec_findings(
         field = f"spec.env.{key}"
         if not _ENV_NAME.match(key):
             findings.append(SpecFinding(field, f"`{key}` is not an environment variable name"))
+        if _CONTROL_CHARACTER.search(value):
+            findings.append(
+                SpecFinding(field, "carries a control character, which a Dockerfile line cannot")
+            )
         if (
             _CREDENTIAL_NAME.search(key)
             or _CREDENTIAL_VALUE.search(value)
@@ -454,6 +621,17 @@ def spec_findings(
     for index, command in enumerate(spec.commands.post_install):
         if not command.strip():
             findings.append(SpecFinding(f"spec.commands.postInstall[{index}]", "is empty"))
+        elif _CONTROL_CHARACTER.search(command):
+            # Each command becomes one `RUN` line (`files.py`'s baked commands
+            # too): an embedded newline ends it and starts another
+            # instruction — as root, with network, outside what `postInstall`
+            # itself is allowed (found on PR #27's Copilot review).
+            findings.append(
+                SpecFinding(
+                    f"spec.commands.postInstall[{index}]",
+                    "carries a control character, which a Dockerfile line cannot",
+                )
+            )
 
     for attribute, label in (("id", "id"), ("name", "name")):
         values = [getattr(secret, attribute) for secret in spec.build_secrets]
@@ -574,18 +752,20 @@ def validate_environment(
 ) -> Environment:
     """The Environment, or the error its findings amount to.
 
-    A spec with any invalid field is ``DL_ENV_SPEC_INVALID``; one that is
-    valid but asks for what cannot be built yet is
-    ``DL_ENV_CAPABILITY_UNSUPPORTED``. Either way every finding is listed.
+    A spec with any invalid field is ``DL_ENV_SPEC_INVALID`` — a fixable
+    field always outranks the rest, whatever else the spec also asks for.
+    Failing that, the first finding's own code is what is raised: valid but
+    unbuildable yet is ``DL_ENV_CAPABILITY_UNSUPPORTED``, an image off the
+    allowlist is ``DL_ENV_POLICY_DENIED`` (E3-04), and so on for whatever a
+    future rule adds. Either way every finding is listed.
     """
     environment = parse_environment(document)
     findings = spec_findings(environment, bases=bases)
     if findings:
         invalid = [finding for finding in findings if finding.code is SPEC_INVALID]
-        code = SPEC_INVALID if invalid else CAPABILITY_UNSUPPORTED
-        first = (invalid or findings)[0]
+        first = invalid[0] if invalid else findings[0]
         raise EnvironmentsError(
-            code,
+            first.code,
             f"{first.field}: {first.message}",
             detail={"findings": [finding.to_dict() for finding in findings]},
         )

@@ -355,3 +355,34 @@ def test_both_tiers_together_are_decided_by_the_core_tier() -> None:
     )
     assert len(result.checks) == len(CORE_CHECKS) + len(EXTENDED_CHECKS)
     assert result.passed
+
+
+def test_extended_naming_contract_or_timeout_does_not_crash(monkeypatch) -> None:
+    """`run_extended_tier(contract=..., timeout=..., **dict(extended))` used
+    to raise `got multiple values for keyword argument` the moment `extended`
+    named either one itself (found on PR #27's Copilot review). `contract`
+    and `timeout` are `run_conformance`'s own, shared across both tiers, so
+    they win over a same-named entry in `extended`; a genuinely extended-only
+    option still passes through."""
+    from code_sandboxes.environments import conformance as conformance_module
+    from code_sandboxes.environments.contract import SANDBOX_CONTRACT_V1
+
+    seen: dict[str, object] = {}
+    real = conformance_module.run_extended_tier
+
+    def spying(sandbox, **kwargs):
+        seen.update(kwargs)
+        return real(sandbox, **kwargs)
+
+    monkeypatch.setattr(conformance_module, "run_extended_tier", spying)
+    sandbox = ScriptedSandbox({12: {"mibPerSecond": 1.0}})
+    run_conformance(
+        sandbox,
+        python_version="3.12",
+        expected_packages=PACKAGES,
+        restart=sandbox.restart,
+        timeout=120.0,
+        extended={"timeout": 5.0, "contract": SANDBOX_CONTRACT_V1, "concurrent_kernels": 2},
+    )
+    assert seen["timeout"] == 120.0
+    assert seen["concurrent_kernels"] == 2

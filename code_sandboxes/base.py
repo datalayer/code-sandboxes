@@ -499,6 +499,7 @@ class Sandbox(ABC):
         timeout: float | None = None,
         name: str | None = None,
         environment: str | None = None,
+        environment_version: str | int | None = None,
         gpu: str | None = None,
         cpu: float | None = None,
         memory: int | None = None,
@@ -507,6 +508,7 @@ class Sandbox(ABC):
         allowed_hosts: list[str] | None = None,
         tags: dict[str, str] | None = None,
         examples: list[tuple[str, str]] | None = None,
+        artifact: Any = None,
         **kwargs,
     ) -> Sandbox:
         """Factory method to create a sandbox of the specified variant.
@@ -525,7 +527,12 @@ class Sandbox(ABC):
             config: Optional full configuration object (overrides individual params).
             timeout: Default timeout for code execution in seconds.
             name: Optional name for the sandbox.
-            environment: Runtime environment (e.g., "ai-agents-env").
+            environment: Runtime environment (e.g., "ai-agents-env"), or a user
+                environment as "<account-handle>/<name>" or by its uid.
+            environment_version: Which version of a user environment to launch:
+                its number, or a version uid. Without one the promoted version
+                launches, which is what a platform environment always does.
+                Only the datalayer variant has versions (PLAN_ENV.md, E1-19).
             gpu: GPU type to use (e.g., "T4", "A100", "H100"). Only for datalayer.
             cpu: CPU cores to allocate.
             memory: Memory limit in MB.
@@ -559,6 +566,7 @@ class Sandbox(ABC):
             config = SandboxConfig(
                 timeout=timeout or 30.0,
                 environment=environment or DEFAULT_ENVIRONMENT,
+                environment_version=environment_version,
                 memory_limit=memory * 1024 * 1024 if memory else None,
                 cpu_limit=cpu,
                 env_vars=env or {},
@@ -581,6 +589,17 @@ class Sandbox(ABC):
         from .eval_sandbox import EvalSandbox
 
         variant_value = normalize_variant(variant)
+
+        if artifact is not None:
+            # One neutral reference, translated into the argument its variant
+            # takes: a template build for E2B, a snapshot for Daytona, an
+            # image id for Modal (PLAN_ENV.md E2-02). A caller holding an
+            # Environment's artifact should not have to know which. What the
+            # caller passed itself wins, so naming both is not a surprise.
+            from .environments.builders import launch_arguments
+
+            for name_, value in launch_arguments(artifact, expected_variant=variant_value).items():
+                kwargs.setdefault(name_, value)
 
         if variant_value == "eval":
             sandbox = EvalSandbox(config=config, **kwargs)
@@ -1059,7 +1078,7 @@ class Sandbox(ABC):
             from .exceptions import VariableNotFoundError
 
             raise VariableNotFoundError(name)
-        return _json.loads(printed[start + len(self._STDOUT_START):end])
+        return _json.loads(printed[start + len(self._STDOUT_START) : end])
 
     def set_variable(self, name: str, value: Any, context: Context | None = None) -> None:
         """Set a variable in the sandbox.

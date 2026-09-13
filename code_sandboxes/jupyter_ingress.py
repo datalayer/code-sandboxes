@@ -97,8 +97,7 @@ def interrupt_kernel_client(client: Any, *, variant: str) -> bool:
         return False
     try:
         client.interrupt()
-    except Exception as error:  # noqa: BLE001 - a failed interrupt is an answer
+    except Exception as error:
         logger.warning("The %s kernel could not be interrupted: %s", variant, error)
         return False
     return True
-

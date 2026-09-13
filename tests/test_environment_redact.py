@@ -204,9 +204,7 @@ def test_a_private_key_read_a_character_at_a_time_is_not_released_in_parts() -> 
 
 
 def test_chunks_hold_at_most_their_bytes_end_after_a_line_and_are_numbered_in_order() -> None:
-    lines = "".join(
-        f"line {n}: héllo wörld ✓ {SECRET if n % 7 == 0 else ''}\n" for n in range(400)
-    )
+    lines = "".join(f"line {n}: héllo wörld ✓ {SECRET if n % 7 == 0 else ''}\n" for n in range(400))
     chunks = chunked(lines, [SECRET], size=37, max_bytes=1024, first_sequence=5)
     assert len(chunks) > 3
     assert [chunk.sequence for chunk in chunks] == list(range(5, 5 + len(chunks)))

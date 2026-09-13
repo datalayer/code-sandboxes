@@ -8,6 +8,47 @@
 
 ## Unreleased
 
+## 1.8.0
+
+- **The Datalayer builder** (`environments.adapters.datalayer`, PLAN_ENV.md
+  E1-07). The Dockerfile is generated from the lock — `uv pip sync --require-hashes`, apt at the versions the lock recorded, `env` before
+  anything installs, `postInstall` as uid 1000 with no network — and the push
+  is by digest with an SBOM and provenance attestation, under the operability
+  tag `v<n>-<build_uid>` so a retried build cannot collide with the attempt
+  before it. `inspect`, `resolve`, `exists` and `delete` go through the ECR
+  API. Needs the `environments-builder` extra.
+- **The scan and the signature** (`environments.policy`,
+  `environments.attest`, E1-08, E1-09). A critical finding with a fixed
+  version blocks and one nothing fixes is recorded; the decision record keeps
+  the threshold it was decided under, so what stopped a build reads a month
+  later. cosign signs only once the scan passed, and a replay finds the
+  signature rather than pushing a second.
+- **A sandbox launches from an artifact** (E2-02): `Sandbox.create(artifact=…)`
+  hands each variant its own argument — an E2B template build, a Daytona
+  snapshot, a Modal image id through `Image.from_id`.
+- **Fixed, and a live defect:** Daytona's adapter took the image branch
+  whenever resources were requested, so a snapshot asked for with `cpu=` came
+  up from a plain Debian image running none of the snapshot's content, with
+  nothing saying so. The combination is refused (correction 13).
+
+## 1.7.0
+
+- **A version is resolved into one lock** (`code_sandboxes.environments.resolve`,
+  PLAN_ENV.md E1-04, D-9). Datalayer's protected constraints are merged over the
+  user's requirements — a requirement that agrees with a pin is dropped for it,
+  one that contradicts it is `DL_ENV_PROTECTED_PACKAGE` with the supported range
+  — the base is resolved to a digest per requested variant, and uv's refusals
+  are read into the error taxonomy: a conflict with the pair that cannot hold, a
+  package no index has, a protected pin, and `DL_ENV_PROVIDER_ERROR`, which is
+  retryable, for a failure that is not about the version.
+
+  The lock is uv's hashed output with the apt pins and the protected pins above
+  it as comments: one document that says everything a build installs, and still
+  a requirements file. `BuildkitResolveRunner` is D-9's solve, `FROM` the
+  resolved base digest; `LocalResolveRunner` runs `uv` where it is called, for
+  `plane local`, and refuses to pin apt rather than lock another
+  distribution's versions.
+
 - **Every variant has a real interrupt now, and can be reached to give it.**
   `Sandbox.interrupt` is two gates — `_executing_event` must be set, then
   `_do_interrupt` must answer — and seven variants failed one of them, each in
@@ -38,8 +79,7 @@
   pinned exceptions left.
 
 - A Datalayer sandbox says when it is running code, so an interrupt can reach
-  it. `Sandbox.interrupt` refuses before it delegates — `if not
-  self._executing_event.is_set(): return False` — and `run_code` never set that
+  it. `Sandbox.interrupt` refuses before it delegates — `if not self._executing_event.is_set(): return False` — and `run_code` never set that
   event, so `is_executing` was always False, every interrupt was refused at the
   door, and the refusal was reported as "no code was running" to a caller
   watching a cell run.

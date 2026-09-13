@@ -222,8 +222,13 @@ class _DatalayerHarness(_Harness):
             def __init__(self, api_key=None, urls=None):
                 del api_key, urls
 
-            def create_runtime(self, name, environment, time_reservation, snapshot_name=None):
-                del name, environment, time_reservation, snapshot_name
+            def create_runtime(
+                self, name, environment, time_reservation, snapshot_name=None, version=None
+            ):
+                # `version` pins which build of a user environment runs
+                # (PLAN_ENV.md E1-19): the real client takes it, so this double
+                # has to, or the sandbox looks broken here and works in prod.
+                del name, environment, time_reservation, snapshot_name, version
                 harness.runtimes.append(Runtime())
                 return harness.runtimes[-1]
 

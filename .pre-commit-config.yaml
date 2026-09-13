@@ -9,6 +9,11 @@ repos:
       - id: check-case-conflict
       - id: check-executables-have-shebangs
       - id: requirements-txt-fixer
+        # Datalayer's protected constraints (PLAN_ENV.md, E1-04): the header
+        # explains why it is ordered the way it is, and the fixer's sort
+        # would push that header below a package line rather than order the
+        # packages beneath it.
+        exclude: ^code_sandboxes/environments/constraints/sandbox-contract-v1\.txt$
       - id: check-added-large-files
       - id: check-case-conflict
       - id: check-toml

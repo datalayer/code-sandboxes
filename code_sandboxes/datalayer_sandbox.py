@@ -55,7 +55,6 @@ from .models import (
     SnapshotInfo,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -475,11 +474,19 @@ class DatalayerSandbox(Sandbox):
             # Build sandbox name
             sandbox_name = self.config.name or f"sandbox-{self._sandbox_id[:8]}"
 
+            # Which VERSION of that environment, passed through as the
+            # environment is (PLAN_ENV.md, E1-19). `None` means the promoted
+            # version, which is what every platform environment launches — and
+            # what every sandbox launched before there were versions asked for.
+            # The GPU rewrite above is left exactly as it is until E4-11 (D-20).
+            environment_version = self.config.environment_version
+
             # Create the runtime (optionally from snapshot)
             if self._snapshot_name:
                 self._runtime = self._client.create_runtime(
                     name=sandbox_name,
                     environment=environment,
+                    version=environment_version,
                     time_reservation=time_reservation,
                     snapshot_name=self._snapshot_name,
                 )
@@ -487,6 +494,7 @@ class DatalayerSandbox(Sandbox):
                 self._runtime = self._client.create_runtime(
                     name=sandbox_name,
                     environment=environment,
+                    version=environment_version,
                     time_reservation=time_reservation,
                 )
 
@@ -571,10 +579,11 @@ class DatalayerSandbox(Sandbox):
         **This variant neither implemented it nor read the flag**, so the
         base class's default ran instead: it sets a flag, returns `True`, and
         stops nothing. (`google_colab` and `kaggle` are entitled to that
-        default — they poll `_interrupt_requested` and stop cooperatively.) Everything above believed it. `tasks/cancel` marks a
-        task `cancelled` and calls the interrupt registered by
-        `execute_cell`; the interrupt answered yes; the cell went on running
-        on a runtime that goes on being billed.
+        default — they poll `_interrupt_requested` and stop cooperatively.)
+        Everything above believed it. `tasks/cancel` marks a task `cancelled`
+        and calls the interrupt registered by `execute_cell`; the interrupt
+        answered yes; the cell went on running on a runtime that goes on
+        being billed.
 
         Measured on prod1 on 2026-09-07: a cell looping for two minutes,
         cancelled ten seconds in, `tasks/cancel` and `tasks/get` both
@@ -594,13 +603,11 @@ class DatalayerSandbox(Sandbox):
         """
         client = getattr(self._runtime, "sandbox_client", None)
         if client is None:
-            logger.warning(
-                "This sandbox has no runtime client, so nothing could be interrupted"
-            )
+            logger.warning("This sandbox has no runtime client, so nothing could be interrupted")
             return False
         try:
             return bool(client.interrupt())
-        except Exception as error:  # noqa: BLE001 - a failed interrupt is an answer
+        except Exception as error:
             logger.warning("The runtime's kernel could not be interrupted: %s", error)
             return False
 
@@ -808,7 +815,9 @@ class DatalayerSandbox(Sandbox):
         try:
             # Set environment variables if provided
             if envs:
-                env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
+                env_code = "\n".join(
+                    f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items()
+                )
                 self._runtime.execute(env_code)
 
             response = self._runtime.execute(code, timeout=execution_timeout)

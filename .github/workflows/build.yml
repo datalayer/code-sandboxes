@@ -16,7 +16,7 @@ jobs:
     uses: ./.github/workflows/reusable-python.yml
     with:
       python-version: ${{ matrix.python-version }}
-      install-extras: test,typing
+      install-extras: test,typing,datalayer
       extra-packages: dbus-python keyring secretstorage
       run-tests: true
       test-command: pytest tests/ --cov=code_sandboxes --cov-report term-missing

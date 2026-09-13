@@ -21,16 +21,18 @@ from __future__ import annotations
 
 import importlib
 import re
-from typing import Protocol, runtime_checkable
+from collections.abc import Mapping
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..models import normalize_variant
-from .errors import CAPABILITY_UNSUPPORTED, EnvironmentsError
+from .errors import CAPABILITY_UNSUPPORTED, SPEC_INVALID, EnvironmentsError
 from .spec import VARIANTS, Environment
 
 __all__ = [
     "BUILDER_MODULES",
+    "LAUNCH_ARGUMENTS",
     "ArtifactMetadata",
     "ArtifactReference",
     "BuildRequest",
@@ -42,6 +44,7 @@ __all__ = [
     "ValidationResult",
     "builder_contract_violations",
     "get_builder",
+    "launch_arguments",
 ]
 
 _OCI_DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
@@ -196,6 +199,86 @@ class EnvironmentBuilder(Protocol):
     def exists(self, artifact: ArtifactReference) -> bool: ...
 
     def delete(self, artifact: ArtifactReference) -> None: ...
+
+
+#: What launching an artifact means to each variant that has one to launch
+#: (PLAN_ENV.md E2-02). `datalayer` is not here on purpose: see
+#: :func:`launch_arguments`. A variant added to `VARIANTS` without a line here
+#: refuses to launch an artifact, and `test_environment_builders.py` says so.
+LAUNCH_ARGUMENTS: dict[str, str] = {
+    "e2b": "template",
+    "daytona": "snapshot",
+    "modal": "image_id",
+}
+
+
+def launch_arguments(
+    artifact: ArtifactReference | Mapping[str, Any], *, expected_variant: str | None = None
+) -> dict[str, Any]:
+    """What launching this artifact means to its variant (PLAN_ENV.md E2-02).
+
+    One neutral reference in, one variant's own argument out: E2B launches a
+    template build, Daytona a snapshot id, Modal an image id. A caller that
+    has an artifact should not have to know which.
+
+    The Datalayer variant is deliberately not here. A sandbox of it is started
+    by the platform, which resolves the version's artifact itself and hands the
+    digest to the Operator over a route only Runtimes may call (E1-10, E1-11):
+    a client passing a digest could name an artifact of somebody else's
+    environment, so it names the environment and the version instead.
+
+    ``expected_variant``, when given, must be the artifact's own — the caller
+    that asked to launch on one variant handed an artifact of another's,
+    which the wrong keyword argument would otherwise carry silently into that
+    variant's own launch, starting its default image rather than the artifact
+    named (found on PR #27's Copilot review).
+    """
+    reference = artifact if isinstance(artifact, ArtifactReference) else None
+    if reference is None:
+        if not isinstance(artifact, Mapping):
+            raise EnvironmentsError(
+                SPEC_INVALID,
+                "an artifact is an ArtifactReference, or the mapping of one",
+                detail={"artifact": str(artifact)[:120]},
+            )
+        reference = ArtifactReference.model_validate(
+            {to_snake(name): value for name, value in artifact.items()}
+        )
+    variant = reference.variant
+    if expected_variant is not None and variant != expected_variant:
+        raise EnvironmentsError(
+            SPEC_INVALID,
+            f"this artifact is `{variant}`'s, not `{expected_variant}`'s",
+            detail={"variant": expected_variant, "artifact_variant": variant},
+        )
+    if variant == "datalayer":
+        raise EnvironmentsError(
+            CAPABILITY_UNSUPPORTED,
+            "A Datalayer sandbox is launched by naming the environment and the version: the "
+            "platform resolves the artifact itself, and hands its digest to the Operator over "
+            "a route only Runtimes may call",
+            detail={"variant": variant, "reference": reference.immutable_reference},
+        )
+    argument = LAUNCH_ARGUMENTS.get(variant)
+    if argument is None:
+        raise EnvironmentsError(
+            CAPABILITY_UNSUPPORTED,
+            f"the {variant} variant launches no artifact of an Environment",
+            detail={"variant": variant},
+        )
+    return {argument: reference.immutable_reference}
+
+
+def to_snake(name: str) -> str:
+    """`immutableReference` as `immutable_reference`: a mapping read either way."""
+    out: list[str] = []
+    for character in str(name):
+        if character.isupper():
+            out.append("_")
+            out.append(character.lower())
+        else:
+            out.append(character)
+    return "".join(out)
 
 
 #: Where each variant's builder lives, imported only when that variant is asked for.

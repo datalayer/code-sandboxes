@@ -843,6 +843,11 @@ class DatalayerSandboxManager(SandboxManager):
         environment = kwargs.pop("environment", None)
         chosen = {
             "environment": environment_name or environment,
+            # The version of a user environment, read from the config by the
+            # sandbox exactly as the environment is (PLAN_ENV.md, E1-19); left
+            # in the extra arguments it would be dropped, and the CLI would
+            # launch the promoted version while claiming to pin one.
+            "environment_version": kwargs.pop("environment_version", None),
             "name": kwargs.pop("name", None),
             "gpu": kwargs.pop("gpu", None),
         }

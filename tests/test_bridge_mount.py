@@ -669,7 +669,9 @@ class _Socket:
         self.closed = True
 
 
-def _protocol_module(monkeypatch, *, established: list, name: str = "datalayer_core.contents_bridge_protocol"):
+def _protocol_module(
+    monkeypatch, *, established: list, name: str = "datalayer_core.contents_bridge_protocol"
+):
     """The frame protocol, faked: a client that records its transport and
     channel, a channel that records the handshake.
 
@@ -882,9 +884,13 @@ def test_a_node_agents_mount_is_reachable_by_the_sandbox_user(monkeypatch):
     owned by root and unwritable.
     """
     seen: dict = {}
-    monkeypatch.setattr(bm, "_FUSE", lambda ops, path, **options: seen.update(options=options, ops=ops))
+    monkeypatch.setattr(
+        bm, "_FUSE", lambda ops, path, **options: seen.update(options=options, ops=ops)
+    )
 
-    bm.mount_with_fuse(bm.BridgeOperations(object(), mode="rw", uid=1000, gid=100), "/m", "rw", allow_other=True)
+    bm.mount_with_fuse(
+        bm.BridgeOperations(object(), mode="rw", uid=1000, gid=100), "/m", "rw", allow_other=True
+    )
 
     assert seen["options"]["allow_other"] is True
     assert (seen["ops"].uid, seen["ops"].gid) == (1000, 100)
@@ -936,11 +942,13 @@ def test_the_mount_sends_its_hello_only_after_the_pairing():
     request as one: `the peer's hello is not an X25519 public key`, over and
     over, reconnecting into the same race each time.
     """
-    relay = _Relay([
-        json.dumps({"event": "accepted", "role": "mount"}),
-        json.dumps({"event": "paired"}),
-        b"x" * 32,
-    ])
+    relay = _Relay(
+        [
+            json.dumps({"event": "accepted", "role": "mount"}),
+            json.dumps({"event": "paired"}),
+            b"x" * 32,
+        ]
+    )
     frames = bm._RelayFrames(relay)
     frames.wait_paired()
     # Nothing has been sent by `wait_paired` itself, and the frame after the
@@ -959,11 +967,13 @@ def test_waiting_for_the_pairing_still_ends_on_a_terminal_announcement():
 
 def test_a_binary_frame_before_the_pairing_is_from_a_pairing_that_is_over():
     """Left over from the previous peer; it is not this pairing's hello."""
-    relay = _Relay([
-        b"stale",
-        json.dumps({"event": "paired"}),
-        b"y" * 32,
-    ])
+    relay = _Relay(
+        [
+            b"stale",
+            json.dumps({"event": "paired"}),
+            b"y" * 32,
+        ]
+    )
     frames = bm._RelayFrames(relay)
     frames.wait_paired()
     assert frames.recv() == b"y" * 32
@@ -1013,11 +1023,13 @@ def test_the_hello_reaches_the_client_when_this_end_connects_first(monkeypatch):
     """
     established: list = []
     _protocol_module(monkeypatch, established=established)
-    relay = _DroppingRelay([
-        json.dumps({"event": "accepted", "role": "mount"}),
-        json.dumps({"event": "paired"}),
-        b"client-public-key",
-    ])
+    relay = _DroppingRelay(
+        [
+            json.dumps({"event": "accepted", "role": "mount"}),
+            json.dumps({"event": "paired"}),
+            b"client-public-key",
+        ]
+    )
     monkeypatch.setattr(bm, "_open_websocket", lambda url: relay)
 
     bm.connect_relay(

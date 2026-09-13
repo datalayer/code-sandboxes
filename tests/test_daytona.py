@@ -648,3 +648,41 @@ def test_the_provider_says_what_it_needs():
     assert not provider.is_available({})
     assert provider.is_available({"DAYTONA_API_KEY": "dtn_key"})
     assert provider.is_available({"DAYTONA_JWT_TOKEN": "jwt", "DAYTONA_ORGANIZATION_ID": "org"})
+
+
+def test_a_snapshot_with_resources_is_refused_rather_than_silently_dropped():
+    """PLAN_ENV.md correction 13: this used to take the image branch.
+
+    A Daytona snapshot bakes in CPU, memory, disk and GPU and is
+    region-scoped. Asking for resources beside one asks for two different
+    machines, and what came back was a Debian image with the resources and
+    none of the snapshot's content — with nothing saying so. A resource change
+    is a new snapshot (E2-02).
+    """
+    pytest.importorskip("daytona")
+
+    for asked in (
+        {"cpu_limit": 2.0},
+        {"memory_limit": 4 * 1024**3},
+        {"gpu": "H100"},
+    ):
+        sandbox = _started(SandboxConfig(**asked), snapshot="dl-geo-v3")
+        with pytest.raises(SandboxConfigurationError, match="carries its own"):
+            sandbox._create_params(pytest.importorskip("daytona"))
+
+
+def test_a_snapshot_and_an_image_together_are_refused():
+    """Two things to start from is not a preference: it is a mistake."""
+    daytona = pytest.importorskip("daytona")
+
+    sandbox = _started(SandboxConfig(), snapshot="dl-geo-v3", image="python:3.13-slim")
+    with pytest.raises(SandboxConfigurationError, match="two different things"):
+        sandbox._create_params(daytona)
+
+
+def test_a_snapshot_alone_still_creates_from_the_snapshot():
+    daytona = pytest.importorskip("daytona")
+
+    params = _started(SandboxConfig(), snapshot="dl-geo-v3")._create_params(daytona)
+    assert isinstance(params, daytona.CreateSandboxFromSnapshotParams)
+    assert params.snapshot == "dl-geo-v3"
