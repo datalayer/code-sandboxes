@@ -57,6 +57,14 @@ class ManagedBuilder:
     title = ""
     #: Whether this provider runs a GPU at all (D-20, E2-17).
     gpu = False
+    #: Whether this provider has a mechanism to inject a build secret into
+    #: exactly the step that names it, without baking it into the image or
+    #: an intermediate layer (E0-04, E3-05). Modal does (a `Secret` scoped to
+    #: the build steps that name it); E2B and Daytona do not — E0-04's spike
+    #: found only a registry login for each, never an arbitrary named
+    #: secret — so they refuse a spec naming one, rather than silently drop
+    #: it or bake it in.
+    supports_build_secrets = True
     #: The build sources it will accept in this phase.
     build_sources: tuple[str, ...] = ("packages",)
     package_managers: tuple[str, ...] = ("uv", "pip")
@@ -178,6 +186,19 @@ class ManagedBuilder:
                         field="spec.compatibility.regions",
                     )
                 )
+        if not self.supports_build_secrets and spec.build_secrets:
+            findings.append(
+                CapabilityFinding(
+                    code=CAPABILITY_UNSUPPORTED.code,
+                    message=(
+                        f"{self.title} has no per-step secret mechanism E0-04 could find — only "
+                        "a registry login, never an arbitrary named secret — so `buildSecrets` "
+                        "cannot be injected without baking it into the image. Build datalayer or "
+                        "modal, which mount one per step, or drop the secret"
+                    ),
+                    field="spec.buildSecrets",
+                )
+            )
         return findings
 
     def _own_findings(

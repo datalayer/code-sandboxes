@@ -44,6 +44,9 @@ class Builder(ManagedBuilder):
     title = "Daytona"
     #: Daytona runs GPUs, on its own hardware and the owner's account (E2-17).
     gpu = True
+    #: E0-04's spike found only a registry login for the private base, never
+    #: a per-step arbitrary named secret (E3-05): `buildSecrets` is refused.
+    supports_build_secrets = False
     #: The targets the owner's organization may build in. Empty until E2-04
     #: reads them from the organization: refusing a region nobody has listed
     #: would refuse every region.

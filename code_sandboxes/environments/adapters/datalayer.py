@@ -57,6 +57,7 @@ from ..builders import (
     CapabilitySet,
     ValidationResult,
 )
+from ..build_secrets import resolve_build_secret
 from ..contract import SANDBOX_CONTRACT_V1
 from ..errors import (
     ARTIFACT_MISSING,
@@ -68,7 +69,7 @@ from ..errors import (
 )
 from ..files import files_step
 from ..resolve import WHEELHOUSE_IMAGE_PATH, WHEELHOUSE_PATH, apt_pins_in, locked_versions
-from ..spec import Environment
+from ..spec import BuildSecret, Environment
 
 __all__ = ["ECR_ENVIRONMENT_PREFIX", "Builder", "owner_repository"]
 
@@ -92,6 +93,20 @@ def owner_repository(owner_uid: str, environment_name: str) -> str:
     if not owner_uid or not environment_name:
         raise ValueError("an owner and an environment name make the repository")
     return f"{ECR_ENVIRONMENT_PREFIX}{owner_uid}/{environment_name}"
+
+
+def _secret_mount(secret: BuildSecret) -> str:
+    """The ``--mount=type=secret`` flag one `BuildSecret` renders as (E3-05).
+
+    ``env``: the value is set as the named environment variable for the
+    ``RUN``'s shell only. ``file``: the value is a file under
+    ``/run/secrets/<name>`` for the same one ``RUN`` — never a path under
+    ``/opt/datalayer`` or the working directory, so nothing written to disk
+    for this step is still there once the layer is committed.
+    """
+    if secret.mount_as == "file":
+        return f"--mount=type=secret,id={secret.id},target=/run/secrets/{secret.name}"
+    return f"--mount=type=secret,id={secret.id},env={secret.name}"
 
 
 class Builder:
@@ -134,6 +149,7 @@ class Builder:
         ecr: Any = None,
         run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
         max_build_seconds: int = DEFAULT_MAX_BUILD_SECONDS,
+        resolve_secret: Callable[..., str] = resolve_build_secret,
     ) -> None:
         self._log = log or (lambda _line: None)
         self._credential = credential
@@ -143,6 +159,10 @@ class Builder:
         self._ecr = ecr
         self._run = run or subprocess.run
         self._max_build_seconds = max_build_seconds
+        #: How one `BuildSecret`'s value is fetched, at the moment the step
+        #: that names it runs (E3-05). `resolve_build_secret` by default;
+        #: overridden in tests so nothing here needs a reachable IAM.
+        self._resolve_secret = resolve_secret
 
     # -- What this variant can do ---------------------------------------------
 
@@ -285,13 +305,15 @@ class Builder:
                 "/opt/datalayer/lock.txt",
             ]
         )
-        if request.build_secret_ids:
-            # Mounted for the step that needs it and nowhere else, so nothing
-            # reaches a layer (§4.1, D-11).
-            for secret_id in request.build_secret_ids:
-                lines.append(
-                    f"RUN --mount=type=secret,id={secret_id} test -s /run/secrets/{secret_id}"
-                )
+        # A build secret is mounted on the postInstall step and nowhere else
+        # (§4.1, D-11): never an `ARG` or `ENV`, which bakes a value into the
+        # image's history, and never the package-install or files steps,
+        # which no secret is declared for. `--mount=type=secret` is a
+        # BuildKit mount: the value is available to the one `RUN`'s shell and
+        # never written to a layer.
+        wanted = set(request.build_secret_ids)
+        secrets = [secret for secret in spec.build_secrets if secret.id in wanted]
+        secret_mounts = " ".join(_secret_mount(secret) for secret in secrets)
         baked = files_step(request.environment, variant=self.variant)
         if baked:
             lines.append("USER 1000:100")
@@ -301,10 +323,11 @@ class Builder:
         if spec.commands.post_install:
             lines.append("USER 1000:100")
             lines.append("WORKDIR /home/datalayer/content")
+            prefix = "RUN --network=none " + (f"{secret_mounts} " if secret_mounts else "")
             for command in spec.commands.post_install:
                 # No network: a command that fetches something makes an
                 # artifact whose contents depend on the day it was built.
-                lines.append(f"RUN --network=none {command}")
+                lines.append(f"{prefix}{command}")
         lines.extend(
             [
                 "USER 1000:100",
@@ -348,6 +371,7 @@ class Builder:
                 wheelhouse.mkdir()
                 for wheel in WHEELHOUSE_PATH.glob("*.whl"):
                     (wheelhouse / wheel.name).write_bytes(wheel.read_bytes())
+            secret_args = self._secret_files(request, root)
             metadata = root / "metadata.json"
             command = [
                 self._buildctl,
@@ -375,6 +399,7 @@ class Builder:
                 "--metadata-file",
                 str(metadata),
                 *self._cache_options(request),
+                *secret_args,
             ]
             self._log(f"Building {reference} from {request.resolved_base}")
             finished = self._invoke(command, timeout=self._max_build_seconds)
@@ -578,6 +603,34 @@ class Builder:
             "--export-cache",
             f"type=registry,ref={cache},mode=max,image-manifest=true,oci-mediatypes=true",
         ]
+
+    def _secret_files(self, request: BuildRequest, root: Path) -> list[str]:
+        """Resolve every declared build secret and hand ``buildctl`` a ``--secret`` per one (E3-05).
+
+        Each value is written to its own file under ``root`` — the same
+        `TemporaryDirectory` the Dockerfile and lock already live in for this
+        one build, removed the moment `build` returns, on success or failure
+        — with owner-only permissions, and named opaquely by the secret's id
+        rather than its name, so a directory listing does not itself say what
+        a secret is for. ``buildctl``'s own ``--secret id=<id>,src=<path>``
+        reads the file directly; the value is never held as an argv string,
+        which a process listing on the same host could read.
+
+        Raises whatever `resolve_build_secret` raises when a secret cannot be
+        resolved (`DL_ENV_BUILD_SECRET_UNAVAILABLE`) — a build never starts
+        with a secret it could not get, rather than silently building
+        without it.
+        """
+        wanted = set(request.build_secret_ids)
+        secrets = [secret for secret in request.environment.spec.build_secrets if secret.id in wanted]
+        args: list[str] = []
+        for secret in secrets:
+            value = self._resolve_secret(secret, owner_uid=request.owner_uid)
+            path = root / f"secret-{secret.id}"
+            path.write_text(value, encoding="utf-8")
+            path.chmod(0o600)
+            args += ["--secret", f"id={secret.id},src={path}"]
+        return args
 
     def _invoke(self, command: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
         directory = self._docker_config_directory()

@@ -232,12 +232,56 @@ class TestTheDockerfileItGenerates:
         # Never the loose list: that is the whole point of resolving once.
         assert "geopandas==1.1.1" not in dockerfile
 
-    def test_a_build_secret_is_mounted_for_its_step_alone(self) -> None:
-        request = a_request(build_secret_ids=("dlsec_abc",))
+    def test_a_build_secret_is_mounted_for_the_postinstall_step_alone(self) -> None:
+        """Mounted on the `postInstall` `RUN` alone — never an `ARG`/`ENV`,
+        which bakes a value into the image's history, and never the
+        package-install or files steps, which name no secret (§4.1, D-11)."""
+        request = a_request(
+            spec={
+                "buildSecrets": [
+                    {"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}
+                ]
+            },
+            build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
+        )
         dockerfile = a_builder().dockerfile(request)
-        assert "--mount=type=secret,id=dlsec_abc" in dockerfile
-        # Nowhere else, and never in a layer.
-        assert dockerfile.count("dlsec_abc") == 2
+        lines = dockerfile.splitlines()
+        mount_lines = [line for line in lines if "--mount=type=secret" in line]
+        assert mount_lines == [
+            "RUN --network=none --mount=type=secret,id=dlsec_01J9BUILDSECRET0000000000,"
+            "env=PIP_TOKEN python -c 'import geopandas'"
+        ]
+        # Nowhere else in the Dockerfile: no `ARG`/`ENV` line, and no other
+        # `RUN` mentions the id or the value's own name.
+        assert not any(line.startswith(("ARG", "ENV")) and "PIP_TOKEN" in line for line in lines)
+        assert sum(1 for line in lines if "dlsec_01J9BUILDSECRET0000000000" in line) == 1
+
+    def test_a_file_mounted_build_secret_targets_run_secrets(self) -> None:
+        request = a_request(
+            spec={
+                "buildSecrets": [
+                    {
+                        "id": "dlsec_01J9BUILDSECRET0000000000",
+                        "name": "netrc",
+                        "mountAs": "file",
+                    }
+                ]
+            },
+            build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
+        )
+        dockerfile = a_builder().dockerfile(request)
+        assert (
+            "--mount=type=secret,id=dlsec_01J9BUILDSECRET0000000000,target=/run/secrets/netrc"
+            in dockerfile
+        )
+
+    def test_an_undeclared_build_secret_id_mounts_nothing(self) -> None:
+        """`build_secret_ids` names what this build resolved; an id the spec
+        never declared is not a secret this build can mount (a mismatch
+        between the two is a caller's bug, not something to render blindly)."""
+        request = a_request(build_secret_ids=("dlsec_not_in_the_spec00000",))
+        dockerfile = a_builder().dockerfile(request)
+        assert "--mount=type=secret" not in dockerfile
 
     def test_an_imported_image_bootstraps_uv_from_its_own_wheelhouse(self) -> None:
         """An imported image (E3-04) is not baked with `uv` or the fork's
