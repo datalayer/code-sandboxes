@@ -1,0 +1,174 @@
+name: Environments Live Matrix
+
+# The managed Environment builders (E2-03, E2-04, E2-05) against the real
+# providers, nightly (PLAN_ENV.md E2-11): a real, hash-verified lock, a real
+# build, a real launch, and the formal core tier — tests/test_environment_live_matrix.py.
+#
+# E2B and Modal carry their own already-documented, unticked gaps there
+# (E2-03's uid/gid mismatch; modal_sandbox.py's missing setpriv) and are
+# `xfail(strict=False)` in that file, so an ordinary failure there is
+# expected and does not fail this workflow. Daytona carries no such marker:
+# a failure there is a real regression, and this workflow opens (or
+# comments on) an issue naming it.
+#
+# Needs, as repository secrets: E2B_API_KEY, DAYTONA_API_KEY, MODAL_TOKEN_ID,
+# MODAL_TOKEN_SECRET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY — the last two
+# scoped to read the approved base from ECR only (D-18). A secret that is
+# not set is not a workflow failure: the test each secret belongs to skips,
+# by name, and says so in the job summary.
+
+on:
+  schedule:
+    # 04:17 UTC: off-peak for every provider this reaches, and away from the
+    # hour boundary every other scheduled workflow in this org tends to pick.
+    - cron: '17 4 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  live-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup UV
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+          python-version: '3.13'
+          activate-environment: true
+
+      - name: Install dependencies
+        run: |
+          uv pip install ".[e2b,daytona,modal,test]"
+          uv pip install boto3
+
+      - name: Configure AWS credentials
+        run: |
+          mkdir -p ~/.aws
+          {
+            echo "[default]"
+            echo "aws_access_key_id=${AWS_ACCESS_KEY_ID}"
+            echo "aws_secret_access_key=${AWS_SECRET_ACCESS_KEY}"
+          } > ~/.aws/credentials
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Run the live matrix
+        id: live
+        continue-on-error: true
+        run: |
+          CODE_SANDBOXES_LIVE=1 pytest -q -m live \
+            tests/test_environment_live_matrix.py \
+            --junitxml=live-matrix-results.xml
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: us-east-1
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+
+      - name: Upload the JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: environments-live-results
+          path: live-matrix-results.xml
+          retention-days: 14
+
+      - name: Summarize genuine failures (not xfail) naming provider and check
+        if: steps.live.outcome == 'failure'
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          tree = ET.parse("live-matrix-results.xml")
+          lines = []
+          for testcase in tree.getroot().iter("testcase"):
+              # An expected-fail (E2B/Modal's own documented gaps) is reported
+              # by pytest's junit writer as its own case with neither
+              # <failure> nor <error> — only a genuine, un-marked failure
+              # (Daytona, or a real regression anywhere else) has one.
+              node = testcase.find("failure")
+              if node is None:
+                  node = testcase.find("error")
+              if node is None:
+                  continue
+              name = f"{testcase.get('classname')}::{testcase.get('name')}"
+              detail = (node.get("message") or node.text or "").strip()
+              short = "\n".join(detail.splitlines()[:20])
+              lines.append(f"### `{name}`\n\n```\n{short}\n```")
+
+          with open("failures.md", "w") as handle:
+              handle.write("\n\n".join(lines))
+          print(f"{len(lines)} genuine failure(s) found")
+          PY
+
+      - name: Ensure the environments-live label exists
+        if: steps.live.outcome == 'failure'
+        continue-on-error: true # already existing is not an error
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'environments-live',
+              color: 'b60205',
+              description: 'The nightly Environments live matrix (E2-11)',
+            });
+
+      - name: Open or update an issue naming the provider and the check
+        if: steps.live.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const detail = fs.readFileSync('failures.md', 'utf8').trim();
+            if (!detail) {
+              // Every failure was inside an `xfail` — nothing genuinely
+              // broke (see the module docstring's own reasoning).
+              return;
+            }
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `The nightly [environments live matrix](${runUrl}) failed for real — not the two already-documented \`xfail\` gaps (E2-03's uid/gid, Modal's missing \`setpriv\`).`,
+              '',
+              detail,
+            ].join('\n');
+            const title = 'environments-live: nightly failure';
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'environments-live',
+            });
+            const found = existing.data.find((issue) => issue.title === title);
+            if (found) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: found.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['environments-live'],
+              });
+            }
+
+      - name: Fail the job if something genuinely broke
+        if: steps.live.outcome == 'failure'
+        run: exit 1
