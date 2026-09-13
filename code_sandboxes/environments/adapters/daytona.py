@@ -102,9 +102,6 @@ __all__ = ["Builder"]
 #: Tags Daytona refuses for a snapshot's source image: each moves.
 MOVING_TAGS = ("latest", "lts", "stable")
 
-#: `uv`, pinned the same way every other builder's bootstrap is (E1-04/E3-04).
-_UV_VERSION = "0.12.11"
-
 _DOCTOR_PATH = "/opt/datalayer/bin/datalayer-sandbox"
 _LOCK_PATH = "/opt/datalayer/lock.txt"
 _CONTENT_DIR = "/home/datalayer/content"
@@ -196,15 +193,28 @@ class Builder(ManagedBuilder):
     def _client(self, sdk: Any) -> Any:
         """The owner's own Daytona client (D-8), built once and reused.
 
-        With no `DAYTONA_API_KEY` on the credential, the SDK's own
+        An owner authenticates with `DAYTONA_API_KEY` **or** the
+        `DAYTONA_JWT_TOKEN`/`DAYTONA_ORGANIZATION_ID` pair — `accounts.py`'s
+        own `CREDENTIAL_VARIABLES` already lists both, and the JWT form was
+        missed here in the first version of this code (found in review):
+        a JWT-authenticated owner fell through to the worker's own ambient
+        credentials, or failed outright, rather than building in their own
+        organization. With neither on the credential, the SDK's own
         constructor falls back to the ambient environment — fine for a
-        single-owner worker or a test, wrong for a real multi-owner one,
-        the same fallback the E2B builder documents for its own key.
+        single-owner worker or a test, wrong for a real multi-owner one.
         """
         if self._client_instance is None:
-            api_key = self._provider_secrets().get("DAYTONA_API_KEY") or None
-            config = sdk.DaytonaConfig(api_key=api_key) if api_key else None
-            self._client_instance = sdk.Daytona(config)
+            secrets = self._provider_secrets()
+            api_key = secrets.get("DAYTONA_API_KEY") or None
+            jwt_token = secrets.get("DAYTONA_JWT_TOKEN") or None
+            organization_id = secrets.get("DAYTONA_ORGANIZATION_ID") or None
+            if api_key:
+                config = sdk.DaytonaConfig(api_key=api_key)
+            elif jwt_token and organization_id:
+                config = sdk.DaytonaConfig(jwt_token=jwt_token, organization_id=organization_id)
+            else:
+                config = None
+            self._client_instance = sdk.Daytona(config) if config is not None else sdk.Daytona()
         return self._client_instance
 
     def _own_findings(
@@ -247,6 +257,26 @@ class Builder(ManagedBuilder):
         # its own docstring), so a spec that somehow got a `resolved_base`
         # anyway is refused plainly rather than baking an unsourced guess
         # at a GPU type and count into a snapshot.
+        if environment.spec.build_secrets:
+            # `build()` has no mechanism to mount one — E0-04's spike found
+            # only a registry login for the private base, never an
+            # arbitrary named secret, the same gap E2B has — so a spec
+            # naming one is refused here rather than silently built without
+            # it (found in review: this chain consumed no build secret at
+            # all, and nothing said so).
+            ids = ", ".join(secret.id for secret in environment.spec.build_secrets)
+            findings.append(
+                CapabilityFinding(
+                    code="DL_ENV_CAPABILITY_UNSUPPORTED",
+                    message=(
+                        f"Daytona has no per-step secret mechanism E0-04 could find — only a "
+                        f"registry login, never an arbitrary named secret — so `buildSecrets` "
+                        f"({ids}) cannot be injected. Build datalayer or modal, which mount one "
+                        "per step, or drop the secret"
+                    ),
+                    field="spec.buildSecrets",
+                )
+            )
         return findings
 
     # -- Building -------------------------------------------------------------
@@ -310,7 +340,17 @@ class Builder(ManagedBuilder):
                 # lock is genuinely per-build.
                 image = (
                     image.add_local_file(str(lock_file), _LOCK_PATH)
-                    .run_commands(f'pip install --no-cache-dir "uv=={_UV_VERSION}"')
+                    # `uv` is not installed here: the approved base already
+                    # bakes it (E1-05, `resolve.py`'s own `bootstrap_uv`
+                    # docstring — "an approved Datalayer base already has it
+                    # baked in"), and this phase's `build_sources` is
+                    # `("packages",)` only, so every build starts from that
+                    # base. Reinstalling it added an extra un-hashed network
+                    # fetch outside the resolved lock for no reason (found in
+                    # review) — matching the Datalayer builder's own
+                    # `dockerfile()`, which installs `uv` only for the
+                    # `image` source, not implemented for this variant yet.
+                    #
                     # Packages install as root, the same reason the
                     # Datalayer and E2B builders give: a user install lands
                     # under the content directory's own home, which the

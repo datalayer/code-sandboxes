@@ -55,6 +55,16 @@ class Credential:
     password: ClassVar[str] = "ecr-token"
 
 
+class JwtCredential:
+    """An owner authenticated by JWT instead of an API key (D-8) — the other
+    form `accounts.py`'s own `CREDENTIAL_VARIABLES` lists for Daytona."""
+
+    provider_secrets: ClassVar[dict[str, str]] = {
+        "DAYTONA_JWT_TOKEN": "owners-jwt-token",
+        "DAYTONA_ORGANIZATION_ID": "org-42",
+    }
+
+
 class NoRegistryCredential:
     """A credential with the owner's own key, but no base-reader login (D-18)."""
 
@@ -419,6 +429,19 @@ class TestBuildingASnapshot:
         [lock_copy] = calls_named(image, "add_local_file")
         assert lock_copy.args[1] == "/opt/datalayer/lock.txt"
 
+    def test_uv_is_not_reinstalled_the_base_already_has_it(self) -> None:
+        """`resolve.py`'s own `bootstrap_uv` docstring: an approved base
+        already bakes `uv` (E1-05) — reinstalling it added an un-hashed
+        network fetch outside the resolved lock for no reason (found in
+        review)."""
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request())
+        image = daytona.client.snapshot.create_calls[0].args[0].image
+        assert not any(
+            "pip install" in call.args[0] and "uv==" in call.args[0]
+            for call in calls_named(image, "run_commands")
+        )
+
     def test_the_lock_copied_in_is_the_requests_own(self) -> None:
         daytona = FakeDaytonaModule()
         a_builder(daytona=daytona).build(a_request(lock_text=LOCK))
@@ -635,6 +658,24 @@ class TestWhatDaytonaCannotBuildYet:
         assert registry.client.create_calls == []
         assert daytona.client.snapshot.create_calls == []
 
+    def test_a_build_secret_is_refused_before_anything_is_queued(self) -> None:
+        """Daytona has no per-step secret mechanism E0-04 could find (found
+        in review: this chain consumed no build secret at all, and nothing
+        said so)."""
+        spec = {
+            "apiVersion": "environments.datalayer.io/v1alpha1",
+            "kind": "Environment",
+            "metadata": {"name": "geo"},
+            "spec": {
+                "language": {"version": "3.13"},
+                "base": {"ref": "datalayer/python-cpu", "channel": "2026.09"},
+                "buildSecrets": [{"id": "dlsec_pypitoken1", "name": "PYPI_TOKEN"}],
+            },
+        }
+        report = a_builder().validate(parse_environment(spec))
+        assert report.supported is False
+        assert "spec.buildSecrets" in [finding.field for finding in report.findings]
+
 
 class TestReadingTheRegistry:
     def test_inspect_reads_the_snapshot_by_id(self) -> None:
@@ -707,6 +748,24 @@ class TestReadingTheRegistry:
         a_builder(daytona=daytona).inspect(an_artifact(provider_artifact_id="snp-123"))
         [config] = [call.args[0] for call in daytona.daytona_calls]
         assert config.kwargs["api_key"] == "owners-daytona-key"
+
+    def test_a_jwt_authenticated_owner_is_recognized_too(self) -> None:
+        """`accounts.py`'s own `CREDENTIAL_VARIABLES` lists both auth forms
+        for Daytona; only the API key was read at first (found in review)."""
+        daytona = FakeDaytonaModule(
+            client=FakeDaytonaClient(
+                snapshot_service=FakeSnapshotService(
+                    get_results={"snp-123": FakeSnapshot(id="snp-123")}
+                )
+            )
+        )
+        a_builder(daytona=daytona, credential=JwtCredential()).inspect(
+            an_artifact(provider_artifact_id="snp-123")
+        )
+        [config] = [call.args[0] for call in daytona.daytona_calls]
+        assert config.kwargs["jwt_token"] == "owners-jwt-token"
+        assert config.kwargs["organization_id"] == "org-42"
+        assert "api_key" not in config.kwargs
 
     def test_the_client_is_built_once_and_reused(self) -> None:
         daytona = FakeDaytonaModule(
