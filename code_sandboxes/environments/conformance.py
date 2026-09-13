@@ -249,7 +249,17 @@ def _imports(sandbox: Sandbox, expected: Mapping[str, str], timeout: float | Non
         "        _dl_entry['version'] = _dl_md.version(_dl_dist)\n"
         "    except _dl_md.PackageNotFoundError:\n"
         "        _dl_entry['error'] = 'not installed'\n"
-        "    for _dl_module in sorted(_dl_modules.get(_dl_dist, []), key=len)[:1]:\n"
+        # `packages_distributions()` is what to trust when it answers — it
+        # reads the distribution's own RECORD, so it is right about a
+        # `cv2`/`opencv-python`-style mismatch too — but its first release
+        # (Python 3.10.0) answers nothing for some real, correctly installed
+        # distributions (pydantic among them; fixed in later 3.10 point
+        # releases and 3.11+). The naive guess every other distribution's
+        # import name already is — the name with `-` as `_` — is the
+        # fallback only when the metadata gave nothing to try at all.
+        "    _dl_candidates = sorted(_dl_modules.get(_dl_dist, []), key=len)[:1] or ["
+        "_dl_dist.replace('-', '_')]\n"
+        "    for _dl_module in _dl_candidates:\n"
         "        try:\n"
         "            _dl_il.import_module(_dl_module)\n"
         "            _dl_entry['imported'] = _dl_module\n"
