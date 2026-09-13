@@ -97,6 +97,20 @@ class TestTheAllowlist:
         with pytest.raises(EnvironmentsError):
             refuse_unless_allowed(ImageReference("ghcr.io", "owner/repo"), allowlist=("docker.io",))
 
+    def test_a_credential_lets_an_unlisted_registry_through(self) -> None:
+        """E3-04's private half, spec-only for now: a credential reference is
+        presumed a deliberate private registry, not something to block on a
+        bootstrap list meant only for the public default."""
+        refuse_unless_allowed(
+            ImageReference("registry.example.com", "team/env"), has_credential=True
+        )
+
+    def test_with_no_credential_the_allowlist_still_applies(self) -> None:
+        with pytest.raises(EnvironmentsError):
+            refuse_unless_allowed(
+                ImageReference("registry.example.com", "team/env"), has_credential=False
+            )
+
 
 class TestResolvingADigest:
     def test_a_pinned_reference_needs_no_network_call(self) -> None:

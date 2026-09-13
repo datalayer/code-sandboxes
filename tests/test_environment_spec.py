@@ -412,6 +412,26 @@ class TestImageSources:
         data["spec"]["base"] = {"ref": "not-approved-at-all", "channel": "n/a"}
         assert _codes(data) == {}
 
+    def test_a_registry_off_the_allowlist_with_a_credential_is_accepted(self) -> None:
+        """A credential reference is E3-04's private half: spec-only for now
+        (E3-05 resolves nothing yet), but it is what lets the registry
+        through `spec_findings` at all."""
+        data = an_image_document(
+            reference="registry.example.com/team/env:v1",
+            credentialSecretId="dlsec_01J8ZK",
+        )
+        assert _codes(data) == {}
+
+    def test_a_malformed_credential_id_is_invalid(self) -> None:
+        """`credentialSecretId` follows `BuildSecret.id`'s own pattern."""
+        data = an_image_document(credentialSecretId="not-a-secret-id")
+        with pytest.raises(EnvironmentsError) as refused:
+            parse_environment(data)
+        assert refused.value.code is errors.SPEC_INVALID
+        assert "spec.build.image.credentialSecretId" in {
+            finding["field"] for finding in refused.value.detail["findings"]
+        }
+
 
 class TestParsingARequirementsFile:
     def test_comments_and_blank_lines_are_dropped(self) -> None:

@@ -247,9 +247,18 @@ class ImageSourceSpec(_Model):
     accepted while this is public-registries only; ``spec.base`` is not
     validated against the approved bases for this source, since the image
     replaces it.
+
+    ``credentialSecretId`` names a private registry's credential the same
+    way ``BuildSecret.id`` names a build secret — a spec may reference one,
+    which is what lets a registry outside the public allowlist through
+    ``spec_findings`` at all. Nothing yet resolves it into a real credential
+    to pull with: that is E3-05's mechanism (build secrets), not built for
+    anything today, so a spec that references one still fails at the
+    registry, honestly, rather than pretend private registries work.
     """
 
     reference: str = ""
+    credential_secret_id: str | None = Field(default=None, pattern=r"^dlsec_[0-9A-Za-z]+$")
 
 
 class BuildSpec(_Model):
@@ -418,12 +427,13 @@ def _image_findings(image: ImageSourceSpec | None) -> list[SpecFinding]:
         parsed = parse_image_reference(image.reference)
     except EnvironmentsError as error:
         return [SpecFinding(f"{field}.reference", error.message)]
-    if not image_registry_allowed(parsed):
+    if not image_registry_allowed(parsed) and not image.credential_secret_id:
         return [
             SpecFinding(
                 f"{field}.reference",
                 f"`{parsed.registry}` is not an allowed registry; allowed: "
-                + ", ".join(DEFAULT_ALLOWED_REGISTRIES),
+                + ", ".join(DEFAULT_ALLOWED_REGISTRIES)
+                + ", or reference a credential for a private one",
                 POLICY_DENIED,
             )
         ]

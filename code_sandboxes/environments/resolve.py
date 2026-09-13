@@ -884,7 +884,7 @@ def resolve_image_base(
             detail={"field": "spec.build.image.reference"},
         )
     parsed = parse_image_reference(image.reference)
-    refuse_unless_allowed(parsed, allowlist)
+    refuse_unless_allowed(parsed, allowlist, has_credential=bool(image.credential_secret_id))
     digest = resolve_image_digest(parsed, transport=transport)
     reference = f"{parsed.registry}/{parsed.repository}@{digest}"
     return dict.fromkeys(variants, reference)

@@ -160,16 +160,30 @@ def image_registry_allowed(
 
 
 def refuse_unless_allowed(
-    image: ImageReference, allowlist: tuple[str, ...] = DEFAULT_ALLOWED_REGISTRIES
+    image: ImageReference,
+    allowlist: tuple[str, ...] = DEFAULT_ALLOWED_REGISTRIES,
+    *,
+    has_credential: bool = False,
 ) -> None:
-    if not image_registry_allowed(image, allowlist):
-        raise EnvironmentsError(
-            POLICY_DENIED,
-            f"{image.registry} is not an allowed registry for an imported image "
-            f"(the allowed ones are {', '.join(allowlist)}, until an organization "
-            "policy names its own)",
-            detail={"field": "spec.build.image.reference", "registry": image.registry},
-        )
+    """Refuse an unlisted registry, unless a credential was referenced for it.
+
+    A registry named alongside `credentialSecretId` (E3-04's private half) is
+    presumed a deliberate private one, its governance E3-06's own allowlist
+    to hold once it exists — this bootstrap list is only ever the *public*
+    default, never the only door. What resolving that credential into a real
+    one to pull with is E3-05's mechanism, not built for anything yet; a spec
+    that clears this check but has no real credential fails honestly at the
+    registry instead, the same as an approved base with no digest published.
+    """
+    if has_credential or image_registry_allowed(image, allowlist):
+        return
+    raise EnvironmentsError(
+        POLICY_DENIED,
+        f"{image.registry} is not an allowed registry for an imported image "
+        f"(the allowed ones are {', '.join(allowlist)}, until an organization "
+        "policy names its own, or reference a credential for a private one)",
+        detail={"field": "spec.build.image.reference", "registry": image.registry},
+    )
 
 
 def _api_host(registry: str) -> str:

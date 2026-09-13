@@ -749,6 +749,24 @@ class TestAnImportedImage:
             )
         assert raised.value.code.code == "DL_ENV_POLICY_DENIED"
 
+    def test_a_disallowed_registry_with_a_credential_reference_is_allowed_through(self) -> None:
+        """E3-04's private half, spec-only: a credential reference clears the
+        allowlist check. Nothing resolves the credential itself yet (E3-05),
+        so this still needs a transport — a real private pull would 401 here."""
+        from code_sandboxes.environments.spec import parse_environment
+
+        resolved = resolve_image_base(
+            parse_environment(
+                an_image_spec(
+                    reference="registry.example.com/team/env:v1",
+                    credentialSecretId="dlsec_01J8ZK",
+                )
+            ),
+            ["datalayer"],
+            transport=anonymous_manifest_transport(),
+        )
+        assert resolved == {"datalayer": f"registry.example.com/team/env@{IMAGE_DIGEST}"}
+
     def test_resolve_environment_uses_the_images_digest_as_the_base(self) -> None:
         runner = RecordedRunner(A_LOCK)
         document = resolve_environment(
