@@ -54,6 +54,11 @@ live-matrix:
 kill-relaunch:
 	CODE_SANDBOXES_LIVE=1 pytest -q -m live tests/test_the_kill_relaunch_drill.py
 
+## The managed Environment builders against the real providers: a real
+## resolved lock, build, launch, and the formal core tier (E2-11).
+environments-live:
+	CODE_SANDBOXES_LIVE=1 pytest -q -m live tests/test_environment_live_matrix.py
+
 clean: ## clean
 	git clean -fdx
 
