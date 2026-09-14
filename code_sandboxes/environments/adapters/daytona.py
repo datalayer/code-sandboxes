@@ -275,26 +275,13 @@ class Builder(ManagedBuilder):
         # its own docstring), so a spec that somehow got a `resolved_base`
         # anyway is refused plainly rather than baking an unsourced guess
         # at a GPU type and count into a snapshot.
-        if environment.spec.build_secrets:
-            # `build()` has no mechanism to mount one — E0-04's spike found
-            # only a registry login for the private base, never an
-            # arbitrary named secret, the same gap E2B has — so a spec
-            # naming one is refused here rather than silently built without
-            # it (found in review: this chain consumed no build secret at
-            # all, and nothing said so).
-            ids = ", ".join(secret.id for secret in environment.spec.build_secrets)
-            findings.append(
-                CapabilityFinding(
-                    code="DL_ENV_CAPABILITY_UNSUPPORTED",
-                    message=(
-                        f"Daytona has no per-step secret mechanism E0-04 could find — only a "
-                        f"registry login, never an arbitrary named secret — so `buildSecrets` "
-                        f"({ids}) cannot be injected. Build datalayer or modal, which mount one "
-                        "per step, or drop the secret"
-                    ),
-                    field="spec.buildSecrets",
-                )
-            )
+        #
+        # `spec.buildSecrets` needs no check of its own here: `supports_build_secrets
+        # = False` above (E3-05, merged since this branch started) makes
+        # `ManagedBuilder._own_findings` refuse it before this method is
+        # even reached — E0-04's spike found only a registry login for the
+        # private base, never an arbitrary named secret, the same gap E2B
+        # has.
         return findings
 
     # -- Building -------------------------------------------------------------
