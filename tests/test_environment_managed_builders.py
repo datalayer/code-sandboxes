@@ -217,6 +217,25 @@ class TestWhatIsSaidBeforeAnythingIsQueued:
         assert report.supported is False
         assert "`conda` is not resolved for E2B yet" in messages(report)
 
+    def test_e2b_and_daytona_refuse_a_build_secret_e0_04_found_no_mechanism_for(self) -> None:
+        """E0-04's spike found only a registry login for the private base on
+        either provider, never a per-step arbitrary named secret: a spec
+        naming one is refused before anything is queued, rather than
+        silently dropped or baked into the image (E3-05)."""
+        spec = {"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "TOKEN"}]}
+        for variant in ("e2b", "daytona"):
+            report = get_builder(variant).validate(environment(**spec))
+            assert report.supported is False, variant
+            assert "no per-step secret mechanism" in messages(report)
+            assert "datalayer" in messages(report) and "modal" in messages(report)
+            assert "spec.buildSecrets" in fields(report)
+
+    def test_datalayer_and_modal_accept_a_build_secret(self) -> None:
+        spec = {"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "TOKEN"}]}
+        for variant in ("datalayer", "modal"):
+            report = get_builder(variant).validate(environment(**spec))
+            assert report.supported is True, f"{variant}: {messages(report)}"
+
     def test_every_finding_carries_the_capability_code(self) -> None:
         report = get_builder("e2b").validate(
             environment(
