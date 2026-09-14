@@ -251,12 +251,13 @@ class TestWhatIsSaidBeforeAnythingIsQueued:
 
 
 class TestTheHalfThatIsNotBuiltYet:
-    @pytest.mark.parametrize("variant,item", [("e2b", "E2-03"), ("modal", "E2-05")])
+    @pytest.mark.parametrize("variant,item", [("modal", "E2-05")])
     def test_a_build_refuses_by_naming_what_is_missing(self, variant: str, item: str) -> None:
         """A caller is never told "no builder" when the real answer is "not
         this item yet" — and never when the real answer is "not this spec".
-        Daytona is built now (E2-04), covered by its own
-        test_environment_daytona_builder.py, so it is not one of these two."""
+        E2B (E2-03) and Daytona (E2-04) are both built now, each covered by
+        its own test_environment_{e2b,daytona}_builder.py, so neither is
+        one of these any more."""
         builder = get_builder(variant)
         with pytest.raises(EnvironmentsError) as raised:
             builder.build(None)  # type: ignore[arg-type]
@@ -265,7 +266,7 @@ class TestTheHalfThatIsNotBuiltYet:
         assert raised.value.detail["variant"] == variant
         assert "answer whether a spec is buildable" in str(raised.value)
 
-    @pytest.mark.parametrize("variant", ["e2b", "modal"])
+    @pytest.mark.parametrize("variant", ["modal"])
     def test_every_operation_that_touches_the_provider_refuses(self, variant: str) -> None:
         builder = get_builder(variant)
         calls = {
@@ -280,6 +281,21 @@ class TestTheHalfThatIsNotBuiltYet:
             with pytest.raises(EnvironmentsError) as raised:
                 call()
             assert raised.value.detail["operation"], f"{variant}.{operation}"
+
+    def test_e2b_still_refuses_what_e2_03_did_not_build(self) -> None:
+        """`build`/`inspect`/`exists` are E2-03's; `smoke_test`, `resolve` and
+        `delete` are not — see adapters/e2b.py's own module docstring for
+        `smoke_test`, and test_environment_e2b_builder.py for what is built."""
+        builder = get_builder("e2b")
+        calls = {
+            "smoke_test": lambda: builder.smoke_test(None),  # type: ignore[arg-type]
+            "resolve": lambda: builder.resolve("geo@1"),
+            "delete": lambda: builder.delete(None),  # type: ignore[arg-type]
+        }
+        for operation, call in calls.items():
+            with pytest.raises(EnvironmentsError) as raised:
+                call()
+            assert raised.value.detail["operation"], f"e2b.{operation}"
 
     def test_daytona_still_refuses_what_e2_04_did_not_build(self) -> None:
         """`build`/`inspect`/`exists` are E2-04's; `smoke_test`, `resolve` and
