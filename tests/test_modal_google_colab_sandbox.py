@@ -493,13 +493,67 @@ def test_modal_start_forwards_gpu_flavor(monkeypatch):
     sandbox.stop()
 
 
+class _FakeExecSandbox:
+    """Records what `_start_driver` asks `sandbox.exec` for, nothing more."""
+
+    def __init__(self) -> None:
+        self.exec_calls: list[dict] = []
+
+    def exec(self, *args, **kwargs):
+        self.exec_calls.append({"args": args, "kwargs": kwargs})
+
+        class _FakeDriver:
+            stdout: ClassVar[list] = []
+            stdin = None
+
+        return _FakeDriver()
+
+
+def test_a_contract_artifact_drops_privileges_and_sets_the_workdir():
+    """`image_id` set means this `ModalSandbox` was launched from a built
+    Environments artifact (D-4, §3, E2-05) — the one case where the account
+    and content directory `adapters/modal.py`'s own build recipe always
+    produces are guaranteed real in this image. Confirmed live, 2026-09-13:
+    checks 1 (doctor) and 2 (identity) both now pass against a real
+    launched sandbox, where they failed before this."""
+    sandbox = ModalSandbox(config=SandboxConfig(timeout=10.0), image_id="im-123")
+    fake = _FakeExecSandbox()
+    sandbox._sandbox = fake
+
+    sandbox._start_driver()
+
+    call = fake.exec_calls[0]
+    assert call["kwargs"]["env"] == {
+        "DATALAYER_SANDBOX_CONTRACT_UID": "1000",
+        "DATALAYER_SANDBOX_CONTRACT_GID": "100",
+        "DATALAYER_SANDBOX_CONTRACT_HOME": "/home/datalayer",
+    }
+    assert call["kwargs"]["workdir"] == "/home/datalayer/content"
+
+
+def test_a_plain_sandbox_asks_for_nothing_extra():
+    """No `image_id` at all — general Modal sandbox usage, well beyond
+    Environments, where nothing guarantees the account this would drop to
+    is even real — never carries these (found in review of the identity
+    fix: unconditional would have risked exactly that)."""
+    sandbox = ModalSandbox(config=SandboxConfig(timeout=10.0))
+    fake = _FakeExecSandbox()
+    sandbox._sandbox = fake
+
+    sandbox._start_driver()
+
+    call = fake.exec_calls[0]
+    assert "env" not in call["kwargs"]
+    assert "workdir" not in call["kwargs"]
+
+
 def test_stop_cleans_up_a_sandbox_left_behind_by_a_failed_start():
     """`start()` creates the remote sandbox well before it marks itself
     started (`_start_driver`, `create_context`, building `SandboxInfo` all
-    come after) — found in review: a failure in between used to leave a
-    real, running sandbox that `stop()`, guarded on `_started` rather than
-    the resource itself, skipped entirely and this object could never clean
-    up again."""
+    come after) — found in review (code-sandboxes#32): a failure in
+    between used to leave a real, running sandbox that `stop()`, guarded
+    on `_started` rather than the resource itself, skipped entirely and
+    this object could never clean up again."""
 
     class _FakeSandboxObj:
         def __init__(self) -> None:
