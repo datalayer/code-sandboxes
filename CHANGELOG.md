@@ -8,6 +8,24 @@
 
 ## Unreleased
 
+## 1.9.11
+
+- **1.9.10's own fix did not work: `--registry-referrers-mode` only ever
+  governs *reading* referrers, never where `sign` writes one** —
+  `sign --help` says so outright ("mode for fetching references"), and a
+  second live sign on r1, 2026-09-14, confirmed it: the signature still
+  landed as an OCI 1.1 referrer, no legacy tag. `Attestor` no longer tries
+  to force cosign's own storage choice. Its replay check and its own
+  `signature_ref` now ask cosign directly, the same way the Operator's own
+  verify will: `can_verify(reference)` runs `cosign verify --key <key>
+  --insecure-ignore-tlog=true <reference>` and answers its exit code, and
+  `signature_ref` is the digest reference itself — what `cosign verify`
+  takes, not a tag it may or may not have written. Signing the same digest
+  twice no longer errors the way a second push under the old immutable tag
+  once would have, but `can_verify` still avoids it, since two valid
+  signatures claiming to be Datalayer's own word on one artifact is not
+  the design either.
+
 ## 1.9.10
 
 - **cosign signs the legacy tag again, not just an OCI referrer**

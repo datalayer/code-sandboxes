@@ -88,7 +88,6 @@ class FakeEcr:
         statuses=("ACTIVE",),
         findings=(),
         enhanced_findings=True,
-        signed: set[str] | None = None,
         manifest: dict | None = None,
         pages: list[list[dict]] | None = None,
     ) -> None:
@@ -99,11 +98,9 @@ class FakeEcr:
         #: `findings` when given, to test reading more than one page.
         self.pages = pages
         self.enhanced_findings = enhanced_findings
-        self.signed = set(signed or set())
         self.manifest = manifest
         self.asked = 0
         self.scanned: list[str] = []
-        self.described_tags: list[str] = []
 
     def batch_get_image(self, repositoryName, imageIds, acceptedMediaTypes):  # noqa: N803 - boto3's spelling
         manifest = self.manifest or {
@@ -157,28 +154,29 @@ class FakeEcr:
             },
         }
 
-    def describe_images(self, repositoryName, imageIds):  # noqa: N803 - boto3's spelling
-        tag = imageIds[0].get("imageTag") or ""
-        self.described_tags.append(tag)
-        if tag in self.signed:
-            return {"imageDetails": [{"imageTags": [tag]}]}
-        error = Exception("ImageNotFoundException")
-        error.response = {"Error": {"Code": "ImageNotFoundException"}}
-        raise error
-
 
 class Cosign:
-    """A cosign whose argv and env are read, and which can refuse."""
+    """Every cosign invocation, in order; `argv`/`env` are the last call's own.
 
-    def __init__(self, returncode: int = 0) -> None:
+    `verify_returncode` is `sign`'s own upfront replay check (E1-09): 1 (not
+    signed yet) unless a test says otherwise, so the ordinary path — verify,
+    then sign — still leaves `argv`/`env` as the `sign` call a test written
+    against the single-call fake already expects.
+    """
+
+    def __init__(self, returncode: int = 0, *, verify_returncode: int = 1) -> None:
         self.returncode = returncode
+        self.verify_returncode = verify_returncode
+        self.calls: list[tuple[list[str], dict[str, str] | None]] = []
         self.argv: list[str] = []
         self.env: dict[str, str] | None = None
 
     def __call__(self, argv, *, env=None, **_kwargs) -> subprocess.CompletedProcess[str]:
         self.argv = list(argv)
         self.env = env
-        return subprocess.CompletedProcess(self.argv, self.returncode, "", "Pushing signature\n")
+        self.calls.append((self.argv, self.env))
+        code = self.verify_returncode if "verify" in argv else self.returncode
+        return subprocess.CompletedProcess(self.argv, code, "", "Pushing signature\n")
 
 
 def an_attestor(**changes) -> Attestor:
@@ -466,17 +464,21 @@ class TestTheSignature:
             # `--tlog-upload=false` alone can no longer override (found live
             # 2026-09-14): turned off so the plain flag is honored again.
             "--use-signing-config=false",
-            # cosign 3.1.3 defaults to the OCI 1.1 referrers API rather than
-            # the classic sidecar tag: found live 2026-09-14, `cosign sign`
-            # reported success but pushed no tag `_signature_exists` or
-            # `signature_ref` could ever find. `legacy` restores it.
-            "--registry-referrers-mode=legacy",
             "--key",
             KEY,
             f"{REGISTRY}/{REPOSITORY}@{DIGEST}",
         ]
-        assert reference == f"{REGISTRY}/{REPOSITORY}:{signature_tag(DIGEST)}"
+        # The digest itself: what `cosign verify --key <key>` takes, not a
+        # tag — cosign 3.1.3 defaults to storing a signature as an OCI 1.1
+        # referrer, not the classic `sha256-<hex>.sig` sidecar tag (found
+        # live 2026-09-14, twice: `--registry-referrers-mode` only ever
+        # governed *reading* referrers, never where `sign` writes one).
+        assert reference == f"{REGISTRY}/{REPOSITORY}@{DIGEST}"
         assert signed_now is True
+        # The upfront replay check, cosign's own answer for whether this key
+        # already signed it — not yet, here, so `sign` ran right after.
+        subcommands = [call[0][1] for call in cosign.calls]
+        assert subcommands == ["verify", "sign"]
 
     def test_no_registry_auth_leaves_cosigns_own_environment_untouched(self) -> None:
         """The common case — nothing to add — inherits this process's own
@@ -508,15 +510,19 @@ class TestTheSignature:
                 assert cosign.env[name] == os.environ[name]
 
     def test_a_replay_finds_the_signature_instead_of_pushing_a_second(self) -> None:
-        """Immutable tags would refuse the second, and two signatures are two words."""
-        ecr = FakeEcr(signed={signature_tag(DIGEST)})
-        cosign = Cosign()
-        reference, signed_now = an_attestor(ecr=ecr, run=cosign).sign(
+        """A second signature would not error the way a second push under the
+        old immutable tag once did, but it would still be two things claiming
+        to be Datalayer's word on the same artifact — cosign's own answer to
+        `verify` is asked first, and `sign` never runs when it says yes."""
+        cosign = Cosign(verify_returncode=0)
+        reference, signed_now = an_attestor(run=cosign).sign(
             registry=REGISTRY, repository=REPOSITORY, digest=DIGEST
         )
         assert signed_now is False
-        assert cosign.argv == []
-        assert reference.endswith(signature_tag(DIGEST))
+        assert len(cosign.calls) == 1
+        assert "verify" in cosign.argv
+        assert "sign" not in cosign.argv
+        assert reference == f"{REGISTRY}/{REPOSITORY}@{DIGEST}"
 
     def test_cosign_refusing_is_a_provider_error(self) -> None:
         with pytest.raises(EnvironmentsError) as raised:
@@ -534,6 +540,23 @@ class TestTheSignature:
         with pytest.raises(EnvironmentsError) as raised:
             an_attestor(cosign="").sign(registry=REGISTRY, repository=REPOSITORY, digest=DIGEST)
         assert raised.value.detail["missing"] == "cosign"
+
+    def test_can_verify_asks_cosign_and_answers_its_exit_code(self) -> None:
+        reference = f"{REGISTRY}/{REPOSITORY}@{DIGEST}"
+        assert an_attestor(run=Cosign(verify_returncode=0)).can_verify(reference) is True
+        assert an_attestor(run=Cosign(verify_returncode=1)).can_verify(reference) is False
+
+    def test_can_verify_names_the_key_and_ignores_the_transparency_log(self) -> None:
+        cosign = Cosign(verify_returncode=0)
+        an_attestor(run=cosign, key=KEY).can_verify(f"{REGISTRY}/{REPOSITORY}@{DIGEST}")
+        assert cosign.argv == [
+            "/usr/bin/cosign",
+            "verify",
+            "--insecure-ignore-tlog=true",
+            "--key",
+            KEY,
+            f"{REGISTRY}/{REPOSITORY}@{DIGEST}",
+        ]
 
     def test_the_signature_sits_beside_the_image_at_cosigns_own_tag(self) -> None:
         assert signature_tag(DIGEST) == "sha256-" + "aa" * 32 + ".sig"
@@ -560,7 +583,7 @@ class TestAttestingAnArtifact:
             artifact=self.an_artifact(), size_bytes=116_183_040, attestor=attestor
         )
         assert answer["scan_summary"]["decision"] == "pass"
-        assert answer["signature_ref"].endswith(signature_tag(DIGEST))
+        assert answer["signature_ref"] == f"{REGISTRY}/{REPOSITORY}@{DIGEST}"
         assert answer["sbom_ref"].endswith(".sbom")
         assert answer["provenance_ref"].endswith(".att")
         assert answer["size_bytes"] == 116_183_040

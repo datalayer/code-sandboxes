@@ -403,17 +403,28 @@ class Attestor:
     def sign(self, *, registry: str, repository: str, digest: str) -> tuple[str, bool]:
         """Sign the digest with the KMS key, unless it is signed already (E1-09).
 
-        Answers the signature's reference and whether this call made it. A
-        replay finds the existing signature: pushing a second one under the
-        same tag is what immutable tags refuse, and it would be a second thing
-        claiming to be Datalayer's word on the same artifact.
+        Answers the signature's own reference — the digest itself, which is
+        what `cosign verify --key <key>` takes, resolving the signature's
+        real location on its own — and whether this call made it.
+
+        A replay finds the existing signature by asking cosign whether *this*
+        key has already signed it, the same check the Operator itself will
+        make before starting a pod (`can_verify`): cosign 3.1.3 stores a
+        signature as an OCI 1.1 referrer, not the classic `sha256-<hex>.sig`
+        sidecar tag a first version of this method assumed (found live,
+        2026-09-14, twice — `--registry-referrers-mode` only ever governed
+        *reading* referrers, never where `sign` writes one, so it changed
+        nothing the first time either). Signing twice would not error the way
+        it would have under the old tag (an OCI referrer is not an immutable
+        tag to collide with), but it would leave two things claiming to be
+        Datalayer's word on the same artifact, which `can_verify` first
+        avoids.
         """
         self.can_sign()
-        tag = signature_tag(digest)
         reference = f"{registry}/{repository}@{digest}"
-        if self._signature_exists(repository=repository, tag=tag):
-            self._log(f"{digest} is signed already, under {tag}")
-            return f"{registry}/{repository}:{tag}", False
+        if self.can_verify(reference):
+            self._log(f"{digest} is signed already")
+            return reference, False
         command = [
             self._cosign,
             "sign",
@@ -440,13 +451,6 @@ class Attestor:
             # `--tlog-upload=false` already asks for, and needs no network
             # call of its own to fetch one.
             "--use-signing-config=false",
-            # cosign 3.1.3 defaults to the OCI 1.1 referrers API instead of
-            # the classic `sha256-<hex>.sig` sidecar tag — found live,
-            # 2026-09-14: `cosign sign` reported success, but no such tag
-            # ever existed, so `_signature_exists`'s own replay check (below)
-            # never found it and `signature_ref` named a tag nothing could
-            # pull. `legacy` restores the tag both of those already assume.
-            "--registry-referrers-mode=legacy",
             "--key",
             self._key,
             reference,
@@ -459,22 +463,21 @@ class Attestor:
                 "cosign did not sign the artifact; its output says why",
                 detail={"digest": digest, "exit": finished.returncode},
             )
-        return f"{registry}/{repository}:{tag}", True
+        return reference, True
 
-    def _signature_exists(self, *, repository: str, tag: str) -> bool:
-        try:
-            answer = self._client().describe_images(
-                repositoryName=repository, imageIds=[{"imageTag": tag}]
-            )
-        except Exception as error:
-            if _is_missing(error):
-                return False
-            raise EnvironmentsError(
-                PROVIDER_ERROR,
-                f"Whether {tag} is already signed could not be read: {error}",
-                detail={"repository": repository, "tag": tag},
-            ) from error
-        return bool(answer.get("imageDetails"))
+    def can_verify(self, reference: str) -> bool:
+        """Whether cosign already finds a signature by this key on `reference`.
+
+        Wherever cosign itself keeps a signature — the OCI 1.1 referrer it
+        defaults to, or the legacy sidecar tag an older registry might still
+        need — is cosign's own business to resolve; asking it directly, the
+        same check the Operator makes before starting a pod, is simpler and
+        more honest than tracking cosign's own storage choices here too.
+        """
+        finished = self._invoke(
+            [self._cosign, "verify", "--insecure-ignore-tlog=true", "--key", self._key, reference]
+        )
+        return finished.returncode == 0
 
     def _invoke(self, command: Sequence[str]) -> subprocess.CompletedProcess[str]:
         # `registry_auth` — same shape as the resolver's own — puts cosign's
