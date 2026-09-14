@@ -187,3 +187,34 @@ that decodes them, so a large file does not have to become a large program:
 sandbox.files.write_bytes("/tmp/data.parquet", payload)
 sandbox.files.read_bytes("/tmp/data.parquet")
 ```
+
+## Environments
+
+An [Environment](/docs/environments) built for E2B is a **template**, not
+built from the Datalayer base the other three variants share: E2B's own
+code-interpreter server (the FastAPI service `run_code` and contexts
+actually talk to) is proprietary and ships baked into E2B's own
+`code-interpreter-v1` only, so a build starts there instead and installs
+your lock with `uv pip sync --require-hashes` on top, reconciling whatever
+`code-interpreter-v1` shipped to exactly what the lock pins. The returned
+`build_id` is the artifact; a name is published too, for operability, but
+a launch always pins the build id.
+
+**Bring your own account:** a build runs in the environment owner's own
+E2B team, read from the same `E2B_API_KEY` (and `E2B_TEAM_ID`, when set)
+`Sandbox.create` itself accepts (above) — never this package's ambient
+key.
+
+**A known, open gap:** a launched sandbox currently runs as `root`, not
+the sandbox contract's `1000:100`. The build itself gets the identity and
+locale right — `code-interpreter-v1` already ships an account at uid 1000
+and a group at gid 100, so the build renames that account onto the
+contract's name rather than colliding with it, and sets `LC_ALL`/`LANG`
+explicitly, since `code-interpreter-v1` sets neither. But the two
+`systemd` services that actually execute a launched sandbox's code
+(`jupyter.service`, `code-interpreter.service`) have no `User=` of their
+own, and E2B's own private server hardcodes `/home/user` as the working
+directory — both independent of anything the build sets, and not yet
+fixed. A sandbox launched from an Environment on E2B today should not be
+relied on for anything that assumes the contract's own user or its
+content directory.
