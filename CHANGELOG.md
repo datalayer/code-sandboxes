@@ -8,6 +8,8 @@
 
 ## Unreleased
 
+## 1.9.5
+
 - **Attest waits for a just-pushed image's scan to exist**
   (`environments.attest`; PLAN_ENV.md E1-08). Enhanced scanning starts after
   the push, so the first answers for a new image are
