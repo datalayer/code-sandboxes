@@ -15,6 +15,7 @@ from code_sandboxes.environments.bases import (
     ApprovedBase,
     BaseChannelUnpublishedError,
     approved_repositories,
+    channel_snapshot,
     resolve_base,
 )
 from code_sandboxes.environments.errors import EnvironmentsError
@@ -109,3 +110,24 @@ def test_each_base_is_published_under_its_own_repository() -> None:
         "datalayer/python-cuda",
         "environments/base/python-cuda",
     )
+
+
+def test_the_2026_09_channel_of_python_cpu_pins_apt_to_its_snapshot() -> None:
+    """D-9: the moment just after the channel's image upgraded its packages."""
+    assert channel_snapshot("datalayer/python-cpu", "2026.09") == "20260914T150000Z"
+    assert channel_snapshot("datalayer/python-cuda", "2026.09") == ""
+    assert channel_snapshot("datalayer/nothing", "2026.09") == ""
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    ["2026-09-14", "https://snapshot.ubuntu.com/ubuntu/20260914T150000Z", "20260914T1500Z"],
+)
+def test_a_channel_pins_apt_to_nothing_but_a_snapshot_id(snapshot: str) -> None:
+    with pytest.raises(ValidationError):
+        ApprovedBase(
+            ref="datalayer/python-cpu",
+            python_versions=("3.13",),
+            channels={"2026.09": {}},
+            snapshots={"2026.09": snapshot},
+        )

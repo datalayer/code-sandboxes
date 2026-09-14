@@ -51,7 +51,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from .bases import APPROVED_BASES, ApprovedBase, resolve_base
+from .bases import APPROVED_BASES, ApprovedBase, channel_snapshot, resolve_base
 from .errors import (
     CAPABILITY_UNSUPPORTED,
     PACKAGE_NOT_FOUND,
@@ -71,6 +71,7 @@ from .spec import DependencyFileSpec, Environment, parse_environment, parse_requ
 
 __all__ = [
     "APT_PIN_PREFIX",
+    "APT_SNAPSHOT_PREFIX",
     "CONSTRAINTS_PATH",
     "LOCK_FORMAT",
     "PROTECTED_PIN_PREFIX",
@@ -83,6 +84,7 @@ __all__ = [
     "ResolveRunner",
     "apt_pins",
     "apt_pins_in",
+    "apt_snapshot_in",
     "lock_document",
     "locked_versions",
     "merge_requirements",
@@ -117,6 +119,11 @@ WHEELHOUSE_PATH = Path(__file__).parent / "constraints" / "wheelhouse"
 #: How an apt pin is written in the lock. A comment, so every reader of a
 #: ``pip`` requirements file — the CLI's diff included — ignores it.
 APT_PIN_PREFIX = "# datalayer-apt: "
+#: The Ubuntu snapshot the apt pins were taken from, as the lock records it.
+#: The builder installs the pins from the same snapshot, since a pinned
+#: version can leave the live mirror (D-9).
+APT_SNAPSHOT_PREFIX = "# datalayer-apt-snapshot: "
+_SNAPSHOT_ID = re.compile(r"^\d{8}T\d{6}Z$")
 
 #: How a protected pin is recorded in the lock.
 PROTECTED_PIN_PREFIX = "# datalayer-protected: "
@@ -315,6 +322,11 @@ class ResolveRequest:
     already has it baked in (E1-05); an imported image is somebody else's,
     and cannot be assumed to."""
 
+    apt_snapshot: str = ""
+    """The Ubuntu snapshot apt versions are pinned against, as
+    ``20260914T150000Z``: the base channel's (D-9). Empty pins against the
+    mirror the base names."""
+
 
 @dataclass
 class ResolveOutcome:
@@ -324,6 +336,9 @@ class ResolveOutcome:
     apt_pins: dict[str, str] = field(default_factory=dict)
     apt_source: str = ""
     """The mirror the apt versions were pinned against, for the lock's header."""
+
+    apt_snapshot: str = ""
+    """The snapshot id they were pinned against, which the builder installs from."""
 
 
 class ResolveRunner(Protocol):
@@ -599,6 +614,12 @@ class BuildkitResolveRunner:
         self._tlskey = tlskey or ""
         self._tlscacert = tlscacert or ""
         self._address = address or ""
+        if apt_snapshot and not _SNAPSHOT_ID.match(apt_snapshot):
+            raise ValueError(
+                f"apt_snapshot must be a snapshot.ubuntu.com id like 20260914T150000Z, "
+                f"not {apt_snapshot!r}"
+            )
+        #: The deployment's override of the base channel's snapshot.
         self._apt_snapshot = apt_snapshot
         self._timeout = timeout
 
@@ -648,18 +669,15 @@ class BuildkitResolveRunner:
         if request.apt:
             # `--simulate` names every package apt would install, transitive
             # ones included, each with the exact version the mirror serves at
-            # the channel's date (D-9).
-            snapshot = self._apt_snapshot
-            if snapshot:
-                codename = "$(. /etc/os-release; echo $VERSION_CODENAME)"
-                lines.append(
-                    f"RUN printf 'deb {snapshot} {codename} main\\n' "
-                    "> /etc/apt/sources.list.d/datalayer-snapshot.list"
-                )
+            # the channel's date (D-9). `--snapshot` points every suite and
+            # component the base's sources name at snapshot.ubuntu.com at that
+            # moment. The `deb` line this used to add named one component,
+            # `main`, which `gdal-bin` is not in, and left the live mirror
+            # enabled beside it (found 2026-09-14).
+            option = self._snapshot_option(request)
             lines.append(
-                "RUN apt-get update -qq && apt-get install --simulate --no-install-recommends "
-                + " ".join(request.apt)
-                + " > /solve/apt.txt"
+                f"RUN apt-get update -qq{option} && apt-get install --simulate "
+                f"--no-install-recommends{option} " + " ".join(request.apt) + " > /solve/apt.txt"
             )
         lines.extend(
             [
@@ -670,6 +688,14 @@ class BuildkitResolveRunner:
         if request.apt:
             lines.append("COPY --from=solve /solve/apt.txt /apt.txt")
         return "\n".join(lines) + "\n"
+
+    def _snapshot(self, request: ResolveRequest) -> str:
+        """The deployment's override, else the base channel's snapshot."""
+        return self._apt_snapshot or request.apt_snapshot
+
+    def _snapshot_option(self, request: ResolveRequest) -> str:
+        snapshot = self._snapshot(request)
+        return f" --snapshot {snapshot}" if snapshot else ""
 
     def solve(
         self, request: ResolveRequest, log: Callable[[str], None] | None = None
@@ -737,12 +763,19 @@ class BuildkitResolveRunner:
             if finished.returncode != 0:
                 raise parse_resolver_failure(finished.stderr or finished.stdout or "")
             lock = (out / "lock.txt").read_text(encoding="utf-8")
-            pins, source = {}, ""
+            pins, source, snapshot = {}, "", ""
             apt_file = out / "apt.txt"
             if request.apt and apt_file.exists():
                 pins = apt_pins(apt_file.read_text(encoding="utf-8"))
-                source = self._apt_snapshot or "the base channel's mirror"
-        return ResolveOutcome(lock_text=lock, apt_pins=pins, apt_source=source)
+                snapshot = self._snapshot(request)
+                source = (
+                    f"https://snapshot.ubuntu.com/ubuntu/{snapshot}"
+                    if snapshot
+                    else "the base channel's mirror"
+                )
+        return ResolveOutcome(
+            lock_text=lock, apt_pins=pins, apt_source=source, apt_snapshot=snapshot
+        )
 
     def _environment(self, request: ResolveRequest) -> dict[str, str] | None:
         """The registry credential, as client-side auth: `buildkitd` holds none (D-17)."""
@@ -830,6 +863,16 @@ def apt_pins_in(lock_text: str) -> dict[str, str]:
     return pins
 
 
+def apt_snapshot_in(lock_text: str) -> str:
+    """The Ubuntu snapshot a lock's apt pins were taken from, or ``""`` (D-9)."""
+    for raw in lock_text.splitlines():
+        line = raw.strip()
+        if line.startswith(APT_SNAPSHOT_PREFIX.strip()):
+            snapshot = line[len(APT_SNAPSHOT_PREFIX.strip()) :].strip()
+            return snapshot if _SNAPSHOT_ID.match(snapshot) else ""
+    return ""
+
+
 def lock_document(
     outcome: ResolveOutcome,
     *,
@@ -856,6 +899,8 @@ def lock_document(
         header.append(f"{APT_PIN_PREFIX}{pin[0]}={pin[1]}")
     if outcome.apt_pins and outcome.apt_source:
         header.append(f"# datalayer-apt-source: {outcome.apt_source}")
+    if outcome.apt_pins and outcome.apt_snapshot:
+        header.append(f"{APT_SNAPSHOT_PREFIX}{outcome.apt_snapshot}")
     for constraint in merged.constraints:
         header.append(f"{PROTECTED_PIN_PREFIX}{constraint}")
     text = "\n".join(header) + "\n" + outcome.lock_text.lstrip("\n")
@@ -1204,6 +1249,12 @@ def resolve_environment(
         base_reference=solving_in,
         registry_auth=_registry_auth(credential),
         bootstrap_uv=(source == "image"),
+        # An imported image is not an approved base, and names no channel.
+        apt_snapshot=(
+            ""
+            if source == "image"
+            else channel_snapshot(environment.spec.base.ref, environment.spec.base.channel, bases)
+        ),
     )
     outcome = (runner or BuildkitResolveRunner()).solve(request, say)
     document = lock_document(

@@ -257,6 +257,7 @@ class TestTheLock:
             lock_text=A_LOCK.lock_text,
             apt_pins={"gdal-bin": "3.8.4+dfsg-3build2"},
             apt_source="https://snapshot.ubuntu.com/ubuntu/20260901T000000Z",
+            apt_snapshot="20260901T000000Z",
         )
         document = lock_document(
             outcome,
@@ -273,6 +274,11 @@ class TestTheLock:
         assert f"{APT_PIN_PREFIX}gdal-bin=3.8.4+dfsg-3build2" in content
         assert "# datalayer-protected: ipykernel==7.3.0" in content
         assert "# resolved-at: 2026-09-12T08:30:00+00:00" in content
+        # The snapshot the pins came from, which the builder installs from.
+        from code_sandboxes.environments.resolve import apt_pins_in, apt_snapshot_in
+
+        assert apt_snapshot_in(content) == "20260901T000000Z"
+        assert apt_pins_in(content) == {"gdal-bin": "3.8.4+dfsg-3build2"}
         # Still a requirements file: what a reader of one sees is the packages.
         assert locked_versions(content) == {
             "affine": "3.0.1",
@@ -888,13 +894,24 @@ class TestTheLocalRunner:
         assert raised.value.detail["missing"] == "uv"
 
 
+def test_the_solve_is_asked_to_pin_apt_at_the_base_channels_snapshot() -> None:
+    from code_sandboxes.environments.bases import channel_snapshot
+    from code_sandboxes.environments.resolve import resolve_environment
+
+    runner = RecordedRunner(A_LOCK)
+    resolve_environment(spec=a_spec(), variants=["datalayer"], runner=runner)
+    assert runner.request is not None
+    assert runner.request.apt_snapshot == channel_snapshot("datalayer/python-cpu", "2026.09")
+    assert runner.request.apt_snapshot == "20260914T150000Z"
+
+
 class TestTheBuildkitRunner:
     def test_the_solve_is_a_dockerfile_from_the_base_that_exports_the_lock(self) -> None:
         from code_sandboxes.environments.resolve import BuildkitResolveRunner
 
         runner = BuildkitResolveRunner(
             buildctl="/usr/bin/true",
-            apt_snapshot="https://snapshot.ubuntu.com/ubuntu/20260901T000000Z",
+            apt_snapshot="20260901T000000Z",
         )
         dockerfile = runner.dockerfile(
             ResolveRequest(
@@ -912,11 +929,43 @@ class TestTheBuildkitRunner:
         assert "--constraint constraints.txt" in dockerfile
         # A protected pin's own wheel, for what no index has (E1-04, E1-05).
         assert "--find-links /opt/datalayer/wheelhouse" in dockerfile
-        assert "snapshot.ubuntu.com" in dockerfile
-        assert "apt-get install --simulate" in dockerfile
+        assert "apt-get update -qq --snapshot 20260901T000000Z" in dockerfile
+        assert (
+            "apt-get install --simulate --no-install-recommends --snapshot 20260901T000000Z "
+            "gdal-bin" in dockerfile
+        )
         # Exported, not left in the image: the lock is the only output.
         assert "FROM scratch" in dockerfile
         assert "COPY --from=solve /solve/lock.txt /lock.txt" in dockerfile
+
+    def test_apt_is_pinned_at_the_base_channels_snapshot_when_nothing_overrides_it(self) -> None:
+        """`--snapshot` points every suite and component at snapshot.ubuntu.com;
+        the `deb ... main` line it replaced missed `gdal-bin`, which is in
+        `universe` (D-9, 2026-09-14)."""
+        from code_sandboxes.environments.resolve import BuildkitResolveRunner
+
+        dockerfile = BuildkitResolveRunner(buildctl="/usr/bin/true").dockerfile(
+            ResolveRequest(
+                python_version="3.13",
+                requirements=(),
+                constraints=(),
+                indexes=(),
+                apt=("gdal-bin",),
+                base_reference="environments/base/python-cpu@sha256:" + "11" * 32,
+                apt_snapshot="20260914T150000Z",
+            )
+        )
+        assert "--snapshot 20260914T150000Z" in dockerfile
+        assert "sources.list.d" not in dockerfile
+
+    def test_a_snapshot_override_that_is_not_an_id_is_refused(self) -> None:
+        from code_sandboxes.environments.resolve import BuildkitResolveRunner
+
+        with pytest.raises(ValueError):
+            BuildkitResolveRunner(
+                buildctl="/usr/bin/true",
+                apt_snapshot="https://snapshot.ubuntu.com/ubuntu/20260901T000000Z",
+            )
 
     def test_an_index_url_cannot_end_the_run_line_and_start_another_command(self) -> None:
         """The whole `RUN` line is one shell command once BuildKit runs it: an

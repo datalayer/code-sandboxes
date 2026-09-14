@@ -36,6 +36,7 @@ __all__ = [
     "BaseChannelUnpublishedError",
     "approved_base",
     "approved_repositories",
+    "channel_snapshot",
     "is_approved_repository",
     "resolve_base",
 ]
@@ -44,6 +45,8 @@ __all__ = [
 ECR_BASE_PREFIX = "environments/base/"
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+#: A snapshot.ubuntu.com id: the moment, to the second, in UTC.
+_SNAPSHOT = re.compile(r"\d{8}T\d{6}Z")
 
 
 class ApprovedBase(BaseModel):
@@ -59,6 +62,11 @@ class ApprovedBase(BaseModel):
     #: Channel, then variant, to the digest resolution pins. A channel with no
     #: variant is approved and not yet published.
     channels: dict[str, dict[str, str]] = Field(default_factory=dict)
+    #: Channel to the Ubuntu snapshot its apt versions are pinned against
+    #: (D-9): a ``snapshot.ubuntu.com`` id, taken just after the channel's
+    #: image upgraded its packages, so no pin is older than what the image
+    #: already carries. A channel with none pins against the base's mirror.
+    snapshots: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("channels")
     @classmethod
@@ -74,6 +82,17 @@ class ApprovedBase(BaseModel):
             channel: {normalize_variant(variant): digest for variant, digest in digests.items()}
             for channel, digests in channels.items()
         }
+
+    @field_validator("snapshots")
+    @classmethod
+    def _snapshot_ids_only(cls, snapshots: dict[str, str]) -> dict[str, str]:
+        for channel, snapshot in snapshots.items():
+            if not _SNAPSHOT.fullmatch(snapshot):
+                raise ValueError(
+                    f"channel {channel!r} pins apt to {snapshot!r}, "
+                    "which is not a snapshot id like 20260914T150000Z"
+                )
+        return snapshots
 
     @property
     def name(self) -> str:
@@ -103,6 +122,7 @@ APPROVED_BASES: dict[str, ApprovedBase] = {
                     "sha256:cd09308a0c5e5adeec7fb5d8d29cf7455e78ba86f5c6c095a79068a280e1254f",
                 )
             },
+            snapshots={"2026.09": "20260914T150000Z"},
         ),
         # E2-17: jupyter-python-cuda plus the same layer.
         ApprovedBase(
@@ -178,6 +198,14 @@ def resolve_base(
     if digest is None:
         raise BaseChannelUnpublishedError(base, channel, normalized)
     return digest
+
+
+def channel_snapshot(
+    ref: str, channel: str, bases: dict[str, ApprovedBase] = APPROVED_BASES
+) -> str:
+    """The Ubuntu snapshot ``ref`` at ``channel`` pins apt against, or ``""`` for none (D-9)."""
+    base = bases.get(ref)
+    return "" if base is None else base.snapshots.get(channel, "")
 
 
 def approved_repositories(bases: dict[str, ApprovedBase] = APPROVED_BASES) -> tuple[str, ...]:

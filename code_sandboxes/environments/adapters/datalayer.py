@@ -68,7 +68,13 @@ from ..errors import (
     EnvironmentsError,
 )
 from ..files import files_step
-from ..resolve import WHEELHOUSE_IMAGE_PATH, WHEELHOUSE_PATH, apt_pins_in, locked_versions
+from ..resolve import (
+    WHEELHOUSE_IMAGE_PATH,
+    WHEELHOUSE_PATH,
+    apt_pins_in,
+    apt_snapshot_in,
+    locked_versions,
+)
 from ..spec import BuildSecret, Environment, command_names_secret
 
 __all__ = [
@@ -310,14 +316,18 @@ class Builder:
             lines.append(f"ENV {name}={shlex.quote(spec.env[name])}")
         if apt:
             # Pinned, and from the lock: `apt-get install <name>` a month later
-            # is a different artifact.
+            # is a different artifact. From the snapshot the pins were taken
+            # from, when the lock names one: a pinned version can leave the
+            # live mirror (D-9).
             pinned = " ".join(f"{name}={apt[name]}" for name in sorted(apt))
+            snapshot = apt_snapshot_in(request.lock_text)
+            option = f" --snapshot {snapshot}" if snapshot else ""
             lines.extend(
                 [
                     "USER root",
                     "RUN --mount=type=cache,target=/var/cache/apt,sharing=locked "
-                    "apt-get update -qq \\\n"
-                    f"    && apt-get install -y --no-install-recommends {pinned} \\\n"
+                    f"apt-get update -qq{option} \\\n"
+                    f"    && apt-get install -y --no-install-recommends{option} {pinned} \\\n"
                     "    && rm -rf /var/lib/apt/lists/*",
                 ]
             )

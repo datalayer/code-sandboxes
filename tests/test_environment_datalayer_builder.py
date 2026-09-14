@@ -248,6 +248,17 @@ class TestTheDockerfileItGenerates:
         # Never the loose list: that is the whole point of resolving once.
         assert "geopandas==1.1.1" not in dockerfile
 
+    def test_apt_installs_from_the_snapshot_the_lock_pinned_it_at(self) -> None:
+        """A pinned version can leave the live mirror: the build installs from
+        the snapshot the resolver pinned against (D-9)."""
+        request = a_request(lock_text=LOCK + "# datalayer-apt-snapshot: 20260914T150000Z\n")
+        dockerfile = a_builder().dockerfile(request)
+        assert "apt-get update -qq --snapshot 20260914T150000Z" in dockerfile
+        assert (
+            "apt-get install -y --no-install-recommends --snapshot 20260914T150000Z "
+            "gdal-bin=3.8.4+dfsg-3build2" in dockerfile
+        )
+
     def test_a_build_secret_is_mounted_for_the_command_that_names_it_alone(self) -> None:
         """Mounted on the `postInstall` `RUN` that names it alone — never an
         `ARG`/`ENV`, which bakes a value into the image's history, never the
