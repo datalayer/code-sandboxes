@@ -8,6 +8,16 @@
 
 ## Unreleased
 
+- **Modal attaches a build secret to the `postInstall` steps that name it**
+  (`environments.adapters.modal`; PLAN_ENV.md E3-05). Modal used to refuse
+  every `buildSecrets` spec. Each declared secret is now resolved from IAM
+  before Modal is touched, made into a Modal Secret of the build's own,
+  passed as `secrets=` to exactly the `run_commands` steps whose command
+  names it, and deleted after the build like the base-reader secret. Its
+  value is redacted from the log and from a failed build's error. A
+  `mountAs: file` secret is refused, because Modal passes secrets as
+  environment variables and a file would land in a layer.
+
 ## 1.9.3
 
 - **A build secret is mounted only on the `postInstall` commands that name it**
