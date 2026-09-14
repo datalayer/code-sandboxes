@@ -8,6 +8,8 @@
 
 ## Unreleased
 
+## 1.9.8
+
 - **Every page of a scan's findings is read before deciding**
   (`environments.attest`; PLAN_ENV.md E1-08, D-11). `describe_image_scan_
   findings` paginates, and the attestor called it exactly once. Found live
