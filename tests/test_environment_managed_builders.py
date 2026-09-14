@@ -230,11 +230,22 @@ class TestWhatIsSaidBeforeAnythingIsQueued:
             assert "datalayer" in messages(report) and "modal" in messages(report)
             assert "spec.buildSecrets" in fields(report)
 
-    def test_datalayer_and_modal_accept_a_build_secret(self) -> None:
+    def test_datalayer_accepts_a_build_secret(self) -> None:
         spec = {"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "TOKEN"}]}
-        for variant in ("datalayer", "modal"):
-            report = get_builder(variant).validate(environment(**spec))
-            assert report.supported is True, f"{variant}: {messages(report)}"
+        report = get_builder("datalayer").validate(environment(**spec))
+        assert report.supported is True, messages(report)
+
+    def test_modal_refuses_a_build_secret_too_but_not_for_lack_of_a_mechanism(self) -> None:
+        """Modal has a real per-step `secrets=` mechanism, unlike E2B and
+        Daytona — `supports_build_secrets` stays the default `True` — but
+        nothing in this builder wires `resolve_build_secret` (E3-05) into
+        it yet, so a spec naming one is still refused, for its own reason
+        rather than the provider-capability one E2B/Daytona give (E2-05)."""
+        spec = {"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "TOKEN"}]}
+        report = get_builder("modal").validate(environment(**spec))
+        assert report.supported is False, messages(report)
+        assert "not wired into this builder" in messages(report)
+        assert "spec.buildSecrets" in fields(report)
 
     def test_every_finding_carries_the_capability_code(self) -> None:
         report = get_builder("e2b").validate(

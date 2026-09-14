@@ -107,10 +107,13 @@ option, not an image property, per section 11.4 item 10).
 **`spec.buildSecrets` is refused, unlike what Modal's own SDK could do.**
 `run_commands`/`apt_install`/`dockerfile_commands` each take a per-step
 `secrets=` collection — Modal has a real per-step secret mechanism, unlike
-E2B or Daytona. What is missing is not Modal's capability but this branch's
-own: `resolve_build_secret` (E3-05) is a separate, not-yet-merged PR, so
-there is nothing here yet to turn a `build_secret_id` into a value. Refused
-for now, with that reason, rather than silently built without it.
+E2B or Daytona. What is missing is not Modal's capability but this
+builder's own: `resolve_build_secret` (E3-05) has landed (`code_sandboxes
+.environments.build_secrets`), but nothing here calls it yet — wiring it
+into a Modal `secrets=` collection, and its own creation/cleanup lifecycle
+(mirroring `_ecr_secret`/`_delete_secret` above), is real, separate,
+follow-up work, not attempted in this pass. Refused for now, with that
+reason, rather than silently built without it.
 
 @module code_sandboxes.environments.adapters.modal
 """
@@ -296,18 +299,18 @@ class Builder(ManagedBuilder):
                 )
         if environment.spec.build_secrets:
             # Modal's own per-step `secrets=` mechanism could carry one —
-            # unlike E2B or Daytona — but `resolve_build_secret` (E3-05) is
-            # a separate, not-yet-merged branch, so there is nothing here
-            # yet to turn an id into a value (found in this item's own
-            # implementation, not a provider limit).
+            # unlike E2B or Daytona — and `resolve_build_secret` (E3-05) has
+            # landed, but nothing here calls it yet: wiring it into a Modal
+            # `secrets=` collection is real, separate work (found in this
+            # item's own implementation, not a provider limit).
             ids = ", ".join(secret.id for secret in environment.spec.build_secrets)
             findings.append(
                 CapabilityFinding(
                     code="DL_ENV_CAPABILITY_UNSUPPORTED",
                     message=(
-                        f"`buildSecrets` ({ids}) needs `resolve_build_secret` (E3-05), not yet "
-                        "in this branch — Modal's own per-step secrets could carry one once it "
-                        "lands"
+                        f"`buildSecrets` ({ids}) is not wired into this builder yet — Modal's own "
+                        "per-step secrets could carry one, and resolve_build_secret (E3-05) can "
+                        "resolve one, but nothing here connects them"
                     ),
                     field="spec.buildSecrets",
                 )
@@ -347,7 +350,8 @@ class Builder(ManagedBuilder):
             # missing from it.
             raise EnvironmentsError(
                 CAPABILITY_UNSUPPORTED,
-                "Modal's build secrets need `resolve_build_secret` (E3-05), not yet in this branch",
+                "Modal's build secrets are not wired into this builder yet (E3-05 has landed, "
+                "but nothing here calls it)",
                 detail={"variant": self.variant, "missing": "E3-05"},
             )
         sdk = self._modal_sdk()
