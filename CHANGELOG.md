@@ -8,6 +8,14 @@
 
 ## Unreleased
 
+## 1.9.6
+
+- **`datalayer/python-cpu`'s `2026.09` channel points at the patched base**
+  (`environments.bases`; PLAN_ENV.md E1-05, E1-08). `jupyter-python` 0.2.2
+  upgrades the Ubuntu security packages and conda's own OpenSSL, and drops
+  JupyterLab's staging `yarn.lock` — the 31 fixable-critical findings that
+  blocked every build from the prior digest under the default scan policy.
+
 ## 1.9.5
 
 - **Attest waits for a just-pushed image's scan to exist**
