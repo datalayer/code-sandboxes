@@ -8,6 +8,17 @@
 
 ## Unreleased
 
+## 1.9.12
+
+- **`owner_repository`, `owner_cache_repository` and `ECR_ENVIRONMENT_PREFIX`
+  moved from `environments.adapters.datalayer` to `environments.builders`**
+  (PLAN_ENV E1-14): Runtimes now validates a smoke-test launch's artifact
+  against this same repository shape, and `builders` is the neutral module a
+  service may import — `adapters.datalayer` is not, and importing it from a
+  service binds that service to the Datalayer provider the way
+  `check_provider_boundary.py` exists to prevent. Re-exported from the
+  adapter unchanged, so every existing `from .datalayer import owner_repository` still works. No behavior change; 78 tests still pass.
+
 ## 1.9.11
 
 - **1.9.10's own fix did not work: `--registry-referrers-mode` only ever
@@ -17,8 +28,7 @@
   landed as an OCI 1.1 referrer, no legacy tag. `Attestor` no longer tries
   to force cosign's own storage choice. Its replay check and its own
   `signature_ref` now ask cosign directly, the same way the Operator's own
-  verify will: `can_verify(reference)` runs `cosign verify --key <key>
-  --insecure-ignore-tlog=true <reference>` and answers its exit code, and
+  verify will: `can_verify(reference)` runs `cosign verify --key <key> --insecure-ignore-tlog=true <reference>` and answers its exit code, and
   `signature_ref` is the digest reference itself — what `cosign verify`
   takes, not a tag it may or may not have written. Signing the same digest
   twice no longer errors the way a second push under the old immutable tag
@@ -31,8 +41,7 @@
 - **cosign signs the legacy tag again, not just an OCI referrer**
   (`environments.attest`; PLAN_ENV.md E1-09). cosign 3.1.3 defaults to the
   OCI 1.1 referrers API for a signature's own storage, not the classic
-  `sha256-<hex>.sig` sidecar tag. Found live on r1, 2026-09-14: `cosign
-  sign` reported success — the first artifact this pipeline ever actually
+  `sha256-<hex>.sig` sidecar tag. Found live on r1, 2026-09-14: `cosign sign` reported success — the first artifact this pipeline ever actually
   signed — but pushed no such tag; `_signature_exists`'s own replay check
   and the `signature_ref` this workflow records both assume one exists.
   `--registry-referrers-mode=legacy` restores it. `cosign verify` needs no
@@ -54,8 +63,7 @@
 ## 1.9.8
 
 - **Every page of a scan's findings is read before deciding**
-  (`environments.attest`; PLAN_ENV.md E1-08, D-11). `describe_image_scan_
-  findings` paginates, and the attestor called it exactly once. Found live
+  (`environments.attest`; PLAN_ENV.md E1-08, D-11). `describe_image_scan_ findings` paginates, and the attestor called it exactly once. Found live
   on r1, 2026-09-14: the first real image with more findings than one page
   had 1,547 enhanced findings, 31 of them critical, and the single-page read
   saw a small enough slice that the decision passed — an image with real,
@@ -66,8 +74,7 @@
 
 ## 1.9.7
 
-- **cosign signs again under `--use-signing-config=false`** (`environments
-  .attest`; PLAN_ENV.md E1-09). cosign 3.1.3 defaults `--use-signing-config`
+- **cosign signs again under `--use-signing-config=false`** (`environments .attest`; PLAN_ENV.md E1-09). cosign 3.1.3 defaults `--use-signing-config`
   to `true`: a TUF-provided signing config now names the service URLs,
   including a transparency log, and `--tlog-upload=false` alone no longer
   overrides that — cosign refused the combination outright (found live on
@@ -100,8 +107,7 @@
   from the same snapshot. This replaces a `deb` line that named only `main`
   (`gdal-bin` is in `universe`) and left the live mirror enabled beside it.
   `DATALAYER_APT_SNAPSHOT` must now be a snapshot id.
-- **A private registry's credential is resolved and used** (`environments
-  .image_import`, `environments.resolve`; PLAN_ENV.md E3-04's second half).
+- **A private registry's credential is resolved and used** (`environments .image_import`, `environments.resolve`; PLAN_ENV.md E3-04's second half).
   `image.credentialSecretId` used to only clear the allowlist check; nothing
   fetched or used the credential it named. It is now fetched through the
   same IAM route a build secret is (E3-05), and sent as HTTP Basic on the
@@ -113,8 +119,7 @@
 - **The Datalayer base channel's own five ESM-locked advisories are allowed**
   (`environments.policy`; PLAN_ENV.md E1-08). Amazon Inspector marks all five
   fixable, but the fix is an Ubuntu ESM package version a plain
-  `apt-get upgrade` cannot reach. Reviewed and added to `DEFAULT_POLICY
-  .allowed`, 2026-09-14, so they are recorded as allowed rather than missed,
+  `apt-get upgrade` cannot reach. Reviewed and added to `DEFAULT_POLICY .allowed`, 2026-09-14, so they are recorded as allowed rather than missed,
   and any other critical still blocks.
 
 ## 1.9.4

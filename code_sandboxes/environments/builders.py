@@ -32,6 +32,7 @@ from .spec import VARIANTS, Environment
 
 __all__ = [
     "BUILDER_MODULES",
+    "ECR_ENVIRONMENT_PREFIX",
     "LAUNCH_ARGUMENTS",
     "ArtifactMetadata",
     "ArtifactReference",
@@ -45,9 +46,48 @@ __all__ = [
     "builder_contract_violations",
     "get_builder",
     "launch_arguments",
+    "owner_cache_repository",
+    "owner_repository",
 ]
 
 _OCI_DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
+
+#: Where an owner's environments live in ECR (D-10). Provider-specific in what
+#: it names (ECR), but neutral in what reaches for it: Runtimes validates a
+#: build's own artifact reference against this same shape (E1-14) without
+#: importing the Datalayer adapter that pushes there, which is exactly why
+#: this lives here rather than in `adapters.datalayer` — the one variant a
+#: service (not just a builder) legitimately names by structure, never by SDK.
+ECR_ENVIRONMENT_PREFIX = "environments/u/"
+
+
+def owner_repository(owner_uid: str, environment_name: str) -> str:
+    """The owner's repository for one environment: ``environments/u/<owner>/<name>``.
+
+    Lowercased: an ECR repository name matches
+    ``[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*`` per path segment, and this
+    project's own uids are ULIDs, conventionally uppercase — found live,
+    2026-09-14, the first real build ever run for a real account's own
+    uid rather than a lowercase test fixture: ``DescribeRepositories``
+    refused it outright, "Invalid parameter at 'repositoryName'". Lowering
+    both segments here, the one place this reference is built, keeps every
+    caller (create, inspect, exists, delete) consistent with itself without
+    each needing to remember to.
+    """
+    if not owner_uid or not environment_name:
+        raise ValueError("an owner and an environment name make the repository")
+    return f"{ECR_ENVIRONMENT_PREFIX}{owner_uid}/{environment_name}".lower()
+
+
+def owner_cache_repository(owner_uid: str) -> str:
+    """The owner's own BuildKit cache repository: ``environments/cache/u/<owner>``.
+
+    Lowercased for the same reason ``owner_repository`` is (a ULID, not a
+    lowercase test fixture, is what a real build actually names).
+    """
+    if not owner_uid:
+        raise ValueError("an owner makes the cache repository")
+    return f"environments/cache/u/{owner_uid}".lower()
 
 
 class _Model(BaseModel):

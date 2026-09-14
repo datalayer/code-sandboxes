@@ -50,6 +50,7 @@ from typing import Any, Callable
 
 from ..build_secrets import resolve_build_secret
 from ..builders import (
+    ECR_ENVIRONMENT_PREFIX,
     ArtifactMetadata,
     ArtifactReference,
     BuildRequest,
@@ -57,6 +58,8 @@ from ..builders import (
     CapabilityReport,
     CapabilitySet,
     ValidationResult,
+    owner_cache_repository,
+    owner_repository,
 )
 from ..contract import SANDBOX_CONTRACT_V1
 from ..errors import (
@@ -84,9 +87,6 @@ __all__ = [
     "owner_repository",
 ]
 
-#: Where an owner's environments live in ECR (D-10).
-ECR_ENVIRONMENT_PREFIX = "environments/u/"
-
 #: The size classes a Datalayer sandbox runs (D-4). The GPU ones stay in the
 #: specification and run on Modal or Daytona until E4-11 (D-20).
 CPU_SIZE_CLASSES = ("small", "medium", "large")
@@ -98,34 +98,12 @@ DEFAULT_MAX_BUILD_SECONDS = 45 * 60
 #: and waited for at every cold start.
 DEFAULT_MAX_ARTIFACT_BYTES = 20 * 1024**3
 
-
-def owner_repository(owner_uid: str, environment_name: str) -> str:
-    """The owner's repository for one environment: ``environments/u/<owner>/<name>``.
-
-    Lowercased: an ECR repository name matches
-    ``[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*`` per path segment, and this
-    project's own uids are ULIDs, conventionally uppercase — found live,
-    2026-09-14, the first real build ever run for a real account's own
-    uid rather than a lowercase test fixture: ``DescribeRepositories``
-    refused it outright, "Invalid parameter at 'repositoryName'". Lowering
-    both segments here, the one place this reference is built, keeps every
-    caller (create, inspect, exists, delete) consistent with itself without
-    each needing to remember to.
-    """
-    if not owner_uid or not environment_name:
-        raise ValueError("an owner and an environment name make the repository")
-    return f"{ECR_ENVIRONMENT_PREFIX}{owner_uid}/{environment_name}".lower()
-
-
-def owner_cache_repository(owner_uid: str) -> str:
-    """The owner's own BuildKit cache repository: ``environments/cache/u/<owner>``.
-
-    Lowercased for the same reason ``owner_repository`` is (a ULID, not a
-    lowercase test fixture, is what a real build actually names).
-    """
-    if not owner_uid:
-        raise ValueError("an owner makes the cache repository")
-    return f"environments/cache/u/{owner_uid}".lower()
+# `ECR_ENVIRONMENT_PREFIX`, `owner_repository` and `owner_cache_repository`
+# moved to `..builders` (E1-14): Runtimes validates a smoke-test launch's
+# artifact against this same repository shape, and `builders` is the neutral
+# module a service may import — this adapter is not. Re-exported here, still
+# `from .datalayer import owner_repository`, for every caller that already
+# does; nothing about their behavior changed.
 
 
 def _secret_mount(secret: BuildSecret) -> str:
