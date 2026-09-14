@@ -8,6 +8,20 @@
 
 ## Unreleased
 
+## 1.9.2
+
+- **A real ECR repository name is lowercase; a real owner uid is not**
+  (`environments.adapters.datalayer.owner_repository`, new
+  `owner_cache_repository`; PLAN_ENV.md E1-07). Found live, 2026-09-14, the
+  first real Datalayer build ever run for a real account's own uid rather
+  than a lowercase test fixture: `DescribeRepositories` refused outright,
+  "Invalid parameter at 'repositoryName'" — this project's own uids are
+  ULIDs, conventionally uppercase, and ECR repository names match
+  `[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*` per path segment. Both the owner's own
+  repository and the owner's cache repository are lowered at the one place
+  each is built, so every caller (create, inspect, exists, delete, the
+  cache import/export) stays consistent with itself.
+
 ## 1.9.1
 
 - **mTLS to the build pool's `buildkitd`** (`environments.adapters.datalayer.Builder`,

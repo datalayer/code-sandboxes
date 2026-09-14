@@ -19,7 +19,11 @@ from pathlib import Path
 
 import pytest
 
-from code_sandboxes.environments.adapters.datalayer import Builder, owner_repository
+from code_sandboxes.environments.adapters.datalayer import (
+    Builder,
+    owner_cache_repository,
+    owner_repository,
+)
 from code_sandboxes.environments.builders import ArtifactReference, BuildRequest
 from code_sandboxes.environments.errors import EnvironmentsError
 from code_sandboxes.environments.spec import parse_environment
@@ -564,6 +568,24 @@ class TestBuildingAndPushing:
         )
         a_builder(run=Buildctl(), ecr=ecr).build(a_request())
         assert ecr.created == []
+
+    def test_a_real_uppercase_ulid_owner_still_names_a_valid_ecr_repository(self) -> None:
+        """Found live, 2026-09-14: the first real build for a real account's
+        own uid, not a lowercase test fixture. ECR repository names match
+        ``[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*`` per segment; this project's own
+        uids are ULIDs, conventionally uppercase — `DescribeRepositories`
+        refused the request outright before this fix."""
+        ulid_owner = "01JV1VE1T5VG22Z05F6EFBMW8E"
+        ecr = FakeEcr()
+        a_builder(run=Buildctl(), ecr=ecr).build(a_request(owner_uid=ulid_owner))
+        names = [item["repositoryName"] for item in ecr.created]
+        assert names, "the build should have created at least the owner's own repository"
+        for name in names:
+            assert name == name.lower(), f"{name!r} is not a valid ECR repository name"
+        assert owner_repository(ulid_owner, "geospatial-analysis") == (
+            f"environments/u/{ulid_owner.lower()}/geospatial-analysis"
+        )
+        assert owner_cache_repository(ulid_owner) == f"environments/cache/u/{ulid_owner.lower()}"
 
     def test_the_credential_reaches_buildctl_and_not_the_workers_own_config(self) -> None:
         seen: dict[str, object] = {}

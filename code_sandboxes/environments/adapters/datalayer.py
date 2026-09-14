@@ -71,7 +71,12 @@ from ..files import files_step
 from ..resolve import WHEELHOUSE_IMAGE_PATH, WHEELHOUSE_PATH, apt_pins_in, locked_versions
 from ..spec import BuildSecret, Environment
 
-__all__ = ["ECR_ENVIRONMENT_PREFIX", "Builder", "owner_repository"]
+__all__ = [
+    "ECR_ENVIRONMENT_PREFIX",
+    "Builder",
+    "owner_cache_repository",
+    "owner_repository",
+]
 
 #: Where an owner's environments live in ECR (D-10).
 ECR_ENVIRONMENT_PREFIX = "environments/u/"
@@ -89,10 +94,32 @@ DEFAULT_MAX_ARTIFACT_BYTES = 20 * 1024**3
 
 
 def owner_repository(owner_uid: str, environment_name: str) -> str:
-    """The owner's repository for one environment: ``environments/u/<owner>/<name>``."""
+    """The owner's repository for one environment: ``environments/u/<owner>/<name>``.
+
+    Lowercased: an ECR repository name matches
+    ``[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*`` per path segment, and this
+    project's own uids are ULIDs, conventionally uppercase — found live,
+    2026-09-14, the first real build ever run for a real account's own
+    uid rather than a lowercase test fixture: ``DescribeRepositories``
+    refused it outright, "Invalid parameter at 'repositoryName'". Lowering
+    both segments here, the one place this reference is built, keeps every
+    caller (create, inspect, exists, delete) consistent with itself without
+    each needing to remember to.
+    """
     if not owner_uid or not environment_name:
         raise ValueError("an owner and an environment name make the repository")
-    return f"{ECR_ENVIRONMENT_PREFIX}{owner_uid}/{environment_name}"
+    return f"{ECR_ENVIRONMENT_PREFIX}{owner_uid}/{environment_name}".lower()
+
+
+def owner_cache_repository(owner_uid: str) -> str:
+    """The owner's own BuildKit cache repository: ``environments/cache/u/<owner>``.
+
+    Lowercased for the same reason ``owner_repository`` is (a ULID, not a
+    lowercase test fixture, is what a real build actually names).
+    """
+    if not owner_uid:
+        raise ValueError("an owner makes the cache repository")
+    return f"environments/cache/u/{owner_uid}".lower()
 
 
 def _secret_mount(secret: BuildSecret) -> str:
@@ -374,7 +401,7 @@ class Builder:
         repository = owner_repository(request.owner_uid, request.environment.metadata.name)
         registry = self._registry_host()
         self._ensure_repository(repository)
-        self._ensure_cache_repository(f"environments/cache/u/{request.owner_uid}")
+        self._ensure_cache_repository(owner_cache_repository(request.owner_uid))
         tag = f"v{request.version}-{request.build_uid}"
         reference = f"{registry}/{repository}:{tag}"
         with tempfile.TemporaryDirectory(prefix="dl-build-") as directory:
@@ -637,7 +664,7 @@ class Builder:
     def _cache_options(self, request: BuildRequest) -> list[str]:
         """The owner's cache, imported and exported: never another owner's (D-12)."""
         registry = self._registry_host()
-        cache = f"{registry}/environments/cache/u/{request.owner_uid}:{self.variant}"
+        cache = f"{registry}/{owner_cache_repository(request.owner_uid)}:{self.variant}"
         return [
             "--import-cache",
             f"type=registry,ref={cache}",
