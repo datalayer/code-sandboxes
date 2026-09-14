@@ -71,9 +71,22 @@ async def test_items_arrive_while_the_code_is_still_running() -> None:
     # The first line lands well before the run ends. Against the replay
     # implementation every arrival is at the end and this is the assertion
     # that fails.
+    #
+    # A fixed `first_at < 0.3` used to be here: three 0.15s ticks put the
+    # first arrival at ~0.15s normally, comfortably under 0.3s — but a busy
+    # CI runner slows the whole run down, not just the margin, and pushed
+    # `first_at` past 0.3 on its own (0.30s, 0.32s, ..., 0.39s, observed
+    # live, never against a real replay regression). Checking the *ratio*
+    # instead is immune to that: the first arrival is normally well under
+    # half of the total span (~1/3 of it, evenly spaced ticks), while a
+    # replay implementation bunches every arrival at the very end, at
+    # (nearly) the same instant — ratio close to 1 — regardless of how slow
+    # or fast the run itself was.
     first_at, _ = arrivals[0]
     last_at, _ = arrivals[-1]
-    assert first_at < 0.3, f"first item arrived at {first_at:.2f}s"
+    assert first_at < last_at * 0.75, (
+        f"first item arrived at {first_at:.2f}s of {last_at:.2f}s total"
+    )
     assert last_at - first_at > 0.2, "everything arrived at once"
 
 
