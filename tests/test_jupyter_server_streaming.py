@@ -84,9 +84,9 @@ async def test_items_arrive_while_the_code_is_still_running() -> None:
     # or fast the run itself was.
     first_at, _ = arrivals[0]
     last_at, _ = arrivals[-1]
-    assert first_at < last_at * 0.75, (
-        f"first item arrived at {first_at:.2f}s of {last_at:.2f}s total"
-    )
+    assert (
+        first_at < last_at * 0.75
+    ), f"first item arrived at {first_at:.2f}s of {last_at:.2f}s total"
     assert last_at - first_at > 0.2, "everything arrived at once"
 
 
