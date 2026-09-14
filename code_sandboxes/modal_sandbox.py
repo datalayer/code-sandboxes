@@ -64,6 +64,16 @@ logger = logging.getLogger(__name__)
 DEFAULT_APP_NAME = "code-sandboxes"
 DEFAULT_MODAL_PYTHON_VERSION = "3.12"
 
+#: The sandbox contract's own identity and content directory (D-4, §3) — the
+#: numbers a Modal-built Environments artifact's image is always chowned to
+#: (`environments/adapters/modal.py`), duplicated here rather than imported:
+#: this module is the general-purpose launcher, that one a layer above it
+#: built only for Environments, and the dependency runs one way.
+_CONTRACT_UID = "1000"
+_CONTRACT_GID = "100"
+_CONTRACT_HOME = "/home/datalayer"
+_CONTRACT_CONTENT_DIR = "/home/datalayer/content"
+
 
 def _resolve_modal_gpu(gpu_flavor: str, modal_module: Any) -> Any:
     """Resolve a GPU flavor string to a Modal GPU spec when possible.
@@ -109,8 +119,39 @@ def _resolve_modal_gpu(gpu_flavor: str, modal_module: Any) -> Any:
 #: lines on stdin — one request, one reply — executing everything in a single
 #: namespace, with stdout/stderr captured per request and the value of a
 #: trailing expression repr'd the way a REPL would.
+#:
+#: **Where the sandbox contract's identity is put back, for a contract
+#: artifact only (PLAN_ENV.md E2-05).** Modal ignores the image's own
+#: Dockerfile `USER`, so every process it starts — this driver included —
+#: runs as root regardless of what a Datalayer-built artifact's own image
+#: bakes in. `modal.Sandbox.exec()` has no `user=` of its own to ask for
+#: instead (confirmed against the installed SDK's own signature), so this
+#: driver, which this package authors and controls end to end, is where
+#: that gets fixed instead. `_start_driver` sets
+#: `DATALAYER_SANDBOX_CONTRACT_UID`/`_GID` only when `self._image_id` is
+#: set — that is, only when this `ModalSandbox` was launched from a built
+#: Environments artifact, whose image the Modal builder (`adapters/modal.py`)
+#: always chowns to `1000:100` even though the `USER` line it also emits is
+#: the very thing Modal ignores. A plain `ModalSandbox` (`debian_slim`, or
+#: anyone else's image, with no `image_id` at all) never has the two
+#: variables set and drops nothing — unaffected, on purpose. Even set, the
+#: drop only takes if `os.getuid() == 0` and the target ids are real in
+#: *this* image; anything else leaves the driver exactly as it started
+#: rather than crash a session that could otherwise still run.
 _DRIVER_SOURCE = """
-import ast, contextlib, io, json, sys, traceback
+import ast, contextlib, io, json, os, sys, traceback
+
+_contract_uid = os.environ.pop("DATALAYER_SANDBOX_CONTRACT_UID", "")
+_contract_gid = os.environ.pop("DATALAYER_SANDBOX_CONTRACT_GID", "")
+_contract_home = os.environ.pop("DATALAYER_SANDBOX_CONTRACT_HOME", "")
+if _contract_uid and _contract_gid and os.getuid() == 0:
+    try:
+        os.setgid(int(_contract_gid))
+        os.setuid(int(_contract_uid))
+        if _contract_home:
+            os.environ["HOME"] = _contract_home
+    except OSError:
+        pass  # not real in this image; stay as we were rather than crash
 
 namespace = {"__name__": "__main__"}
 for line in sys.stdin:
@@ -424,8 +465,25 @@ class ModalSandbox(Sandbox):
         import queue
         import threading
 
+        exec_kwargs: dict[str, Any] = {}
+        if self._image_id:
+            # Only for a launch from a built Environments artifact (D-4,
+            # §3) — `_DRIVER_SOURCE`'s own comment says why, and why a plain
+            # `ModalSandbox` (no `image_id`) never sets these and drops
+            # nothing. `exec()` has no `user=` of its own to ask for
+            # instead (confirmed against the installed SDK's own
+            # signature), so the driver does the dropping, and `workdir=`
+            # is exec's own, real parameter for the rest.
+            exec_kwargs["env"] = {
+                "DATALAYER_SANDBOX_CONTRACT_UID": _CONTRACT_UID,
+                "DATALAYER_SANDBOX_CONTRACT_GID": _CONTRACT_GID,
+                "DATALAYER_SANDBOX_CONTRACT_HOME": _CONTRACT_HOME,
+            }
+            exec_kwargs["workdir"] = _CONTRACT_CONTENT_DIR
         try:
-            driver = self._sandbox.exec(self._python_executable, "-u", "-c", _DRIVER_SOURCE)
+            driver = self._sandbox.exec(
+                self._python_executable, "-u", "-c", _DRIVER_SOURCE, **exec_kwargs
+            )
         except Exception:
             logger.warning(
                 "The Modal session driver could not be started; snippets will not share state.",
@@ -510,18 +568,23 @@ class ModalSandbox(Sandbox):
                 return reply
 
     def stop(self) -> None:
-        if not self._started:
+        # Guarded on the resource itself, not `_started` (found in review,
+        # code-sandboxes#32): `start()` creates the remote sandbox well
+        # before it marks itself started (`_start_driver`, `create_context`,
+        # building `SandboxInfo` all come after), so a failure in between
+        # would otherwise leave a real, running sandbox that `stop()` skips
+        # entirely and this object can never clean up again.
+        if self._sandbox is None:
             return
-        if self._sandbox is not None:
-            try:
-                self._sandbox.terminate()
-            except Exception:
-                logger.debug("Ignoring error while terminating Modal sandbox", exc_info=True)
-            try:
-                self._sandbox.detach()
-            except Exception:
-                logger.debug("Ignoring error while detaching Modal sandbox", exc_info=True)
-            self._sandbox = None
+        try:
+            self._sandbox.terminate()
+        except Exception:
+            logger.debug("Ignoring error while terminating Modal sandbox", exc_info=True)
+        try:
+            self._sandbox.detach()
+        except Exception:
+            logger.debug("Ignoring error while detaching Modal sandbox", exc_info=True)
+        self._sandbox = None
         self._app = None
         self._jupyter_endpoint = None
         self._volume_mounts.stopped()

@@ -230,11 +230,22 @@ class TestWhatIsSaidBeforeAnythingIsQueued:
             assert "datalayer" in messages(report) and "modal" in messages(report)
             assert "spec.buildSecrets" in fields(report)
 
-    def test_datalayer_and_modal_accept_a_build_secret(self) -> None:
+    def test_datalayer_accepts_a_build_secret(self) -> None:
         spec = {"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "TOKEN"}]}
-        for variant in ("datalayer", "modal"):
-            report = get_builder(variant).validate(environment(**spec))
-            assert report.supported is True, f"{variant}: {messages(report)}"
+        report = get_builder("datalayer").validate(environment(**spec))
+        assert report.supported is True, messages(report)
+
+    def test_modal_refuses_a_build_secret_too_but_not_for_lack_of_a_mechanism(self) -> None:
+        """Modal has a real per-step `secrets=` mechanism, unlike E2B and
+        Daytona — `supports_build_secrets` stays the default `True` — but
+        nothing in this builder wires `resolve_build_secret` (E3-05) into
+        it yet, so a spec naming one is still refused, for its own reason
+        rather than the provider-capability one E2B/Daytona give (E2-05)."""
+        spec = {"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "TOKEN"}]}
+        report = get_builder("modal").validate(environment(**spec))
+        assert report.supported is False, messages(report)
+        assert "not wired into this builder" in messages(report)
+        assert "spec.buildSecrets" in fields(report)
 
     def test_every_finding_carries_the_capability_code(self) -> None:
         report = get_builder("e2b").validate(
@@ -251,36 +262,28 @@ class TestWhatIsSaidBeforeAnythingIsQueued:
 
 
 class TestTheHalfThatIsNotBuiltYet:
-    @pytest.mark.parametrize("variant,item", [("modal", "E2-05")])
-    def test_a_build_refuses_by_naming_what_is_missing(self, variant: str, item: str) -> None:
-        """A caller is never told "no builder" when the real answer is "not
-        this item yet" — and never when the real answer is "not this spec".
-        E2B (E2-03) and Daytona (E2-04) are both built now, each covered by
-        its own test_environment_{e2b,daytona}_builder.py, so neither is
-        one of these any more."""
-        builder = get_builder(variant)
-        with pytest.raises(EnvironmentsError) as raised:
-            builder.build(None)  # type: ignore[arg-type]
-        assert raised.value.code.code == "DL_ENV_CAPABILITY_UNSUPPORTED"
-        assert raised.value.detail["missing"] == item
-        assert raised.value.detail["variant"] == variant
-        assert "answer whether a spec is buildable" in str(raised.value)
+    """E2B (E2-03), Daytona (E2-04) and Modal (E2-05) — every managed
+    variant — are all built now, each covered by its own
+    test_environment_{e2b,daytona,modal}_builder.py, so there is no longer a
+    variant to parametrize "refuses because it is not built at all yet"
+    over. What is left standing is what each one's own item did not build:
+    `smoke_test`, `resolve` and `delete`, still refusing via the inherited
+    `ManagedBuilder` methods on all three."""
 
-    @pytest.mark.parametrize("variant", ["modal"])
-    def test_every_operation_that_touches_the_provider_refuses(self, variant: str) -> None:
-        builder = get_builder(variant)
+    def test_modal_still_refuses_what_e2_05_did_not_build(self) -> None:
+        """`build`/`inspect`/`exists` are E2-05's; `smoke_test`, `resolve` and
+        `delete` are not — see test_environment_modal_builder.py for what
+        is built."""
+        builder = get_builder("modal")
         calls = {
-            "build": lambda: builder.build(None),  # type: ignore[arg-type]
-            "inspect": lambda: builder.inspect(None),  # type: ignore[arg-type]
             "smoke_test": lambda: builder.smoke_test(None),  # type: ignore[arg-type]
             "resolve": lambda: builder.resolve("geo@1"),
-            "exists": lambda: builder.exists(None),  # type: ignore[arg-type]
             "delete": lambda: builder.delete(None),  # type: ignore[arg-type]
         }
         for operation, call in calls.items():
             with pytest.raises(EnvironmentsError) as raised:
                 call()
-            assert raised.value.detail["operation"], f"{variant}.{operation}"
+            assert raised.value.detail["operation"], f"modal.{operation}"
 
     def test_e2b_still_refuses_what_e2_03_did_not_build(self) -> None:
         """`build`/`inspect`/`exists` are E2-03's; `smoke_test`, `resolve` and

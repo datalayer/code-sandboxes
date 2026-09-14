@@ -71,3 +71,33 @@ with Sandbox.create(
     result = sandbox.run_code("import numpy as np; print(np.arange(3).sum())")
     print(result.stdout)  # "3"
 ```
+
+## Environments
+
+An [Environment](/docs/environments) built for Modal is an **image id**,
+`im-…` — pulled `from_aws_ecr` off the approved Datalayer base, with your
+lock installed by `uv pip sync --require-hashes` on top. A published name
+is worth having for operability, but a launch always pins the id: each
+build gets a fresh credential, so no layer cache survives between builds,
+and the id is the only reference that names one build and not another.
+
+**Bring your own account:** a build runs in the environment owner's own
+Modal workspace, from the same `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` pair
+`Sandbox.create` itself accepts (above) — never this package's ambient
+token.
+
+**Modal ignores the image's own `USER`,** so every build step runs as
+root regardless of what the base sets — but a launched sandbox's identity
+is put back where it actually matters: the session driver
+`Sandbox.create` starts inside the container drops itself to the
+contract's `1000:100` before it starts executing anything, for an
+Environment-built image specifically (never for a plain `ModalSandbox`
+with no image id — general Modal sandbox usage here is unaffected).
+Confirmed live: a launched sandbox's identity check now passes, where it
+used to report `uid: 0`.
+
+**A known, open gap:** two of the core tier's checks — imports and
+filesystem — still fail on a launched Environment sandbox, for a reason
+not yet root-caused: reproduced on a real, contract-built image, not on a
+plain `ModalSandbox`, so it is specific to something about that image
+under repeated `exec`, not the identity fix above.
