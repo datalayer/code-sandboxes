@@ -150,6 +150,15 @@ class Attestor:
     policy
         What the findings have to say. The owner's default unless an
         organization tightened it (E3-06).
+    registry_auth
+        What cosign reads the repository with, to sign it (D-17): the same
+        `{"DOCKER_CONFIG": <dir>}` shape the resolver and the builder already
+        take off a `BuildCredential`, the one attribute name every caller
+        reads regardless of what kind of credential it holds. cosign has no
+        AWS credential chain of its own for ECR, unlike the boto3 client the
+        scan is read with — found live, 2026-09-14: with none, `cosign sign`
+        reached the registry anonymously and was refused, `401 Unauthorized`,
+        on every real artifact this pipeline ever tried to sign.
     """
 
     def __init__(
@@ -166,6 +175,7 @@ class Attestor:
         scan_timeout_seconds: float = DEFAULT_SCAN_TIMEOUT_SECONDS,
         scan_interval_seconds: float = DEFAULT_SCAN_INTERVAL_SECONDS,
         log: Callable[[str], None] | None = None,
+        registry_auth: Mapping[str, str] | None = None,
     ) -> None:
         self._ecr = ecr
         self._cosign = (shutil.which("cosign") or "") if cosign is None else cosign
@@ -178,6 +188,7 @@ class Attestor:
         self._timeout = scan_timeout_seconds
         self._interval = scan_interval_seconds
         self._log = log or (lambda _line: None)
+        self._registry_auth = dict(registry_auth or {})
 
     # -- the scan -------------------------------------------------------------
 
@@ -459,9 +470,19 @@ class Attestor:
         return bool(answer.get("imageDetails"))
 
     def _invoke(self, command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        # `registry_auth` — same shape as the resolver's own — puts cosign's
+        # `DOCKER_CONFIG` beside the rest of this process's environment,
+        # never replacing it: `--key` alone still needs AWS's own chain to
+        # reach the KMS key, which this does not touch.
+        env = {**os.environ, **self._registry_auth} if self._registry_auth else None
         try:
             finished = self._run(
-                list(command), capture_output=True, text=True, check=False, timeout=self._timeout
+                list(command),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=self._timeout,
+                env=env,
             )
         except subprocess.TimeoutExpired as expired:
             raise EnvironmentsError(
@@ -552,6 +573,7 @@ def attest_artifact(
         key=str(getattr(credential, "signing_key", "") or ""),
         policy=policy,
         log=log,
+        registry_auth=getattr(credential, "registry_auth", None),
     )
     return use.attest(
         registry=registry,

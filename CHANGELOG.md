@@ -8,6 +8,17 @@
 
 ## Unreleased
 
+- **cosign gets the same registry credential the build pushed with**
+  (`environments.attest`; PLAN_ENV.md D-17, E1-09). cosign has no AWS
+  credential chain of its own for ECR, unlike the boto3 client the scan is
+  read with. Found live on r1, 2026-09-14: `cosign sign` reached the
+  repository anonymously and was refused, plain `401 Unauthorized`, on
+  every real artifact this pipeline ever tried to sign. `Attestor` takes a
+  `registry_auth` — the same `{"DOCKER_CONFIG": <dir>}` shape the resolver
+  and the builder already read off a `BuildCredential` — and sets it on
+  cosign's own subprocess, added to this process's own environment rather
+  than replacing it.
+
 ## 1.9.8
 
 - **Every page of a scan's findings is read before deciding**

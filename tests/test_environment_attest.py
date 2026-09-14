@@ -168,14 +168,16 @@ class FakeEcr:
 
 
 class Cosign:
-    """A cosign whose argv is read, and which can refuse."""
+    """A cosign whose argv and env are read, and which can refuse."""
 
     def __init__(self, returncode: int = 0) -> None:
         self.returncode = returncode
         self.argv: list[str] = []
+        self.env: dict[str, str] | None = None
 
-    def __call__(self, argv, **_kwargs) -> subprocess.CompletedProcess[str]:
+    def __call__(self, argv, *, env=None, **_kwargs) -> subprocess.CompletedProcess[str]:
         self.argv = list(argv)
+        self.env = env
         return subprocess.CompletedProcess(self.argv, self.returncode, "", "Pushing signature\n")
 
 
@@ -470,6 +472,35 @@ class TestTheSignature:
         ]
         assert reference == f"{REGISTRY}/{REPOSITORY}:{signature_tag(DIGEST)}"
         assert signed_now is True
+
+    def test_no_registry_auth_leaves_cosigns_own_environment_untouched(self) -> None:
+        """The common case — nothing to add — inherits this process's own
+        environment rather than replacing it with an empty one."""
+        cosign = Cosign()
+        an_attestor(run=cosign).sign(registry=REGISTRY, repository=REPOSITORY, digest=DIGEST)
+        assert cosign.env is None
+
+    def test_registry_auth_reaches_cosign_as_docker_config(self) -> None:
+        """cosign has no AWS credential chain of its own for ECR, unlike the
+        boto3 client the scan is read with: found live, 2026-09-14, `cosign
+        sign` reached the registry anonymously and was refused with a plain
+        `401 Unauthorized` on every real artifact this pipeline tried to
+        sign. The same `{"DOCKER_CONFIG": <dir>}` the resolver and the
+        builder already take off a `BuildCredential` fixes it here too."""
+        docker_config = "/tmp/dl-docker-abc"  # noqa: S108 - a build's own dir, never touched by this test
+        cosign = Cosign()
+        an_attestor(run=cosign, registry_auth={"DOCKER_CONFIG": docker_config}).sign(
+            registry=REGISTRY, repository=REPOSITORY, digest=DIGEST
+        )
+        assert cosign.env is not None
+        assert cosign.env["DOCKER_CONFIG"] == docker_config
+        # Added to this process's own environment, not instead of it — cosign
+        # still needs AWS's own chain to reach the KMS key with `--key`.
+        import os
+
+        for name in ("PATH", "HOME"):
+            if name in os.environ:
+                assert cosign.env[name] == os.environ[name]
 
     def test_a_replay_finds_the_signature_instead_of_pushing_a_second(self) -> None:
         """Immutable tags would refuse the second, and two signatures are two words."""
