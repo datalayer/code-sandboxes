@@ -8,6 +8,8 @@
 
 ## Unreleased
 
+## 1.9.4
+
 - **A pushed Environment image is decided by its linux/amd64 image's scan**
   (`environments.attest`; PLAN_ENV.md E1-08). The Datalayer builder pushes
   with SBOM and provenance attestations, so the digest it records is an OCI
