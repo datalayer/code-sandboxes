@@ -38,6 +38,7 @@ from .contract import SANDBOX_CONTRACT_V1, SUPPORTED_CONTRACTS
 from .errors import (
     CAPABILITY_UNSUPPORTED,
     POLICY_DENIED,
+    PUBLICATION_BLOCKED,
     SPEC_INVALID,
     EnvironmentsError,
     ErrorCode,
@@ -81,8 +82,10 @@ __all__ = [
     "SystemPackages",
     "VariantSet",
     "VersionStatus",
+    "assert_publishable",
     "parse_environment",
     "parse_requirements_txt",
+    "publication_findings",
     "spec_digest",
     "spec_findings",
     "validate_environment",
@@ -776,3 +779,55 @@ def spec_digest(environment: Environment | EnvironmentSpec) -> str:
     """``sha256:<hex>`` of the canonical spec, defaults included; metadata excluded."""
     spec = environment.spec if isinstance(environment, Environment) else environment
     return canonical_digest(spec.model_dump(by_alias=True, mode="json"))
+
+
+def publication_findings(environment: Environment) -> list[SpecFinding]:
+    """What keeps this version from ever being published to the public Library (D-12).
+
+    D-12: *"A promoted version becomes public only by being published, and
+    only when every input is public — public indexes, no ``files``, no
+    ``buildSecrets``, an approved base."* This function holds only the
+    ``buildSecrets`` half of that boundary — a build secret is IAM-held and
+    fetched for one build's own use, so it is never public by definition,
+    whether the version is otherwise made of nothing but public inputs or
+    not. The rest of D-12's boundary (public indexes, no baked ``files``, an
+    approved base) belongs to the publish route itself once it exists
+    (E2-15, not built yet as of this writing — there is no
+    ``services/library`` "environment" artifact type and no publish endpoint
+    in ``services/runtimes/datalayer_runtimes/services/environments.py`` to
+    call this from today). This is the seam that route calls when it lands,
+    named the way every other rule of the specification is.
+
+    Deliberately never applied to `promote()` (the private, per-owner
+    lifecycle step that makes a version an environment's active one): a
+    private environment with a build secret is fine, since only its owner
+    ever builds or launches it (D-12's own words). Only the act of making a
+    version world-visible is refused.
+    """
+    if not environment.spec.build_secrets:
+        return []
+    ids = ", ".join(secret.id for secret in environment.spec.build_secrets)
+    return [
+        SpecFinding(
+            "spec.buildSecrets",
+            f"a version with a build secret ({ids}) can never be published to the "
+            "public Library (D-12); remove it, or keep the version private",
+            PUBLICATION_BLOCKED,
+        )
+    ]
+
+
+def assert_publishable(environment: Environment) -> None:
+    """Raise ``DL_ENV_PUBLICATION_BLOCKED`` unless this version may be published (D-12).
+
+    Every finding `publication_findings` has, listed in the detail; the first
+    one's own message is what the error carries.
+    """
+    findings = publication_findings(environment)
+    if findings:
+        first = findings[0]
+        raise EnvironmentsError(
+            first.code,
+            f"{first.field}: {first.message}",
+            detail={"findings": [finding.to_dict() for finding in findings]},
+        )
