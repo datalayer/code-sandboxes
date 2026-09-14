@@ -466,6 +466,11 @@ class TestTheSignature:
             # `--tlog-upload=false` alone can no longer override (found live
             # 2026-09-14): turned off so the plain flag is honored again.
             "--use-signing-config=false",
+            # cosign 3.1.3 defaults to the OCI 1.1 referrers API rather than
+            # the classic sidecar tag: found live 2026-09-14, `cosign sign`
+            # reported success but pushed no tag `_signature_exists` or
+            # `signature_ref` could ever find. `legacy` restores it.
+            "--registry-referrers-mode=legacy",
             "--key",
             KEY,
             f"{REGISTRY}/{REPOSITORY}@{DIGEST}",

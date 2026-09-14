@@ -8,6 +8,18 @@
 
 ## Unreleased
 
+## 1.9.10
+
+- **cosign signs the legacy tag again, not just an OCI referrer**
+  (`environments.attest`; PLAN_ENV.md E1-09). cosign 3.1.3 defaults to the
+  OCI 1.1 referrers API for a signature's own storage, not the classic
+  `sha256-<hex>.sig` sidecar tag. Found live on r1, 2026-09-14: `cosign
+  sign` reported success — the first artifact this pipeline ever actually
+  signed — but pushed no such tag; `_signature_exists`'s own replay check
+  and the `signature_ref` this workflow records both assume one exists.
+  `--registry-referrers-mode=legacy` restores it. `cosign verify` needs no
+  matching flag: it already looks for the tag by default.
+
 ## 1.9.9
 
 - **cosign gets the same registry credential the build pushed with**

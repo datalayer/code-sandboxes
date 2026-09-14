@@ -440,6 +440,13 @@ class Attestor:
             # `--tlog-upload=false` already asks for, and needs no network
             # call of its own to fetch one.
             "--use-signing-config=false",
+            # cosign 3.1.3 defaults to the OCI 1.1 referrers API instead of
+            # the classic `sha256-<hex>.sig` sidecar tag — found live,
+            # 2026-09-14: `cosign sign` reported success, but no such tag
+            # ever existed, so `_signature_exists`'s own replay check (below)
+            # never found it and `signature_ref` named a tag nothing could
+            # pull. `legacy` restores the tag both of those already assume.
+            "--registry-referrers-mode=legacy",
             "--key",
             self._key,
             reference,
