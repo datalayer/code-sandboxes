@@ -8,6 +8,8 @@
 
 ## Unreleased
 
+## 1.9.9
+
 - **cosign gets the same registry credential the build pushed with**
   (`environments.attest`; PLAN_ENV.md D-17, E1-09). cosign has no AWS
   credential chain of its own for ECR, unlike the boto3 client the scan is
