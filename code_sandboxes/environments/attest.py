@@ -530,10 +530,20 @@ def _is_missing(error: BaseException) -> bool:
     return _error_code(error) in {
         "ImageNotFoundException",
         "RepositoryNotFoundException",
-        "ScanNotFoundException",
     }
 
 
 def _is_in_progress(error: BaseException) -> bool:
-    """ECR answers a scan that has not finished as an error, not a status."""
-    return _error_code(error) in {"ScanInProgressException", "LimitExceededException"}
+    """ECR answers a scan that has not finished as an error, not a status.
+
+    `ScanNotFoundException` is one of those answers: enhanced scanning starts
+    after the push, so an image pushed a moment ago has no scan yet (found
+    live on r1, 2026-09-14, the first build to read its image's scan rather
+    than its index's). It is waited for like a running scan, within the same
+    bound.
+    """
+    return _error_code(error) in {
+        "ScanInProgressException",
+        "ScanNotFoundException",
+        "LimitExceededException",
+    }

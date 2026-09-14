@@ -123,6 +123,10 @@ class FakeEcr:
             error = Exception("ScanInProgressException")
             error.response = {"Error": {"Code": "ScanInProgressException"}}
             raise error
+        if status == "SCAN_NOT_FOUND":
+            error = Exception("ScanNotFoundException")
+            error.response = {"Error": {"Code": "ScanNotFoundException"}}
+            raise error
         if status == "MISSING":
             error = Exception("ImageNotFoundException")
             error.response = {"Error": {"Code": "ImageNotFoundException"}}
@@ -333,6 +337,25 @@ class TestTheScan:
         assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
         assert "linux/amd64" in raised.value.message
         assert ecr.scanned == []
+
+    def test_an_image_pushed_a_moment_ago_is_waited_for_until_its_scan_exists(self) -> None:
+        """Enhanced scanning starts after the push: the first answers for a
+        new image are `ScanNotFoundException` (found live on r1, 2026-09-14)."""
+        ecr = FakeEcr(statuses=("SCAN_NOT_FOUND", "SCAN_NOT_FOUND", "ACTIVE"))
+        waits: list[float] = []
+        decision = an_attestor(ecr=ecr, sleep=waits.append).scan(
+            repository=REPOSITORY, digest=DIGEST
+        )
+        assert decision.passed
+        assert ecr.asked == 3 and waits == [10.0, 10.0]
+
+    def test_a_scan_that_never_appears_is_retryable(self) -> None:
+        ecr = FakeEcr(statuses=("SCAN_NOT_FOUND",))
+        clock = iter([0.0, 0.0, 10_000.0, 10_000.0, 10_000.0])
+        with pytest.raises(EnvironmentsError) as raised:
+            an_attestor(ecr=ecr, now=lambda: next(clock)).scan(repository=REPOSITORY, digest=DIGEST)
+        assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
+        assert raised.value.code.retry.value != "no"
 
     def test_a_single_image_is_scanned_by_its_own_digest(self) -> None:
         ecr = FakeEcr()
