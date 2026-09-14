@@ -380,6 +380,17 @@ class Attestor:
             # even answer. The matching verify-side omission is fixed in
             # `datalayer_operator.services.environment_signatures`.
             "--tlog-upload=false",
+            # cosign 3.1.3 defaults `--use-signing-config` to `true`: a
+            # TUF-provided signing config now names the service URLs,
+            # including a transparency log, and `--tlog-upload=false` alone
+            # no longer overrides that — cosign refuses the combination
+            # outright, "not supported with --signing-config or
+            # --use-signing-config" (found live, 2026-09-14, the first real
+            # sign this worker's own pinned cosign ever ran). Turning the
+            # signing config off restores the plain, flag-driven behavior
+            # `--tlog-upload=false` already asks for, and needs no network
+            # call of its own to fetch one.
+            "--use-signing-config=false",
             "--key",
             self._key,
             reference,

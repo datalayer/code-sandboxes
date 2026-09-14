@@ -8,6 +8,15 @@
 
 ## Unreleased
 
+- **cosign signs again under `--use-signing-config=false`** (`environments
+  .attest`; PLAN_ENV.md E1-09). cosign 3.1.3 defaults `--use-signing-config`
+  to `true`: a TUF-provided signing config now names the service URLs,
+  including a transparency log, and `--tlog-upload=false` alone no longer
+  overrides that — cosign refused the combination outright (found live on
+  r1, 2026-09-14, the first real signature this pipeline ever attempted).
+  Turning the signing config off restores the plain, flag-driven behavior
+  `--tlog-upload=false` already asks for.
+
 ## 1.9.6
 
 - **`datalayer/python-cpu`'s `2026.09` channel points at the patched base**

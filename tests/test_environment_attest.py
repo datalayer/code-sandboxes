@@ -418,6 +418,10 @@ class TestTheSignature:
             # default and prompts for consent to publish an immutable
             # record — the wrong default for a private environment.
             "--tlog-upload=false",
+            # cosign 3.1.3 defaults to a TUF-provided signing config that
+            # `--tlog-upload=false` alone can no longer override (found live
+            # 2026-09-14): turned off so the plain flag is honored again.
+            "--use-signing-config=false",
             "--key",
             KEY,
             f"{REGISTRY}/{REPOSITORY}@{DIGEST}",
