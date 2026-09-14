@@ -235,17 +235,19 @@ class TestWhatIsSaidBeforeAnythingIsQueued:
         report = get_builder("datalayer").validate(environment(**spec))
         assert report.supported is True, messages(report)
 
-    def test_modal_refuses_a_build_secret_too_but_not_for_lack_of_a_mechanism(self) -> None:
-        """Modal has a real per-step `secrets=` mechanism, unlike E2B and
-        Daytona — `supports_build_secrets` stays the default `True` — but
-        nothing in this builder wires `resolve_build_secret` (E3-05) into
-        it yet, so a spec naming one is still refused, for its own reason
-        rather than the provider-capability one E2B/Daytona give (E2-05)."""
-        spec = {"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "TOKEN"}]}
-        report = get_builder("modal").validate(environment(**spec))
+    def test_modal_accepts_an_env_build_secret_and_refuses_a_file_one(self) -> None:
+        """Modal has a per-step `secrets=` mechanism, unlike E2B and Daytona,
+        and attaches a secret to the steps that name it (E3-05). It passes
+        environment variables only, so a `mountAs: file` secret, which would
+        have to be written into a layer, is refused."""
+        secret = {"id": "dlsec_01J9BUILDSECRET0000000000", "name": "TOKEN"}
+        report = get_builder("modal").validate(environment(buildSecrets=[secret]))
+        assert "spec.buildSecrets" not in " ".join(fields(report)), messages(report)
+        report = get_builder("modal").validate(
+            environment(buildSecrets=[{**secret, "mountAs": "file"}])
+        )
         assert report.supported is False, messages(report)
-        assert "not wired into this builder" in messages(report)
-        assert "spec.buildSecrets" in fields(report)
+        assert "spec.buildSecrets[0].mountAs" in fields(report)
 
     def test_every_finding_carries_the_capability_code(self) -> None:
         report = get_builder("e2b").validate(

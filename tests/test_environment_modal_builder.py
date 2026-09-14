@@ -28,6 +28,7 @@ from code_sandboxes.environments.builders import ArtifactReference, BuildRequest
 from code_sandboxes.environments.errors import (
     ARTIFACT_MISSING,
     BUILD_FAILED,
+    BUILD_SECRET_UNAVAILABLE,
     CAPABILITY_UNSUPPORTED,
     PROVIDER_ERROR,
     EnvironmentsError,
@@ -108,8 +109,9 @@ class FakeImage:
         )
         return self
 
-    def run_commands(self, *commands: str) -> FakeImage:
-        self.calls.append(Call("run_commands", commands))
+    def run_commands(self, *commands: str, secrets: Any = None) -> FakeImage:
+        kwargs = {} if secrets is None else {"secrets": list(secrets)}
+        self.calls.append(Call("run_commands", commands, kwargs))
         return self
 
     def workdir(self, path: str) -> FakeImage:
@@ -660,35 +662,100 @@ class TestWhatModalCannotBuildYet:
         assert modal.Secret.from_dict_calls == []
         assert modal.Image.from_aws_ecr_calls == []
 
-    def test_a_build_secret_id_is_refused_at_build_time_too(self) -> None:
-        """`_own_findings` already refuses this at `validate()` — nothing
-        enforces that `build()` is only ever called after a passing
-        `validate()` (found in review), so `build()` guards it too, the
-        same way the GPU class above does."""
+
+class TestABuildSecret:
+    """E3-05: a secret is attached to the `run_commands` steps that name it."""
+
+    SECRET_ID = "dlsec_01J9BUILDSECRET0000000000"
+    VALUE = "tiles-licence-value-8f3a"
+
+    def a_secret_request(self, mount_as: str = "env") -> BuildRequest:
+        return a_request(
+            spec={
+                "buildSecrets": [{"id": self.SECRET_ID, "name": "TILES_KEY", "mountAs": mount_as}],
+                "commands": {
+                    "postInstall": [
+                        "python -c 'import geopandas'",
+                        "python unpack_tiles.py --key-env TILES_KEY",
+                    ]
+                },
+            },
+            build_secret_ids=(self.SECRET_ID,),
+        )
+
+    def resolver(self, asked: list[tuple[str, str]] | None = None) -> Any:
+        def resolve_secret(secret: Any, *, owner_uid: str) -> str:
+            if asked is not None:
+                asked.append((secret.id, owner_uid))
+            return self.VALUE
+
+        return resolve_secret
+
+    def test_it_reaches_only_the_command_that_names_it(self) -> None:
         modal = FakeModalModule()
+        asked: list[tuple[str, str]] = []
+        a_builder(modal=modal, resolve_secret=self.resolver(asked)).build(self.a_secret_request())
+        assert asked == [(self.SECRET_ID, OWNER)]
+        [build_secret] = [s for s in modal.Secret.from_dict_calls if "TILES_KEY" in s.env_dict]
+        assert build_secret.env_dict == {"TILES_KEY": self.VALUE}
+        assert build_secret.hydrate_calls == [modal.client]
+        [image] = modal.Image.created
+        [named] = run_commands_containing(image, "unpack_tiles.py")
+        assert named.kwargs == {"secrets": [build_secret]}
+        [unnamed] = run_commands_containing(image, "import geopandas")
+        assert unnamed.kwargs == {}
+        # Never on the install steps either.
+        [install] = run_commands_containing(image, "uv pip sync")
+        assert install.kwargs == {}
+
+    def test_it_is_deleted_after_the_build_like_the_base_secret(self) -> None:
+        modal = FakeModalModule()
+        a_builder(modal=modal, resolve_secret=self.resolver()).build(self.a_secret_request())
+        assert len(modal.client.stub.secret_delete_calls) == 2
+
+    def test_it_is_deleted_even_when_the_build_fails(self) -> None:
+        modal = FakeModalModule(build_error=RuntimeError("step exited 1"))
+        with pytest.raises(EnvironmentsError):
+            a_builder(modal=modal, resolve_secret=self.resolver()).build(self.a_secret_request())
+        assert len(modal.client.stub.secret_delete_calls) == 2
+
+    def test_a_failed_build_never_carries_its_value(self) -> None:
+        modal = FakeModalModule(build_error=RuntimeError(f"unpack_tiles.py printed {self.VALUE}"))
         with pytest.raises(EnvironmentsError) as raised:
-            a_builder(modal=modal).build(a_request(build_secret_ids=("dlsec_abc123",)))
-        assert raised.value.code.code == CAPABILITY_UNSUPPORTED.code
-        assert raised.value.detail["missing"] == "E3-05"
+            a_builder(modal=modal, resolve_secret=self.resolver()).build(self.a_secret_request())
+        assert self.VALUE not in str(raised.value)
+        assert self.VALUE not in repr(raised.value.detail)
+        assert raised.value.__cause__ is None
+
+    def test_one_iam_will_not_give_stops_the_build_before_modal(self) -> None:
+        modal = FakeModalModule()
+
+        def refused(secret: Any, *, owner_uid: str) -> str:
+            raise EnvironmentsError(BUILD_SECRET_UNAVAILABLE, "IAM refused")
+
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder(modal=modal, resolve_secret=refused).build(self.a_secret_request())
+        assert raised.value.code is BUILD_SECRET_UNAVAILABLE
         assert modal.Secret.from_dict_calls == []
         assert modal.Image.from_aws_ecr_calls == []
 
-    def test_a_build_secret_is_refused_before_anything_is_queued(self) -> None:
-        spec = {
-            "apiVersion": "environments.datalayer.io/v1alpha1",
-            "kind": "Environment",
-            "metadata": {"name": "geo"},
-            "spec": {
-                "language": {"version": "3.13"},
-                "base": {"ref": "datalayer/python-cpu", "channel": "2026.09"},
-                "buildSecrets": [{"id": "dlsec_pypitoken1", "name": "PYPI_TOKEN"}],
-            },
-        }
-        environment = parse_environment(spec)
-        report = a_builder().validate(environment)
+    def test_a_file_mounted_one_is_refused_before_anything_is_queued(self) -> None:
+        report = a_builder().validate(self.a_secret_request("file").environment)
         assert report.supported is False
-        assert "spec.buildSecrets" in [finding.field for finding in report.findings]
-        assert "resolve_build_secret" in " ".join(finding.message for finding in report.findings)
+        assert "spec.buildSecrets[0].mountAs" in [finding.field for finding in report.findings]
+
+    def test_an_env_one_is_buildable(self) -> None:
+        report = a_builder().validate(self.a_secret_request().environment)
+        assert "spec.buildSecrets" not in " ".join(finding.field for finding in report.findings)
+
+    def test_a_file_mounted_one_is_refused_at_build_time_too(self) -> None:
+        modal = FakeModalModule()
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder(modal=modal, resolve_secret=self.resolver()).build(
+                self.a_secret_request("file")
+            )
+        assert raised.value.code.code == CAPABILITY_UNSUPPORTED.code
+        assert modal.Secret.from_dict_calls == []
 
 
 class TestReadingTheRegistry:

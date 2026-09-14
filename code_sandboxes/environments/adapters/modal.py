@@ -104,16 +104,16 @@ builder does not know the launch-time `gpu=` argument to hand a size class
 either (D-20 leaves that to a later item; a GPU is Modal's own launch
 option, not an image property, per section 11.4 item 10).
 
-**`spec.buildSecrets` is refused, unlike what Modal's own SDK could do.**
-`run_commands`/`apt_install`/`dockerfile_commands` each take a per-step
-`secrets=` collection — Modal has a real per-step secret mechanism, unlike
-E2B or Daytona. What is missing is not Modal's capability but this
-builder's own: `resolve_build_secret` (E3-05) has landed (`code_sandboxes
-.environments.build_secrets`), but nothing here calls it yet — wiring it
-into a Modal `secrets=` collection, and its own creation/cleanup lifecycle
-(mirroring `_ecr_secret`/`_delete_secret` above), is real, separate,
-follow-up work, not attempted in this pass. Refused for now, with that
-reason, rather than silently built without it.
+**A build secret is attached to the `postInstall` steps that name it (E3-05).**
+`run_commands` takes a per-step `secrets=` collection, a mechanism E2B and
+Daytona lack. Each declared secret is resolved from IAM
+(`resolve_build_secret`) before Modal is touched, made into a Modal Secret of
+this build's own, attached to exactly the `run_commands` steps whose command
+names it (`command_names_secret`), and deleted after the build the way the
+base-reader secret is. Its value is redacted from the build's log and from a
+failed build's error. Modal hands a secret to a step only as environment
+variables, so a `mountAs: file` secret is refused: making it a file would
+write it into a layer.
 
 @module code_sandboxes.environments.adapters.modal
 """
@@ -129,6 +129,7 @@ from pathlib import Path
 from typing import Any
 
 from ..accounts import provider_account
+from ..build_secrets import resolve_build_secret
 from ..builders import (
     ArtifactMetadata,
     ArtifactReference,
@@ -144,8 +145,9 @@ from ..errors import (
     EnvironmentsError,
 )
 from ..files import files_step
+from ..redact import redact
 from ..resolve import WHEELHOUSE_IMAGE_PATH, apt_pins_in
-from ..spec import GPU_SIZE_CLASSES, Environment
+from ..spec import GPU_SIZE_CLASSES, BuildSecret, Environment, command_names_secret
 from .managed import ManagedBuilder
 
 __all__ = ["UNIMPLEMENTED_INSTRUCTIONS", "Builder"]
@@ -204,6 +206,21 @@ def _modal_internals() -> tuple[Any, Any]:
     return synchronizer, api_pb2
 
 
+def _scrubbed(text: str, values: dict[str, str]) -> str:
+    """The text with this build's secret values redacted, or as it was with none (E3-05)."""
+    return redact(text, values.values()) if values else text
+
+
+def _post_install(
+    image: Any, commands: list[str], declared: list[BuildSecret], step_secrets: dict[str, Any]
+) -> Any:
+    """Each `postInstall` command as its own step, with the secrets it names (E3-05)."""
+    for command in commands:
+        named = [step_secrets[s.id] for s in declared if command_names_secret(command, s)]
+        image = image.run_commands(command, secrets=named) if named else image.run_commands(command)
+    return image
+
+
 class Builder(ManagedBuilder):
     """Modal: the capability half (E2-06) and the build (E2-05)."""
 
@@ -228,8 +245,12 @@ class Builder(ManagedBuilder):
         modal_internals: Callable[[], tuple[Any, Any]] | None = None,
         image_builder_version: str | None = None,
         region: str | None = None,
+        resolve_secret: Callable[..., str] = resolve_build_secret,
     ) -> None:
         super().__init__(log=log, credential=credential)
+        #: How one `BuildSecret`'s value is fetched (E3-05): IAM by default,
+        #: the same seam the Datalayer builder takes.
+        self._resolve_secret = resolve_secret
         self._modal_sdk = modal_sdk or _modal_sdk
         self._modal_internals = modal_internals or _modal_internals
         self._image_builder_version = image_builder_version or _IMAGE_BUILDER_VERSION
@@ -297,24 +318,19 @@ class Builder(ManagedBuilder):
                         field=f"spec.commands.postInstall[{index}]",
                     )
                 )
-        if environment.spec.build_secrets:
-            # Modal's own per-step `secrets=` mechanism could carry one —
-            # unlike E2B or Daytona — and `resolve_build_secret` (E3-05) has
-            # landed, but nothing here calls it yet: wiring it into a Modal
-            # `secrets=` collection is real, separate work (found in this
-            # item's own implementation, not a provider limit).
-            ids = ", ".join(secret.id for secret in environment.spec.build_secrets)
-            findings.append(
-                CapabilityFinding(
-                    code="DL_ENV_CAPABILITY_UNSUPPORTED",
-                    message=(
-                        f"`buildSecrets` ({ids}) is not wired into this builder yet — Modal's own "
-                        "per-step secrets could carry one, and resolve_build_secret (E3-05) can "
-                        "resolve one, but nothing here connects them"
-                    ),
-                    field="spec.buildSecrets",
+        for index, secret in enumerate(environment.spec.build_secrets):
+            if secret.mount_as == "file":
+                findings.append(
+                    CapabilityFinding(
+                        code="DL_ENV_CAPABILITY_UNSUPPORTED",
+                        message=(
+                            f"Modal gives `{secret.name}` to a step as an environment variable "
+                            "only; a file would be written into a layer. Use `mountAs: env`, or "
+                            "drop `modal` from the variants"
+                        ),
+                        field=f"spec.buildSecrets[{index}].mountAs",
+                    )
                 )
-            )
         return findings
 
     # -- Building -------------------------------------------------------------
@@ -340,20 +356,9 @@ class Builder(ManagedBuilder):
                 "needs is E2-17's, not built yet",
                 detail={"variant": self.variant, "missing": "E2-17"},
             )
-        if request.build_secret_ids or spec.build_secrets:
-            # `_own_findings` already refuses this at `validate()` — this
-            # guard is `build()`'s own, the same way the GPU one above is,
-            # because nothing enforces that `build` is only ever called
-            # after a passing `validate` (found in review): a caller
-            # handing `build()` an already-resolved request could otherwise
-            # get a successful image with a required credential silently
-            # missing from it.
-            raise EnvironmentsError(
-                CAPABILITY_UNSUPPORTED,
-                "Modal's build secrets are not wired into this builder yet (E3-05 has landed, "
-                "but nothing here calls it)",
-                detail={"variant": self.variant, "missing": "E3-05"},
-            )
+        # Resolved before Modal is touched: a secret IAM will not give stops
+        # the build with nothing to clean up in the owner's workspace.
+        declared, values = self._resolved_secrets(request)
         sdk = self._modal_sdk()
         # Read from the process environment, not a per-call argument (see
         # the module docstring) — set before anything else touches the SDK.
@@ -362,7 +367,12 @@ class Builder(ManagedBuilder):
         name = f"dl-{request.environment.metadata.name}-v{request.version}-{request.build_uid}"
 
         ecr_secret = self._ecr_secret(sdk, client)
+        step_secrets: dict[str, Any] = {}
         try:
+            for secret in declared:
+                step_secrets[secret.id] = self._hydrated_secret(
+                    sdk, client, {secret.name: values[secret.id]}, keep=step_secrets
+                )
             app = sdk.App.lookup(
                 f"dl-{request.environment.metadata.name}", client=client, create_if_missing=True
             )
@@ -404,8 +414,7 @@ class Builder(ManagedBuilder):
                 )
                 for command in files_step(request.environment, variant=self.variant):
                     image = image.run_commands(command)
-                for command in spec.commands.post_install:
-                    image = image.run_commands(command)
+                image = _post_install(image, spec.commands.post_install, declared, step_secrets)
                 image = image.workdir(_CONTENT_DIR).entrypoint([_ENTRYPOINT_PATH])
 
                 logged: list[str] = []
@@ -423,13 +432,13 @@ class Builder(ManagedBuilder):
                     # that raised inside the `with` block above never
                     # reached the line that read it, so a failed build's
                     # own log was silently dropped from the error detail.
-                    logged.extend(buffer.getvalue().splitlines())
+                    logged.extend(_scrubbed(buffer.getvalue(), values).splitlines())
                     raise EnvironmentsError(
                         BUILD_FAILED,
-                        f"The Modal build failed: {error}",
+                        f"The Modal build failed: {_scrubbed(str(error), values)}",
                         detail={"variant": self.variant, "name": name, "log": logged[-20:]},
-                    ) from error
-                logged.extend(buffer.getvalue().splitlines())
+                    ) from (None if values else error)
+                logged.extend(_scrubbed(buffer.getvalue(), values).splitlines())
                 for line in logged:
                     self._log(line)
             # A name for people and dashboards only (§11.4 item 3): moves
@@ -439,6 +448,8 @@ class Builder(ManagedBuilder):
             # No standing credential is left in an account Datalayer does
             # not control, whether the build above succeeded or not (D-18).
             self._delete_secret(sdk, client, ecr_secret)
+            for secret in step_secrets.values():
+                self._delete_secret(sdk, client, secret)
 
         return ArtifactReference(
             variant=self.variant,
@@ -449,6 +460,25 @@ class Builder(ManagedBuilder):
             provider_account=provider_account(self.variant, self._provider_secrets()) or None,
             contract_version=spec.contract or SANDBOX_CONTRACT_V1.version,
         )
+
+    def _resolved_secrets(self, request: BuildRequest) -> tuple[list[BuildSecret], dict[str, str]]:
+        """The build secrets this build attaches, and each one's value from IAM (E3-05).
+
+        `_own_findings` refuses a `mountAs: file` secret at `validate()`. This
+        guards it too, the same way `build` guards a GPU class, because
+        nothing makes a caller validate first.
+        """
+        wanted = set(request.build_secret_ids)
+        declared = [s for s in request.environment.spec.build_secrets if s.id in wanted]
+        if any(secret.mount_as == "file" for secret in declared):
+            raise EnvironmentsError(
+                CAPABILITY_UNSUPPORTED,
+                "Modal gives a build secret to a step as an environment variable only; a "
+                "`mountAs: file` secret would be written into a layer",
+                detail={"variant": self.variant, "field": "spec.buildSecrets"},
+            )
+        values = {s.id: self._resolve_secret(s, owner_uid=request.owner_uid) for s in declared}
+        return declared, values
 
     def _ecr_secret(self, sdk: Any, client: Any) -> Any | None:
         """A Modal Secret carrying this build's own base-reader credential (D-17, D-18).
@@ -487,6 +517,30 @@ class Builder(ManagedBuilder):
                 f"Modal could not be given a pull credential for the base: {error}",
                 detail={"variant": self.variant},
             ) from error
+        return secret
+
+    def _hydrated_secret(
+        self, sdk: Any, client: Any, env: dict[str, str], *, keep: dict[str, Any]
+    ) -> Any:
+        """A Modal Secret of this build's own for one build secret (E3-05).
+
+        Created in the owner's workspace like `_ecr_secret`'s, and deleted by
+        `build`'s own `finally`. A `hydrate` that fails is cleaned up here,
+        since `build` never got it back. The error names no value.
+        """
+        secret = sdk.Secret.from_dict(env)
+        try:
+            secret.hydrate(client=client)
+        except Exception as error:
+            self._delete_secret(sdk, client, secret)
+            # `from None`: Modal's own error is not kept, in case it echoes
+            # what it was given. Its type is enough to tell failures apart.
+            raise EnvironmentsError(
+                PROVIDER_ERROR,
+                f"Modal could not be given the build secret `{next(iter(env))}` "
+                f"({type(error).__name__})",
+                detail={"variant": self.variant, "made": len(keep)},
+            ) from None
         return secret
 
     def _delete_secret(self, sdk: Any, client: Any, secret: Any | None) -> None:
