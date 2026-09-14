@@ -8,6 +8,17 @@
 
 ## Unreleased
 
+## 1.9.3
+
+- **A build secret is mounted only on the `postInstall` commands that name it**
+  (`environments.spec.command_names_secret`, `environments.adapters.datalayer`;
+  PLAN_ENV.md E3-05). Every declared secret used to be mounted on every
+  `postInstall` `RUN`. A command now gets a secret's mount only when the
+  secret's name is in it as a whole word (`$NAME`, `${NAME}`, `--key-env NAME`,
+  `/run/secrets/NAME`). A declared secret that no command names is a
+  `DL_ENV_SPEC_INVALID` finding on `spec.buildSecrets[i]`, rather than a build
+  that runs with it empty.
+
 ## 1.9.2
 
 - **A real ECR repository name is lowercase; a real owner uid is not**
