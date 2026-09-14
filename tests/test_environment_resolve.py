@@ -809,10 +809,16 @@ class TestAnImportedImage:
         assert raised.value.code.code == "DL_ENV_POLICY_DENIED"
 
     def test_a_disallowed_registry_with_a_credential_reference_is_allowed_through(self) -> None:
-        """E3-04's private half, spec-only: a credential reference clears the
-        allowlist check. Nothing resolves the credential itself yet (E3-05),
-        so this still needs a transport — a real private pull would 401 here."""
+        """A credential reference clears the allowlist check, and its value
+        is fetched and handed to the registry request (E3-04's private half,
+        wired through the same seam a build secret is resolved through)."""
         from code_sandboxes.environments.spec import parse_environment
+
+        asked: list[tuple[str, str]] = []
+
+        def resolve_secret(secret: object, *, owner_uid: str) -> str:
+            asked.append((secret.id, owner_uid))  # type: ignore[attr-defined]
+            return "puller:secret-value"
 
         resolved = resolve_image_base(
             parse_environment(
@@ -823,8 +829,26 @@ class TestAnImportedImage:
             ),
             ["datalayer"],
             transport=anonymous_manifest_transport(),
+            owner_uid="01k0wner000000000000000000",
+            resolve_secret=resolve_secret,
         )
         assert resolved == {"datalayer": f"registry.example.com/team/env@{IMAGE_DIGEST}"}
+        assert asked == [("dlsec_01J8ZK", "01k0wner000000000000000000")]
+
+    def test_a_public_image_never_asks_for_a_credential(self) -> None:
+        """No `credentialSecretId`: `resolve_secret` is never called at all,
+        the same discipline a build secret's own resolution keeps."""
+        from code_sandboxes.environments.spec import parse_environment
+
+        def unreachable(secret: object, *, owner_uid: str) -> str:
+            raise AssertionError("a public image asks IAM for nothing")
+
+        resolve_image_base(
+            parse_environment(an_image_spec()),
+            ["datalayer"],
+            transport=anonymous_manifest_transport(),
+            resolve_secret=unreachable,
+        )
 
     def test_resolve_environment_uses_the_images_digest_as_the_base(self) -> None:
         runner = RecordedRunner(A_LOCK)
@@ -842,6 +866,28 @@ class TestAnImportedImage:
         # The contract layer, the same as every other source: nothing about
         # an import skips Datalayer's own protected pins.
         assert "ipykernel==7.3.0" in runner.request.requirements
+
+    def test_resolve_environment_threads_owner_uid_and_resolve_secret_through(self) -> None:
+        """E3-04's private half reached from the top-level seam
+        `EnvironmentBuildWorkflow`'s own resolver calls (E1-03)."""
+        asked: list[tuple[str, str]] = []
+
+        def resolve_secret(secret: object, *, owner_uid: str) -> str:
+            asked.append((secret.id, owner_uid))  # type: ignore[attr-defined]
+            return "puller:secret-value"
+
+        runner = RecordedRunner(A_LOCK)
+        resolve_environment(
+            spec=an_image_spec(
+                reference="registry.example.com/team/env:v1", credentialSecretId="dlsec_01J8ZK"
+            ),
+            variants=["datalayer"],
+            runner=runner,
+            image_transport=anonymous_manifest_transport(),
+            owner_uid="01k0wner000000000000000000",
+            resolve_secret=resolve_secret,
+        )
+        assert asked == [("dlsec_01J8ZK", "01k0wner000000000000000000")]
 
     def test_resolve_environment_asks_uv_to_be_bootstrapped_for_an_image_source(self) -> None:
         runner = RecordedRunner(A_LOCK)

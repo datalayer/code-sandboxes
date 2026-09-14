@@ -217,6 +217,31 @@ class TestThePolicy:
         # The finding is still counted: an allowance hides nothing.
         assert decision.body()["counts"] == {"CRITICAL": 1}
 
+    def test_the_default_policy_allows_the_base_channels_esm_locked_ffmpeg_advisories(
+        self,
+    ) -> None:
+        """`datalayer/python-cpu:2026.09`'s own five (E1-05, E1-08, 2026-09-14):
+        Inspector marks each fixable, but the fix is an Ubuntu ESM package
+        version a plain `apt-get upgrade` cannot reach. Reviewed and allowed,
+        not silently missed — still counted, and any other critical still
+        blocks."""
+        allowed = (
+            "CVE-2024-35366",
+            "CVE-2024-35367",
+            "CVE-2024-35368",
+            "CVE-2026-40962",
+            "CVE-2025-57052",
+        )
+        for cve in allowed:
+            decision = decide(
+                findings_of([enhanced(cve, "CRITICAL", package="ffmpeg", fixed="7:6.1.1-esm")])
+            )
+            assert decision.decision == "pass", cve
+            assert decision.body()["policy"]["allowed"] == list(allowed)
+        # A critical outside that fixed list still blocks under the default.
+        decision = decide(findings_of([enhanced("CVE-2026-9999", "CRITICAL", fixed="1.2.3")]))
+        assert decision.decision == "blocked"
+
     def test_the_older_findings_shape_is_read_too(self) -> None:
         found = findings_of([basic("CVE-2026-1111", "CRITICAL")])
         assert [(finding.id, finding.package, finding.fixable) for finding in found] == [

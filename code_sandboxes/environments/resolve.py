@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from .bases import APPROVED_BASES, ApprovedBase, channel_snapshot, resolve_base
+from .build_secrets import resolve_build_secret
 from .errors import (
     CAPABILITY_UNSUPPORTED,
     PACKAGE_NOT_FOUND,
@@ -67,7 +68,13 @@ from .image_import import (
     refuse_unless_allowed,
     resolve_image_digest,
 )
-from .spec import DependencyFileSpec, Environment, parse_environment, parse_requirements_txt
+from .spec import (
+    BuildSecret,
+    DependencyFileSpec,
+    Environment,
+    parse_environment,
+    parse_requirements_txt,
+)
 
 __all__ = [
     "APT_PIN_PREFIX",
@@ -949,6 +956,8 @@ def resolve_image_base(
     *,
     allowlist: tuple[str, ...] = DEFAULT_ALLOWED_REGISTRIES,
     transport: Any = None,
+    owner_uid: str = "",
+    resolve_secret: Callable[..., str] = resolve_build_secret,
 ) -> dict[str, str]:
     """Every wanted variant's base, from an imported image rather than an approved one (E3-04).
 
@@ -956,10 +965,18 @@ def resolve_image_base(
     never a per-variant table the way an approved base's channel is, and
     every variant this phase builds for is `linux/amd64` regardless (D-9's
     own bases are single-arch too). Only a registry in ``allowlist`` is ever
-    resolved — `spec_findings` already refuses the rest before a build is
-    asked for; this is the same rule kept here for whatever resolves directly
-    without validating first, so nothing that reaches the network was never
-    checked.
+    resolved, unless the spec names a private one's credential — the same
+    rule `spec_findings` already refuses the rest by, kept here too for
+    whatever resolves directly without validating first, so nothing that
+    reaches the network was never checked.
+
+    A private registry (``image.credential_secret_id`` set, E3-04's second
+    half) has its credential fetched from IAM through `resolve_secret` — the
+    same seam a build secret is resolved through (E3-05), since this is the
+    same mechanism: an id a spec names, a value fetched only at the moment
+    it is used, and never returned, logged, or stored anywhere past this call.
+    ``owner_uid`` is required to fetch one; resolving an uncredentialed image
+    needs neither.
     """
     image = environment.spec.build.image
     if image is None or not image.reference.strip():
@@ -970,7 +987,11 @@ def resolve_image_base(
         )
     parsed = parse_image_reference(image.reference)
     refuse_unless_allowed(parsed, allowlist, has_credential=bool(image.credential_secret_id))
-    digest = resolve_image_digest(parsed, transport=transport)
+    credential = None
+    if image.credential_secret_id:
+        secret = BuildSecret(id=image.credential_secret_id, name="registry-credential")
+        credential = resolve_secret(secret, owner_uid=owner_uid)
+    digest = resolve_image_digest(parsed, transport=transport, credential=credential)
     reference = f"{parsed.registry}/{parsed.repository}@{digest}"
     return dict.fromkeys(variants, reference)
 
@@ -1142,6 +1163,8 @@ def resolve_environment(
     uv: str | None = None,
     pyproject_run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
     image_transport: Any = None,
+    owner_uid: str = "",
+    resolve_secret: Callable[..., str] = resolve_build_secret,
 ) -> dict[str, Any]:
     """A version's lock, and the base each variant builds from.
 
@@ -1177,6 +1200,12 @@ def resolve_environment(
         the registry request runs over — injected by tests
         (`httpx.MockTransport`), the real network otherwise. Unused by every
         other source.
+    owner_uid, resolve_secret
+        An `image` source naming a private registry's `credentialSecretId`
+        (E3-04's second half): the owner the credential belongs to, and how
+        its value is fetched — IAM by default, the same seam a build secret
+        (E3-05) is resolved through. Unused by a public registry or any
+        other source.
 
     Returns
     -------
@@ -1211,7 +1240,13 @@ def resolve_environment(
         )
     wanted = sorted({str(variant) for variant in variants} or {"datalayer"})
     resolved_bases = (
-        resolve_image_base(environment, wanted, transport=image_transport)
+        resolve_image_base(
+            environment,
+            wanted,
+            transport=image_transport,
+            owner_uid=owner_uid,
+            resolve_secret=resolve_secret,
+        )
         if source == "image"
         else resolve_bases(environment, wanted, bases, registry=_registry_of(credential))
     )

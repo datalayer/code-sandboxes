@@ -129,8 +129,29 @@ class ScanPolicy:
         }
 
 
+#: Advisories allowed on the Datalayer base channel itself (D-9), reviewed and
+#: accepted 2026-09-14 rather than silently missed: all five are in `ffmpeg`
+#: (`CVE-2024-35366`, `CVE-2024-35367`, `CVE-2024-35368`, `CVE-2026-40962`) and
+#: `libcjson1` (`CVE-2025-57052`, pulled in only by `librist4`, itself only
+#: needed by `ffmpeg`), on `datalayer/python-cpu:2026.09`. Amazon Inspector
+#: reports each as fixable, but the fix is an Ubuntu ESM (Extended Security
+#: Maintenance) package version — `7:6.1.1-3ubuntu5+esm5` and the like — not
+#: reachable by a plain `apt-get upgrade`, only by a Pro subscription token
+#: this deployment does not hold. `ffmpeg` has no other installed package
+#: depending on it (`apt-cache rdepends --installed`), so it is kept for what
+#: it is: an image-wide convenience (matplotlib's `FFMpegWriter` and the like),
+#: not something the sandbox contract's own doctor checks for. Revisit once
+#: Ubuntu ships a non-ESM fix, or the channel drops `ffmpeg`.
+_BASE_CHANNEL_ALLOWED: tuple[str, ...] = (
+    "CVE-2024-35366",
+    "CVE-2024-35367",
+    "CVE-2024-35368",
+    "CVE-2026-40962",
+    "CVE-2025-57052",
+)
+
 #: What every owner is scanned against until an organization says otherwise.
-DEFAULT_POLICY = ScanPolicy()
+DEFAULT_POLICY = ScanPolicy(allowed=_BASE_CHANNEL_ALLOWED)
 
 
 @dataclass(frozen=True)

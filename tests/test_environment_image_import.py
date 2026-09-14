@@ -200,3 +200,88 @@ class TestResolvingADigest:
         with pytest.raises(EnvironmentsError) as raised:
             resolve_image_digest(image, transport=transport)
         assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
+
+
+class TestAPrivateRegistrysCredential:
+    """E3-04's private half: `username:password` sent as Basic on the token
+    request the challenge names, the way `docker login` authenticates one —
+    never the credential itself sent to the registry named in the reference."""
+
+    def test_the_credential_is_sent_as_basic_on_the_token_request_alone(self) -> None:
+        calls: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            if "auth.example.com" in str(request.url):
+                assert request.headers["Authorization"] == "Basic cHVsbGVyOnNlY3JldC12YWx1ZQ=="
+                return httpx.Response(200, json={"token": "scoped-private-token"})
+            if "Authorization" not in request.headers:
+                return httpx.Response(
+                    401,
+                    headers={
+                        "WWW-Authenticate": (
+                            'Bearer realm="https://auth.example.com/token",'
+                            'service="registry.example.com",'
+                            'scope="repository:team/env:pull"'
+                        )
+                    },
+                )
+            # The registry itself never sees the credential, only the token
+            # the auth realm minted from it.
+            assert request.headers["Authorization"] == "Bearer scoped-private-token"
+            assert "cHVsbGVy" not in str(request.headers)
+            return httpx.Response(200, headers={"Docker-Content-Digest": DIGEST})
+
+        image = ImageReference("registry.example.com", "team/env", "v1")
+        transport = httpx.MockTransport(handler)
+        digest = resolve_image_digest(image, transport=transport, credential="puller:secret-value")
+        assert digest == DIGEST
+        assert any("auth.example.com" in str(c.url) for c in calls)
+
+    def test_no_credential_answers_the_challenge_with_no_basic_header(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if "auth.example.com" in str(request.url):
+                assert "Authorization" not in request.headers
+                return httpx.Response(200, json={"token": "anon-token"})
+            if "Authorization" not in request.headers:
+                return httpx.Response(
+                    401,
+                    headers={
+                        "WWW-Authenticate": (
+                            'Bearer realm="https://auth.example.com/token",'
+                            'service="registry.example.com",'
+                            'scope="repository:team/env:pull"'
+                        )
+                    },
+                )
+            return httpx.Response(200, headers={"Docker-Content-Digest": DIGEST})
+
+        image = ImageReference("registry.example.com", "team/env", "v1")
+        transport = httpx.MockTransport(handler)
+        assert resolve_image_digest(image, transport=transport) == DIGEST
+
+    def test_a_registry_that_refuses_the_credential_names_the_reference(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if "auth.example.com" in str(request.url):
+                return httpx.Response(200, json={"token": "wrong-scope-token"})
+            if "Authorization" not in request.headers:
+                return httpx.Response(
+                    401,
+                    headers={
+                        "WWW-Authenticate": (
+                            'Bearer realm="https://auth.example.com/token",'
+                            'service="registry.example.com",'
+                            'scope="repository:team/env:pull"'
+                        )
+                    },
+                )
+            return httpx.Response(403)
+
+        image = ImageReference("registry.example.com", "team/env", "v1")
+        transport = httpx.MockTransport(handler)
+        with pytest.raises(EnvironmentsError) as raised:
+            resolve_image_digest(image, transport=transport, credential="puller:wrong-value")
+        assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
+        assert "puller" not in raised.value.message
+        assert "wrong-value" not in raised.value.message
+        assert "team/env" in raised.value.message

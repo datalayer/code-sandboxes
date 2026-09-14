@@ -8,6 +8,38 @@
 
 ## Unreleased
 
+- **Attest waits for a just-pushed image's scan to exist**
+  (`environments.attest`; PLAN_ENV.md E1-08). Enhanced scanning starts after
+  the push, so the first answers for a new image are
+  `ScanNotFoundException`. Attest read that as an image with no scan and
+  failed the build at once (found live on r1, 2026-09-14). It is now waited
+  for like a running scan, within the same bound.
+- **apt is pinned at, and installed from, the base channel's Ubuntu snapshot**
+  (`environments.bases`, `environments.resolve`,
+  `environments.adapters.datalayer`; PLAN_ENV.md E1-04). A channel records
+  the `snapshot.ubuntu.com` id its image was upgraded at. The solve runs
+  `apt-get` with `--snapshot` at that id, the lock records it
+  (`# datalayer-apt-snapshot:`), and the Datalayer builder installs its pins
+  from the same snapshot. This replaces a `deb` line that named only `main`
+  (`gdal-bin` is in `universe`) and left the live mirror enabled beside it.
+  `DATALAYER_APT_SNAPSHOT` must now be a snapshot id.
+- **A private registry's credential is resolved and used** (`environments
+  .image_import`, `environments.resolve`; PLAN_ENV.md E3-04's second half).
+  `image.credentialSecretId` used to only clear the allowlist check; nothing
+  fetched or used the credential it named. It is now fetched through the
+  same IAM route a build secret is (E3-05), and sent as HTTP Basic on the
+  registry's own token exchange — the way `docker login` authenticates a
+  private pull — never to the registry named in the reference, and never
+  logged. `resolve_environment` and `resolve_image_base` take `owner_uid`
+  and `resolve_secret` to reach it; unused by a public registry or any other
+  source.
+- **The Datalayer base channel's own five ESM-locked advisories are allowed**
+  (`environments.policy`; PLAN_ENV.md E1-08). Amazon Inspector marks all five
+  fixable, but the fix is an Ubuntu ESM package version a plain
+  `apt-get upgrade` cannot reach. Reviewed and added to `DEFAULT_POLICY
+  .allowed`, 2026-09-14, so they are recorded as allowed rather than missed,
+  and any other critical still blocks.
+
 ## 1.9.4
 
 - **A pushed Environment image is decided by its linux/amd64 image's scan**
