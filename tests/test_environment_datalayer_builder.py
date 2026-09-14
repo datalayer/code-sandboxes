@@ -582,6 +582,35 @@ class TestBuildingAndPushing:
         assert REGISTRY in seen["written"]["auths"]
         assert seen["mode"] == "600"
 
+    def test_mtls_flags_reach_buildctl_when_all_three_are_set(self) -> None:
+        """The build pool's `buildkitd` takes mTLS only (E1-06)."""
+        buildctl = Buildctl()
+        a_builder(
+            run=buildctl,
+            address="tcp://datalayer-buildkit.datalayer-builds.svc.cluster.local:1234",
+            tlscert="/certs/client/tls.crt",
+            tlskey="/certs/client/tls.key",
+            tlscacert="/certs/client/ca.crt",
+        ).build(a_request())
+        assert "--tlscert=/certs/client/tls.crt" in buildctl.argv
+        assert "--tlskey=/certs/client/tls.key" in buildctl.argv
+        assert "--tlscacert=/certs/client/ca.crt" in buildctl.argv
+
+    def test_no_tls_flags_when_none_are_set(self) -> None:
+        """A plain-socket `buildkitd`, such as `plane local`'s own ephemeral
+        one, needs none of the three — and every prior live drill built
+        against exactly that, before the pool on r1 existed."""
+        buildctl = Buildctl()
+        a_builder(run=buildctl).build(a_request())
+        assert not any(arg.startswith("--tls") for arg in buildctl.argv)
+
+    def test_a_partial_set_of_tls_options_is_treated_as_none(self) -> None:
+        """All three or none: a `buildkitd` that takes mTLS refuses a client
+        with only some of them, at the daemon rather than here."""
+        buildctl = Buildctl()
+        a_builder(run=buildctl, tlscert="/certs/client/tls.crt").build(a_request())
+        assert not any(arg.startswith("--tls") for arg in buildctl.argv)
+
     def test_the_docker_config_does_not_outlive_the_build(self) -> None:
         """A registry password base64'd into a file the worker keeps forever
         is a credential leak on disk, whichever way the build ends (found on

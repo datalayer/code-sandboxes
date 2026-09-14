@@ -127,6 +127,15 @@ class Builder:
         looks like (E1-06).
     address
         ``buildkitd``'s address, when it is not the default socket.
+    tlscert, tlskey, tlscacert
+        Paths to the client certificate, its key, and the CA that signed
+        ``buildkitd``'s own server certificate — the build pool's daemon
+        takes mTLS connections only (PLAN_ENV.md E1-06), so a ``tcp://``
+        ``address`` with none of these set fails the handshake, not the
+        build. Unset (the default) is right for a plain-socket
+        ``buildkitd``, such as ``plane local``'s own ephemeral one, which
+        was every ``buildkitd`` this adapter had ever actually built
+        against before the pool on r1 existed.
     region
         The registry's region, for the ECR API calls.
     ecr
@@ -145,6 +154,9 @@ class Builder:
         credential: Any = None,
         buildctl: str | None = None,
         address: str | None = None,
+        tlscert: str | None = None,
+        tlskey: str | None = None,
+        tlscacert: str | None = None,
         region: str | None = None,
         ecr: Any = None,
         run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
@@ -155,6 +167,9 @@ class Builder:
         self._credential = credential
         self._buildctl = (shutil.which("buildctl") or "") if buildctl is None else buildctl
         self._address = address or os.environ.get("DATALAYER_BUILDKIT_ADDR", "").strip()
+        self._tlscert = tlscert or os.environ.get("DATALAYER_BUILDKIT_TLSCERT", "").strip()
+        self._tlskey = tlskey or os.environ.get("DATALAYER_BUILDKIT_TLSKEY", "").strip()
+        self._tlscacert = tlscacert or os.environ.get("DATALAYER_BUILDKIT_TLSCACERT", "").strip()
         self._region = region or os.environ.get("AWS_REGION", "us-east-1")
         self._ecr = ecr
         self._run = run or subprocess.run
@@ -384,6 +399,7 @@ class Builder:
                 command = [
                     self._buildctl,
                     *(["--addr", self._address] if self._address else []),
+                    *self._tls_options(),
                     "build",
                     "--frontend",
                     "dockerfile.v0",
@@ -533,6 +549,22 @@ class Builder:
                 ) from error
             self._ecr = boto3.client("ecr", region_name=self._region)
         return self._ecr
+
+    def _tls_options(self) -> list[str]:
+        """The ``buildctl`` global flags for the build pool's mTLS (E1-06).
+
+        All three or none: a `buildkitd` that takes mTLS refuses a client
+        with only some of them, so a partial set here would fail at the
+        daemon with a confusing error rather than a clear one about the
+        deployment's own configuration.
+        """
+        if not (self._tlscert and self._tlskey and self._tlscacert):
+            return []
+        return [
+            f"--tlscert={self._tlscert}",
+            f"--tlskey={self._tlskey}",
+            f"--tlscacert={self._tlscacert}",
+        ]
 
     def _registry_host(self) -> str:
         registry = str(getattr(self._credential, "registry", "") or "")

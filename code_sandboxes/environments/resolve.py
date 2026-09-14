@@ -583,13 +583,39 @@ class BuildkitResolveRunner:
         self,
         buildctl: str | None = None,
         address: str | None = None,
+        tlscert: str | None = None,
+        tlskey: str | None = None,
+        tlscacert: str | None = None,
         apt_snapshot: str = "",
         timeout: float = 900.0,
     ) -> None:
         self._buildctl = (shutil.which("buildctl") or "") if buildctl is None else buildctl
+        #: The build pool's `buildkitd` takes mTLS connections only
+        #: (PLAN_ENV.md E1-06); a plain-socket one, such as `plane local`'s
+        #: own ephemeral daemon, needs none of these three. All or nothing,
+        #: for the same reason `datalayer.py`'s `Builder` takes them the
+        #: same way.
+        self._tlscert = tlscert or ""
+        self._tlskey = tlskey or ""
+        self._tlscacert = tlscacert or ""
         self._address = address or ""
         self._apt_snapshot = apt_snapshot
         self._timeout = timeout
+
+    def _tls_options(self) -> list[str]:
+        """The ``buildctl`` global flags for the build pool's mTLS (E1-06).
+
+        All three or none, as ``datalayer.py``'s ``Builder._tls_options``
+        takes them: a `buildkitd` that requires mTLS refuses a client
+        carrying only some of the three, at the daemon rather than here.
+        """
+        if not (self._tlscert and self._tlskey and self._tlscacert):
+            return []
+        return [
+            f"--tlscert={self._tlscert}",
+            f"--tlskey={self._tlskey}",
+            f"--tlscacert={self._tlscacert}",
+        ]
 
     def dockerfile(self, request: ResolveRequest) -> str:
         """The solve, as the frontend reads it: resolve, then pin apt, then export both."""
@@ -679,6 +705,7 @@ class BuildkitResolveRunner:
             command = [
                 self._buildctl,
                 *(["--addr", self._address] if self._address else []),
+                *self._tls_options(),
                 "build",
                 "--frontend",
                 "dockerfile.v0",

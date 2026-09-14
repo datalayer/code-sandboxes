@@ -1021,6 +1021,69 @@ class TestTheBuildkitRunner:
             )
         assert seen["wheelhouse"] == expected
 
+    def test_mtls_flags_reach_buildctl_when_all_three_are_set(self, monkeypatch) -> None:
+        """The build pool's `buildkitd` takes mTLS only (E1-06), same as
+        `datalayer.py`'s own `Builder`."""
+        import subprocess as subprocess_module
+
+        from code_sandboxes.environments import resolve as resolve_module
+        from code_sandboxes.environments.resolve import BuildkitResolveRunner
+
+        seen: dict[str, list[str]] = {}
+
+        def fake_run(command, **kwargs):
+            seen["argv"] = list(command)
+            return subprocess_module.CompletedProcess(command, 1, "", "boom")
+
+        monkeypatch.setattr(resolve_module.subprocess, "run", fake_run)
+        runner = BuildkitResolveRunner(
+            buildctl="/usr/bin/true",
+            address="tcp://datalayer-buildkit.datalayer-builds.svc.cluster.local:1234",
+            tlscert="/certs/client/tls.crt",
+            tlskey="/certs/client/tls.key",
+            tlscacert="/certs/client/ca.crt",
+        )
+        with pytest.raises(EnvironmentsError):
+            runner.solve(
+                ResolveRequest(
+                    python_version="3.13",
+                    requirements=("ipykernel==7.3.0",),
+                    constraints=(),
+                    indexes=(),
+                    base_reference="environments/base/python-cpu@sha256:" + "11" * 32,
+                )
+            )
+        assert "--tlscert=/certs/client/tls.crt" in seen["argv"]
+        assert "--tlskey=/certs/client/tls.key" in seen["argv"]
+        assert "--tlscacert=/certs/client/ca.crt" in seen["argv"]
+
+    def test_no_tls_flags_when_none_are_set(self, monkeypatch) -> None:
+        """A plain-socket `buildkitd`, such as `plane local`'s own ephemeral
+        one, needs none of the three."""
+        import subprocess as subprocess_module
+
+        from code_sandboxes.environments import resolve as resolve_module
+        from code_sandboxes.environments.resolve import BuildkitResolveRunner
+
+        seen: dict[str, list[str]] = {}
+
+        def fake_run(command, **kwargs):
+            seen["argv"] = list(command)
+            return subprocess_module.CompletedProcess(command, 1, "", "boom")
+
+        monkeypatch.setattr(resolve_module.subprocess, "run", fake_run)
+        with pytest.raises(EnvironmentsError):
+            BuildkitResolveRunner(buildctl="/usr/bin/true").solve(
+                ResolveRequest(
+                    python_version="3.13",
+                    requirements=("ipykernel==7.3.0",),
+                    constraints=(),
+                    indexes=(),
+                    base_reference="environments/base/python-cpu@sha256:" + "11" * 32,
+                )
+            )
+        assert not any(arg.startswith("--tls") for arg in seen["argv"])
+
     def test_it_refuses_a_base_that_is_not_pinned_by_digest(self) -> None:
         from code_sandboxes.environments.resolve import BuildkitResolveRunner
 

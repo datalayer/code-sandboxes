@@ -8,6 +8,23 @@
 
 ## Unreleased
 
+## 1.9.1
+
+- **mTLS to the build pool's `buildkitd`** (`environments.adapters.datalayer.Builder`,
+  `environments.resolve.BuildkitResolveRunner`; PLAN_ENV.md E1-06/E1-07). Both
+  drivers of `buildctl` took only `--addr`, which is what every prior live
+  drill needed against a plain-socket, ephemeral `buildkitd` — never a real
+  one. The build pool's real daemon on r1 takes mTLS connections only, so
+  reaching it needed three more flags neither driver had: `--tlscert`,
+  `--tlskey` and `--tlscacert`, each read from `DATALAYER_BUILDKIT_TLSCERT`,
+  `DATALAYER_BUILDKIT_TLSKEY` and `DATALAYER_BUILDKIT_TLSCACERT` when not
+  passed explicitly (`Builder`, matching how it already reads
+  `DATALAYER_BUILDKIT_ADDR`) or passed in by the caller (`BuildkitResolveRunner`,
+  constructed by durable's own `activities_environments.py`, which now reads
+  and forwards the same three). All three or none — a partial set is treated
+  as none, since a `buildkitd` requiring mTLS refuses a client carrying only
+  some of them at the daemon, with a less useful error than refusing here.
+
 ## 1.9.0
 
 - **The Daytona builder** (`environments.adapters.daytona`, PLAN_ENV.md
