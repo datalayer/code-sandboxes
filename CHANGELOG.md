@@ -8,6 +8,8 @@
 
 ## Unreleased
 
+## 1.9.7
+
 - **cosign signs again under `--use-signing-config=false`** (`environments
   .attest`; PLAN_ENV.md E1-09). cosign 3.1.3 defaults `--use-signing-config`
   to `true`: a TUF-provided signing config now names the service URLs,
