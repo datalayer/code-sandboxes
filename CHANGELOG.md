@@ -8,6 +8,62 @@
 
 ## Unreleased
 
+## 1.9.0
+
+- **The Daytona builder** (`environments.adapters.daytona`, PLAN_ENV.md
+  E2-04). A snapshot built from the approved Datalayer base — `uv pip sync --require-hashes` against the resolved lock, your files, `postInstall`
+  commands, and an explicit `tini -- sleep infinity` entrypoint — with the
+  owner's own Daytona organization, never this package's ambient
+  credentials. Confirmed live against a real, hash-verified lock: a real
+  snapshot reaches `Active` and a sandbox launched from it passes the full
+  sandbox contract, doctor included — the one managed variant, of the
+  three landing here, whose build-time state and launched state fully
+  agree.
+- **The E2B builder** (`environments.adapters.e2b`, PLAN_ENV.md E2-03). A
+  template built from `code-interpreter-v1` — E2B's own proprietary
+  code-interpreter server ships baked into it only, so the build starts
+  there rather than from the Datalayer base and reconciles whatever it
+  shipped to exactly what the lock pins. Two live-found identity bugs are
+  fixed: `code-interpreter-v1` already holds an account at uid 1000 and a
+  group at gid 100 of its own, so the old `useradd` was silently landing
+  elsewhere — the build now renames the existing account instead — and the
+  base sets no locale at all, now set explicitly. A real build passes the
+  contract's doctor check in full. **Still open:** a launched sandbox
+  currently runs as root, not the contract's `1000:100` — the two
+  `systemd` services that actually execute a launched sandbox's code have
+  no `User=` of their own, and E2B's private server hardcodes `/home/user`
+  as the working directory, independent of anything the build sets.
+- **The Modal builder** (`environments.adapters.modal`, PLAN_ENV.md E2-05).
+  An image built `from_aws_ecr` off the approved base, with a per-build
+  Secret made and torn down around it. The contract's own identity is put
+  back at launch: `modal_sandbox.py`'s session driver now drops itself to
+  `1000:100` for a sandbox launched from a built Environments artifact
+  specifically (gated on `image_id`, so general Modal sandbox usage
+  elsewhere is unaffected) — Modal ignores the image's own `USER`, so this
+  is the only place it can be restored. A separate, previously
+  silently-fatal bug is also fixed: the real launcher creates the sandbox
+  with no command arguments at all, so an entrypoint relying on `exec "$@"` alone was a no-op and every launched environment exited within
+  seconds; the entrypoint now falls back to `sleep infinity` when given
+  none. **Still open:** two of the core tier's checks (imports, filesystem)
+  still fail on a launched sandbox, for a reason not yet root-caused —
+  confirmed specific to a contract-built image under repeated `exec`, not
+  the identity fix.
+- **A real, shared bug in all three managed launchers, found in review**:
+  `start()` creates the remote sandbox well before it marks itself
+  started, while `stop()` was guarded on that flag rather than on the
+  resource itself — a failure in between left a real, running sandbox
+  that `stop()` skipped entirely, orphaned for good. Fixed identically in
+  `daytona_sandbox.py`, `modal_sandbox.py` and `e2b_sandbox.py`.
+- **A nightly live matrix for the three managed builders**
+  (`.github/workflows/environments-live.yml`, PLAN_ENV.md E2-11). Builds a
+  real artifact on each real provider from a real, hash-verified lock,
+  launches a sandbox from it, and runs the formal core tier — opening (or
+  commenting on) an issue naming the provider and the check on a genuine
+  failure. E2B and Modal run `xfail(strict=False)` for their own
+  already-documented gaps above; Daytona carries no such marker. Needs
+  provider secrets added to the repository before it does anything for
+  real.
+
 ## 1.8.2
 
 - **A sandbox can be asked whether it is still alive, and the answer no longer
