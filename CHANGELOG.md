@@ -8,6 +8,8 @@
 
 ## Unreleased
 
+## 1.8.2
+
 - **A sandbox can be asked whether it is still alive, and the answer no longer
   comes from a flag we set ourselves.** `CodeSandboxClient.is_alive()` returned
   `is_started`, which records that `start()` ran in this process and nothing
@@ -17,6 +19,19 @@
   them, and the client asks the sandbox instead of reading its own flag.
   Variants that have no way to ask their provider inherit the base answer,
   `is_started`, which is all they can honestly say.
+- **Build secrets** (`environments.build_secrets`, PLAN_ENV.md E3-05).
+  `spec.buildSecrets` now resolves for real on the Datalayer variant: each
+  declared secret's value is fetched from IAM's own internal route at the
+  moment the `postInstall` step runs, mounted with BuildKit's
+  `--mount=type=secret` (an environment variable or a file under
+  `/run/secrets/`, per `mountAs`) in its own directory outside the build
+  context, and passed to `buildctl` by file path — never in argv, never in a
+  step result, never an `ARG`/`ENV` that would bake it into the image's
+  history. E2B and Daytona refuse a spec naming one outright: E0-04's spike
+  found only a registry login for the private base on either, never a
+  per-step arbitrary secret. A version with any build secret can never be
+  published to the Library (D-12). New codes `DL_ENV_BUILD_SECRET_UNAVAILABLE`
+  and `DL_ENV_PUBLICATION_BLOCKED`.
 
 ## 1.8.0
 
