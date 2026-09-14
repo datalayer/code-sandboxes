@@ -17,6 +17,7 @@ rows amount to, and a paraphrase of them would test the paraphrase.
 
 from __future__ import annotations
 
+import json
 import subprocess
 
 import pytest
@@ -88,16 +89,35 @@ class FakeEcr:
         findings=(),
         enhanced_findings=True,
         signed: set[str] | None = None,
+        manifest: dict | None = None,
     ) -> None:
         self.statuses = list(statuses)
         self.findings = list(findings)
         self.enhanced_findings = enhanced_findings
         self.signed = set(signed or set())
+        self.manifest = manifest
         self.asked = 0
+        self.scanned: list[str] = []
         self.described_tags: list[str] = []
+
+    def batch_get_image(self, repositoryName, imageIds, acceptedMediaTypes):  # noqa: N803 - boto3's spelling
+        manifest = self.manifest or {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "layers": [],
+        }
+        return {
+            "images": [
+                {
+                    "imageId": imageIds[0],
+                    "imageManifestMediaType": manifest["mediaType"],
+                    "imageManifest": json.dumps(manifest),
+                }
+            ]
+        }
 
     def describe_image_scan_findings(self, repositoryName, imageId):  # noqa: N803 - boto3's spelling
         self.asked += 1
+        self.scanned.append(imageId["imageDigest"])
         status = self.statuses[min(self.asked, len(self.statuses)) - 1]
         if status == "RAISES_IN_PROGRESS":
             error = Exception("ScanInProgressException")
@@ -277,6 +297,59 @@ class TestTheScan:
             an_attestor(ecr=ecr).scan(repository=REPOSITORY, digest=DIGEST)
         assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
         assert raised.value.detail["digest"] == DIGEST
+
+    IMAGE = "sha256:" + "bb" * 32
+    ATTESTATION = "sha256:" + "cc" * 32
+
+    def an_index(self, *entries: dict) -> dict:
+        return {"mediaType": "application/vnd.oci.image.index.v1+json", "manifests": list(entries)}
+
+    def attestation_entry(self) -> dict:
+        return {
+            "digest": self.ATTESTATION,
+            "platform": {"os": "unknown", "architecture": "unknown"},
+            "annotations": {"vnd.docker.reference.type": "attestation-manifest"},
+        }
+
+    def test_an_index_is_decided_by_the_scan_of_its_linux_amd64_image(self) -> None:
+        """The builder pushes with attestations, so what it records is an
+        index, and the scanner answers `UNSUPPORTED_IMAGE` for an index (found
+        live on r1, 2026-09-14)."""
+        ecr = FakeEcr(
+            manifest=self.an_index(
+                self.attestation_entry(),
+                {"digest": self.IMAGE, "platform": {"os": "linux", "architecture": "amd64"}},
+            ),
+            findings=[enhanced("CVE-2026-1234", "CRITICAL", fixed="2.9.15")],
+        )
+        decision = an_attestor(ecr=ecr).scan(repository=REPOSITORY, digest=DIGEST)
+        assert ecr.scanned == [self.IMAGE]
+        assert decision.decision == "blocked"
+
+    def test_an_index_with_no_linux_amd64_image_is_named(self) -> None:
+        ecr = FakeEcr(manifest=self.an_index(self.attestation_entry()))
+        with pytest.raises(EnvironmentsError) as raised:
+            an_attestor(ecr=ecr).scan(repository=REPOSITORY, digest=DIGEST)
+        assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
+        assert "linux/amd64" in raised.value.message
+        assert ecr.scanned == []
+
+    def test_a_single_image_is_scanned_by_its_own_digest(self) -> None:
+        ecr = FakeEcr()
+        an_attestor(ecr=ecr).scan(repository=REPOSITORY, digest=DIGEST)
+        assert ecr.scanned == [DIGEST]
+
+    def test_a_refused_scan_names_both_the_artifact_and_the_image_read(self) -> None:
+        ecr = FakeEcr(
+            statuses=("UNSUPPORTED_IMAGE",),
+            manifest=self.an_index(
+                {"digest": self.IMAGE, "platform": {"os": "linux", "architecture": "amd64"}}
+            ),
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            an_attestor(ecr=ecr).scan(repository=REPOSITORY, digest=DIGEST)
+        assert raised.value.detail["digest"] == DIGEST
+        assert raised.value.detail["scannedDigest"] == self.IMAGE
 
 
 # -- the signature --------------------------------------------------------------

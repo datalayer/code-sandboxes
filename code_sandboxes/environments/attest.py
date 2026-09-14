@@ -32,6 +32,7 @@ clock — so the whole chain is tested without AWS and without a daemon.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -67,6 +68,20 @@ SCAN_STATUSES = {
     "waiting": ("IN_PROGRESS", "PENDING", "SCAN_ELIGIBILITY_EXPIRED"),
     "refused": ("FAILED", "UNSUPPORTED_IMAGE", "FINDINGS_UNAVAILABLE"),
 }
+
+#: The platform an Environment image is built for: the image of an index
+#: whose scan is read.
+_SCANNED_PLATFORM = ("linux", "amd64")
+
+#: What a registry answers for an image index, and for a single image.
+_INDEX_MEDIA_TYPES = (
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+)
+_MANIFEST_MEDIA_TYPES = (
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+)
 
 #: How long a scan is waited for, and how often it is asked about.
 DEFAULT_SCAN_TIMEOUT_SECONDS = 15 * 60
@@ -173,29 +188,34 @@ class Attestor:
         — retryable, because nothing about the version is wrong — and so is a
         scanner that refuses the image. A scan that finished is decided, and a
         blocking decision raises `DL_ENV_SCAN_BLOCKED`.
+
+        An artifact that is an image index is decided by the scan of its
+        linux/amd64 image: see `_scanned_digest`.
         """
         deadline = self._now() + self._timeout
+        scanned = self._scanned_digest(repository=repository, digest=digest)
+        where = {"repository": repository, "digest": digest, "scannedDigest": scanned}
         waited = 0
         while True:
-            status, described = self._describe(repository=repository, digest=digest)
+            status, described = self._describe(repository=repository, digest=scanned)
             if status in SCAN_STATUSES["done"]:
                 break
             if status in SCAN_STATUSES["refused"]:
                 raise EnvironmentsError(
                     PROVIDER_ERROR,
                     f"The registry did not scan this artifact: {status}",
-                    detail={"repository": repository, "digest": digest, "scanStatus": status},
+                    detail={**where, "scanStatus": status},
                 )
             if self._now() >= deadline:
                 raise EnvironmentsError(
                     PROVIDER_ERROR,
                     f"The scan of this artifact did not finish within {self._timeout:.0f}s "
                     f"(last status {status or 'unknown'})",
-                    detail={"repository": repository, "digest": digest, "scanStatus": status},
+                    detail={**where, "scanStatus": status},
                 )
             waited += 1
             if waited == 1:
-                self._log(f"Waiting for the scan of {digest}")
+                self._log(f"Waiting for the scan of {scanned}")
             self._sleep(self._interval)
         findings = findings_of(self._findings(described))
         decision = decide(
@@ -210,6 +230,64 @@ class Attestor:
             + (f" — {decision.said()}" if not decision.passed else "")
         )
         return decision
+
+    def _scanned_digest(self, *, repository: str, digest: str) -> str:
+        """The digest whose scan decides this artifact: its own, or its linux/amd64 image's.
+
+        The Datalayer builder pushes with SBOM and provenance attestations, so
+        what it records is an OCI image index: the image, and an attestation
+        manifest beside it. Enhanced scanning scans the image and answers
+        `UNSUPPORTED_IMAGE` for the index (found live on r1, 2026-09-14), so the
+        scan read is that of the image the index names for linux/amd64. The
+        signature stays on the index, which is what a pod pulls.
+        """
+        try:
+            answer = self._client().batch_get_image(
+                repositoryName=repository,
+                imageIds=[{"imageDigest": digest}],
+                acceptedMediaTypes=[*_INDEX_MEDIA_TYPES, *_MANIFEST_MEDIA_TYPES],
+            )
+        except Exception as error:
+            raise EnvironmentsError(
+                PROVIDER_ERROR,
+                f"The manifest of {digest} could not be read: {error}",
+                detail={"repository": repository, "digest": digest},
+            ) from error
+        images = answer.get("images") or []
+        if not images:
+            raise EnvironmentsError(
+                PROVIDER_ERROR,
+                f"The registry has no image {digest}",
+                detail={"repository": repository, "digest": digest},
+            )
+        try:
+            manifest = json.loads(images[0].get("imageManifest") or "{}")
+        except ValueError:
+            manifest = {}
+        media_type = str(images[0].get("imageManifestMediaType") or manifest.get("mediaType") or "")
+        if media_type not in _INDEX_MEDIA_TYPES and "manifests" not in manifest:
+            return digest
+        os_name, architecture = _SCANNED_PLATFORM
+        for entry in manifest.get("manifests") or []:
+            annotations = entry.get("annotations") or {}
+            if annotations.get("vnd.docker.reference.type") == "attestation-manifest":
+                continue
+            platform = entry.get("platform") or {}
+            child = str(entry.get("digest") or "")
+            if (
+                platform.get("os") == os_name
+                and platform.get("architecture") == architecture
+                and _DIGEST.match(child)
+            ):
+                self._log(
+                    f"Reading the scan of {child}, the {os_name}/{architecture} image of {digest}"
+                )
+                return child
+        raise EnvironmentsError(
+            PROVIDER_ERROR,
+            f"The image index {digest} holds no {os_name}/{architecture} image to scan",
+            detail={"repository": repository, "digest": digest},
+        )
 
     def _describe(self, *, repository: str, digest: str) -> tuple[str, dict[str, Any]]:
         """One `DescribeImageScanFindings`, as a status and what it answered."""

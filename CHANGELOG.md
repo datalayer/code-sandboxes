@@ -8,6 +8,16 @@
 
 ## Unreleased
 
+- **A pushed Environment image is decided by its linux/amd64 image's scan**
+  (`environments.attest`; PLAN_ENV.md E1-08). The Datalayer builder pushes
+  with SBOM and provenance attestations, so the digest it records is an OCI
+  image index. Amazon Inspector scans the image inside it and answers
+  `UNSUPPORTED_IMAGE` for the index itself, so every real build failed at
+  `attest` with `DL_ENV_PROVIDER_ERROR` (found live on r1, 2026-09-14, the
+  first build to get past the scan-read permission). The attestor now reads
+  the manifest and, for an index, reads the scan of its `linux/amd64` image,
+  skipping the attestation manifest. The signature stays on the index, which
+  is what a pod pulls.
 - **Modal attaches a build secret to the `postInstall` steps that name it**
   (`environments.adapters.modal`; PLAN_ENV.md E3-05). Modal used to refuse
   every `buildSecrets` spec. Each declared secret is now resolved from IAM
