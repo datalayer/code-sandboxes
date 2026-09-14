@@ -95,6 +95,18 @@ class FakeEcr:
         return error
 
 
+#: One build secret, named by one of two `postInstall` commands (E3-05).
+A_SECRET = {
+    "buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}],
+    "commands": {
+        "postInstall": [
+            "python -c 'import geopandas'",
+            "python unpack_tiles.py --key-env PIP_TOKEN",
+        ]
+    },
+}
+
+
 def a_request(**changes) -> BuildRequest:
     """The section 4.1 example as a build of version 3, attempt `bld-1`."""
     spec = {
@@ -236,21 +248,20 @@ class TestTheDockerfileItGenerates:
         # Never the loose list: that is the whole point of resolving once.
         assert "geopandas==1.1.1" not in dockerfile
 
-    def test_a_build_secret_is_mounted_for_the_postinstall_step_alone(self) -> None:
-        """Mounted on the `postInstall` `RUN` alone — never an `ARG`/`ENV`,
-        which bakes a value into the image's history, and never the
-        package-install or files steps, which name no secret (§4.1, D-11)."""
-        request = a_request(
-            spec={"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}]},
-            build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
-        )
+    def test_a_build_secret_is_mounted_for_the_command_that_names_it_alone(self) -> None:
+        """Mounted on the `postInstall` `RUN` that names it alone — never an
+        `ARG`/`ENV`, which bakes a value into the image's history, never the
+        package-install or files steps, and never a `postInstall` command
+        that does not read it (§4.1, D-11)."""
+        request = a_request(spec=A_SECRET, build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",))
         dockerfile = a_builder().dockerfile(request)
         lines = dockerfile.splitlines()
         mount_lines = [line for line in lines if "--mount=type=secret" in line]
         assert mount_lines == [
             "RUN --network=none --mount=type=secret,id=dlsec_01J9BUILDSECRET0000000000,"
-            "env=PIP_TOKEN python -c 'import geopandas'"
+            "env=PIP_TOKEN python unpack_tiles.py --key-env PIP_TOKEN"
         ]
+        assert "RUN --network=none python -c 'import geopandas'" in lines
         # Nowhere else in the Dockerfile: no `ARG`/`ENV` line, and no other
         # `RUN` mentions the id or the value's own name.
         assert not any(line.startswith(("ARG", "ENV")) and "PIP_TOKEN" in line for line in lines)
@@ -265,7 +276,8 @@ class TestTheDockerfileItGenerates:
                         "name": "netrc",
                         "mountAs": "file",
                     }
-                ]
+                ],
+                "commands": {"postInstall": ["python unpack_tiles.py --netrc /run/secrets/netrc"]},
             },
             build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
         )
@@ -480,7 +492,7 @@ class TestBuildingAndPushing:
                 return result
 
         request = a_request(
-            spec={"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}]},
+            spec=A_SECRET,
             build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
         )
         buildctl = RecordingBuildctl()
@@ -501,7 +513,7 @@ class TestBuildingAndPushing:
             raise EnvironmentsError(BUILD_SECRET_UNAVAILABLE, "IAM is unreachable")
 
         request = a_request(
-            spec={"buildSecrets": [{"id": "dlsec_01J9BUILDSECRET0000000000", "name": "PIP_TOKEN"}]},
+            spec=A_SECRET,
             build_secret_ids=("dlsec_01J9BUILDSECRET0000000000",),
         )
         buildctl = Buildctl()

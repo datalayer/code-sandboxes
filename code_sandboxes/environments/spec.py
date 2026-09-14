@@ -83,6 +83,7 @@ __all__ = [
     "VariantSet",
     "VersionStatus",
     "assert_publishable",
+    "command_names_secret",
     "parse_environment",
     "parse_requirements_txt",
     "publication_findings",
@@ -198,6 +199,18 @@ class BuildSecret(_Model):
     id: str = Field(pattern=r"^dlsec_[0-9A-Za-z]+$")
     mount_as: Literal["env", "file"] = "env"
     name: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+
+
+def command_names_secret(command: str, secret: BuildSecret) -> bool:
+    """Whether one ``postInstall`` command names ``secret``, so its step gets the mount (E3-05).
+
+    A command names a secret when the secret's name is in it as a whole word:
+    ``$PIP_TOKEN``, ``${PIP_TOKEN}``, ``--key-env PIP_TOKEN`` or
+    ``/run/secrets/netrc``. A secret is mounted on exactly the steps that name
+    it (§4.1), so a command that reads none holds none.
+    """
+    word = rf"(?<![A-Za-z0-9_.-]){re.escape(secret.name)}(?![A-Za-z0-9_.-])"
+    return re.search(word, command) is not None
 
 
 class Accelerator(_Model):
@@ -640,6 +653,17 @@ def spec_findings(
         values = [getattr(secret, attribute) for secret in spec.build_secrets]
         if len(values) != len(set(values)):
             findings.append(SpecFinding("spec.buildSecrets", f"a secret {label} is listed twice"))
+    for index, secret in enumerate(spec.build_secrets):
+        # A secret no command names would be mounted nowhere: the build would
+        # run with it empty and fail far from the cause.
+        if not any(command_names_secret(command, secret) for command in spec.commands.post_install):
+            findings.append(
+                SpecFinding(
+                    f"spec.buildSecrets[{index}]",
+                    f"`{secret.name}` is named by no `postInstall` command, and a secret "
+                    "is mounted only on the commands that name it",
+                )
+            )
 
     resources = spec.resources
     if resources.size_class not in SIZE_CLASSES:

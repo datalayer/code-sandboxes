@@ -23,8 +23,10 @@ from code_sandboxes.environments.errors import EnvironmentsError
 from code_sandboxes.environments.schema import main as schema_main
 from code_sandboxes.environments.schema import schema_text
 from code_sandboxes.environments.spec import (
+    BuildSecret,
     Environment,
     assert_publishable,
+    command_names_secret,
     parse_environment,
     publication_findings,
     spec_digest,
@@ -72,10 +74,11 @@ spec:
   commands:
     postInstall:
       - "python -c 'import geopandas'"
+      - "python unpack_tiles.py --key-env TILES_LICENSE_KEY"
   buildSecrets:
     - id: dlsec_01J8ZK
       mountAs: env
-      name: PIP_EXTRA_INDEX_TOKEN
+      name: TILES_LICENSE_KEY
   resources:
     accelerator: none
     hints:
@@ -195,6 +198,13 @@ UNSUPPORTED = "DL_ENV_CAPABILITY_UNSUPPORTED"
         ("spec.language.version", "3.9", "spec.language.version", INVALID),
         ("spec.build.source", "dockerfile", "spec.build.source", UNSUPPORTED),
         ("spec.packages.python.manager", "conda", "spec.packages.python.manager", UNSUPPORTED),
+        # E3-05: a secret no postInstall command names would be mounted nowhere.
+        (
+            "spec.commands.postInstall",
+            ["python -c 'import geopandas'"],
+            "spec.buildSecrets[0]",
+            INVALID,
+        ),
         (
             "spec.packages.python.dependencies.0",
             "geopandas>=>1",
@@ -524,6 +534,24 @@ def test_a_spec_is_digested_the_same_from_the_environment_or_the_spec() -> None:
     environment = parse_environment(copy.deepcopy(document()))
     assert isinstance(environment, Environment)
     assert spec_digest(environment) == spec_digest(environment.spec)
+
+
+@pytest.mark.parametrize(
+    ("command", "named"),
+    [
+        ("python unpack_tiles.py --key-env TOKEN", True),
+        ('curl -H "Authorization: $TOKEN" x', True),
+        ("echo ${TOKEN}", True),
+        ("cat /run/secrets/TOKEN", True),
+        ("echo $TOKEN_FILE", False),
+        ("echo $MY_TOKEN", False),
+        ("python -c 'import geopandas'", False),
+    ],
+)
+def test_a_command_names_a_secret_by_its_whole_name(command: str, named: bool) -> None:
+    """E3-05: the Datalayer builder mounts a secret on the commands that name it."""
+    secret = BuildSecret(id="dlsec_01J8ZK", name="TOKEN")
+    assert command_names_secret(command, secret) is named
 
 
 class TestPublicationFindings:

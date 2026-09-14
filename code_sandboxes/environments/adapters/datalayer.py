@@ -69,7 +69,7 @@ from ..errors import (
 )
 from ..files import files_step
 from ..resolve import WHEELHOUSE_IMAGE_PATH, WHEELHOUSE_PATH, apt_pins_in, locked_versions
-from ..spec import BuildSecret, Environment
+from ..spec import BuildSecret, Environment, command_names_secret
 
 __all__ = [
     "ECR_ENVIRONMENT_PREFIX",
@@ -347,15 +347,14 @@ class Builder:
                 "/opt/datalayer/lock.txt",
             ]
         )
-        # A build secret is mounted on the postInstall step and nowhere else
-        # (§4.1, D-11): never an `ARG` or `ENV`, which bakes a value into the
-        # image's history, and never the package-install or files steps,
-        # which no secret is declared for. `--mount=type=secret` is a
-        # BuildKit mount: the value is available to the one `RUN`'s shell and
-        # never written to a layer.
+        # A build secret is mounted on the postInstall commands that name it
+        # and nowhere else (§4.1, D-11): never an `ARG` or `ENV`, which bakes a
+        # value into the image's history, never the package-install or files
+        # steps, and never a postInstall command that does not read it.
+        # `--mount=type=secret` is a BuildKit mount: the value is available to
+        # the one `RUN`'s shell and never written to a layer.
         wanted = set(request.build_secret_ids)
         secrets = [secret for secret in spec.build_secrets if secret.id in wanted]
-        secret_mounts = " ".join(_secret_mount(secret) for secret in secrets)
         baked = files_step(request.environment, variant=self.variant)
         if baked:
             lines.append("USER 1000:100")
@@ -365,11 +364,15 @@ class Builder:
         if spec.commands.post_install:
             lines.append("USER 1000:100")
             lines.append("WORKDIR /home/datalayer/content")
-            prefix = "RUN --network=none " + (f"{secret_mounts} " if secret_mounts else "")
             for command in spec.commands.post_install:
                 # No network: a command that fetches something makes an
                 # artifact whose contents depend on the day it was built.
-                lines.append(f"{prefix}{command}")
+                mounts = "".join(
+                    f"{_secret_mount(secret)} "
+                    for secret in secrets
+                    if command_names_secret(command, secret)
+                )
+                lines.append(f"RUN --network=none {mounts}{command}")
         lines.extend(
             [
                 "USER 1000:100",
