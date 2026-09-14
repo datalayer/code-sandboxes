@@ -226,3 +226,35 @@ program that decodes them:
 sandbox.files.write_bytes("/tmp/data.parquet", payload)
 sandbox.files.read_bytes("/tmp/data.parquet")
 ```
+
+## Environments
+
+An [Environment](/docs/environments) built for Daytona is a **snapshot** —
+built from the approved Datalayer base, `uv pip sync --require-hashes`
+against the resolved lock, your files and `postInstall` commands, and an
+explicit `tini -- sleep infinity` entrypoint (Daytona's own default,
+otherwise, is a bare `sleep infinity`, with no init to reap orphans). The
+base already carries `uv`, the doctor and the sandbox contract's user and
+locale, so none of that is reinstalled — only the lock is genuinely
+per-build. The snapshot's own `id` is the artifact; a build also names it,
+for operability, but a launch never uses the name.
+
+**Bring your own account:** a build runs with the environment owner's own
+Daytona organization, not this package's ambient credentials — either
+`DAYTONA_API_KEY`, or `DAYTONA_JWT_TOKEN` together with
+`DAYTONA_ORGANIZATION_ID`, the same two forms `Sandbox.create` itself
+accepts (above). The snapshot exists only in that organization.
+
+**Resources and region are part of the snapshot,** the one thing Daytona's
+own artifact carries that the other three variants' don't: the size class
+(`small`, `medium`, `large`) sets the CPU, memory and disk a build asks
+for, and the `target` a build's snapshot lands in is the one a launch
+starts from — a version that changes size class or region rebuilds a
+second, distinct artifact rather than resizing the first.
+
+Of the four variants, Daytona is the one whose build-time doctor check and
+live launch agree in full: the doctor is *not* run at build time (a
+build-time `RUN` step's PID 1 is Daytona's own build agent, not the
+snapshot's — the `init` check would fail there for a reason that says
+nothing about the finished artifact), but a real launched sandbox passes
+every check of the core tier, identity included.
