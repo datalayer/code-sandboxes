@@ -265,24 +265,11 @@ class Builder(ManagedBuilder):
                     field="spec.env.HOME",
                 )
             )
-        if environment.spec.build_secrets:
-            # E0-04's spike found only a registry login for the private
-            # base, never a per-step arbitrary named secret — build() has
-            # no mechanism to mount one, so a spec naming one is refused
-            # here rather than silently built without it (found in review).
-            ids = ", ".join(secret.id for secret in environment.spec.build_secrets)
-            findings.append(
-                CapabilityFinding(
-                    code="DL_ENV_CAPABILITY_UNSUPPORTED",
-                    message=(
-                        f"E2B has no per-step secret mechanism E0-04 could find — only a "
-                        f"registry login, never an arbitrary named secret — so `buildSecrets` "
-                        f"({ids}) cannot be injected. Build datalayer or modal, which mount one "
-                        "per step, or drop the secret"
-                    ),
-                    field="spec.buildSecrets",
-                )
-            )
+        # `spec.buildSecrets` needs no check of its own here: `supports_build_secrets
+        # = False` above (E3-05, merged since this branch started) makes
+        # `ManagedBuilder._own_findings` refuse it before this method is
+        # even reached — E0-04's spike found only a registry login for the
+        # private base, never an arbitrary named secret.
         return findings
 
     # -- Building -------------------------------------------------------------
