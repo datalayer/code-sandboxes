@@ -289,32 +289,70 @@ class Attestor:
             detail={"repository": repository, "digest": digest},
         )
 
+    #: A hard cap on pages read, so a registry that never stops paginating
+    #: cannot wedge a build forever — this many pages is already far past any
+    #: real image's own finding count (E1-08, found live 2026-09-14: see
+    #: `_describe`'s own docstring for why a page limit is not optional).
+    _MAX_FINDING_PAGES = 50
+
     def _describe(self, *, repository: str, digest: str) -> tuple[str, dict[str, Any]]:
-        """One `DescribeImageScanFindings`, as a status and what it answered."""
-        try:
-            answer = self._client().describe_image_scan_findings(
-                repositoryName=repository, imageId={"imageDigest": digest}
-            )
-        except Exception as error:
-            if _is_in_progress(error):
-                return "IN_PROGRESS", {}
-            if _is_missing(error):
+        """Every `DescribeImageScanFindings` page, as one status and one answer.
+
+        ECR paginates enhanced findings — `nextToken`, not a field this call
+        can ask to skip — and a single unpaginated call answers only its first
+        page. Found live, 2026-09-14: the first real artifact this pipeline
+        scanned had 1,547 enhanced findings across many pages and 31 of them
+        critical, and a single-page read passed a decision that should have
+        blocked, because none of those 31 were in the one page it happened to
+        see. Every page is read and merged before `decide` ever runs.
+        """
+        pages = 0
+        status = ""
+        enhanced: list[Any] = []
+        basic: list[Any] = []
+        completed_at: Any = None
+        token: str | None = None
+        while True:
+            try:
+                kwargs: dict[str, Any] = {
+                    "repositoryName": repository,
+                    "imageId": {"imageDigest": digest},
+                }
+                if token:
+                    kwargs["nextToken"] = token
+                answer = self._client().describe_image_scan_findings(**kwargs)
+            except Exception as error:
+                if _is_in_progress(error):
+                    return "IN_PROGRESS", {}
+                if _is_missing(error):
+                    raise EnvironmentsError(
+                        PROVIDER_ERROR,
+                        f"The registry has no scan for {digest}: {error}",
+                        detail={"repository": repository, "digest": digest},
+                    ) from error
                 raise EnvironmentsError(
                     PROVIDER_ERROR,
-                    f"The registry has no scan for {digest}: {error}",
+                    f"The scan of {digest} could not be read: {error}",
                     detail={"repository": repository, "digest": digest},
                 ) from error
-            raise EnvironmentsError(
-                PROVIDER_ERROR,
-                f"The scan of {digest} could not be read: {error}",
-                detail={"repository": repository, "digest": digest},
-            ) from error
-        status = str(((answer.get("imageScanStatus") or {}).get("status")) or "")
-        findings = answer.get("imageScanFindings") or {}
+            status = str(((answer.get("imageScanStatus") or {}).get("status")) or "")
+            findings = answer.get("imageScanFindings") or {}
+            enhanced.extend(findings.get("enhancedFindings") or [])
+            basic.extend(findings.get("findings") or [])
+            completed_at = findings.get("imageScanCompletedAt") or completed_at
+            pages += 1
+            token = answer.get("nextToken")
+            if not token or pages >= self._MAX_FINDING_PAGES:
+                if token:
+                    self._log(
+                        f"Stopped reading {digest}'s scan after {pages} pages, "
+                        "with more findings still unread"
+                    )
+                break
         return status, {
-            "findings": findings,
-            "completed_at": findings.get("imageScanCompletedAt"),
-            "scanner": "ECR enhanced" if findings.get("enhancedFindings") else "ECR basic",
+            "findings": {"enhancedFindings": enhanced, "findings": basic},
+            "completed_at": completed_at,
+            "scanner": "ECR enhanced" if enhanced else "ECR basic",
         }
 
     @staticmethod

@@ -90,9 +90,14 @@ class FakeEcr:
         enhanced_findings=True,
         signed: set[str] | None = None,
         manifest: dict | None = None,
+        pages: list[list[dict]] | None = None,
     ) -> None:
         self.statuses = list(statuses)
         self.findings = list(findings)
+        #: Each entry is one `describe_image_scan_findings` page's own
+        #: findings, read in order and merged by `_describe` — overrides
+        #: `findings` when given, to test reading more than one page.
+        self.pages = pages
         self.enhanced_findings = enhanced_findings
         self.signed = set(signed or set())
         self.manifest = manifest
@@ -115,7 +120,7 @@ class FakeEcr:
             ]
         }
 
-    def describe_image_scan_findings(self, repositoryName, imageId):  # noqa: N803 - boto3's spelling
+    def describe_image_scan_findings(self, repositoryName, imageId, nextToken=None):  # noqa: N803 - boto3's spelling
         self.asked += 1
         self.scanned.append(imageId["imageDigest"])
         status = self.statuses[min(self.asked, len(self.statuses)) - 1]
@@ -132,6 +137,18 @@ class FakeEcr:
             error.response = {"Error": {"Code": "ImageNotFoundException"}}
             raise error
         key = "enhancedFindings" if self.enhanced_findings else "findings"
+        if self.pages is not None:
+            index = int(nextToken or "0")
+            answer = {
+                "imageScanStatus": {"status": status},
+                "imageScanFindings": {
+                    key: list(self.pages[index]),
+                    "imageScanCompletedAt": "2026-09-12T09:00:00Z",
+                },
+            }
+            if index + 1 < len(self.pages):
+                answer["nextToken"] = str(index + 1)
+            return answer
         return {
             "imageScanStatus": {"status": status},
             "imageScanFindings": {
@@ -326,6 +343,31 @@ class TestTheScan:
             an_attestor(ecr=ecr).scan(repository=REPOSITORY, digest=DIGEST)
         assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
         assert raised.value.detail["digest"] == DIGEST
+
+    def test_every_page_of_findings_is_read_before_deciding(self) -> None:
+        """Found live, 2026-09-14: a single unpaginated call answered only its
+        first page, and a real image with 1,547 findings across many pages
+        passed a decision that should have blocked — none of its 31 critical
+        findings were on the one page a single call happened to see. Every
+        page is now read and merged before `decide` runs."""
+        page_1 = [enhanced("CVE-2026-1111", "LOW")]
+        page_2 = [enhanced("CVE-2026-1234", "CRITICAL", fixed="2.9.15")]
+        page_3 = [enhanced("CVE-2026-2222", "MEDIUM")]
+        ecr = FakeEcr(pages=[page_1, page_2, page_3])
+        decision = an_attestor(ecr=ecr).scan(repository=REPOSITORY, digest=DIGEST)
+        assert decision.decision == "blocked"
+        assert [finding.id for finding in decision.blocking] == ["CVE-2026-1234"]
+        assert decision.body()["counts"] == {"LOW": 1, "CRITICAL": 1, "MEDIUM": 1}
+        assert ecr.asked == 3
+
+    def test_reading_pages_stops_at_the_cap_rather_than_paginating_forever(self) -> None:
+        pages = [
+            [enhanced(f"CVE-2026-{n:04d}", "LOW")] for n in range(Attestor._MAX_FINDING_PAGES + 5)
+        ]
+        ecr = FakeEcr(pages=pages)
+        decision = an_attestor(ecr=ecr).scan(repository=REPOSITORY, digest=DIGEST)
+        assert decision.decision == "pass"
+        assert ecr.asked == Attestor._MAX_FINDING_PAGES
 
     IMAGE = "sha256:" + "bb" * 32
     ATTESTATION = "sha256:" + "cc" * 32

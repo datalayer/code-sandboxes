@@ -8,6 +8,17 @@
 
 ## Unreleased
 
+- **Every page of a scan's findings is read before deciding**
+  (`environments.attest`; PLAN_ENV.md E1-08, D-11). `describe_image_scan_
+  findings` paginates, and the attestor called it exactly once. Found live
+  on r1, 2026-09-14: the first real image with more findings than one page
+  had 1,547 enhanced findings, 31 of them critical, and the single-page read
+  saw a small enough slice that the decision passed — an image with real,
+  unreviewed critical vulnerabilities would have been signed and started. A
+  hard cap of 50 pages keeps a pathological registry from paginating
+  forever; hitting it logs that more findings went unread rather than
+  pretending the scan was complete.
+
 ## 1.9.7
 
 - **cosign signs again under `--use-signing-config=false`** (`environments
