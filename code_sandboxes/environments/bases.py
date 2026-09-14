@@ -108,9 +108,15 @@ class ApprovedBase(BaseModel):
 APPROVED_BASES: dict[str, ApprovedBase] = {
     base.ref: base
     for base in (
-        # E1-05: jupyter-python:0.2.1 (the restored fork) plus the contract layer,
-        # released 2026-09-12 to environments/base/python-cpu. One image, so every
-        # variant pins the same digest until a variant needs a base of its own.
+        # E1-05: jupyter-python:0.2.2 (Ubuntu security packages and conda's own
+        # OpenSSL upgraded, JupyterLab's staging yarn.lock dropped) plus the
+        # contract layer, released 2026-09-14 to environments/base/python-cpu.
+        # One image, so every variant pins the same digest until a variant
+        # needs a base of its own. The prior digest, jupyter-python:0.2.1,
+        # carried 31 fixable-critical findings the scan (E1-08) blocks every
+        # build on; this one carries none the default policy does not already
+        # name (`policy.py`'s own `_BASE_CHANNEL_ALLOWED`, five ESM-locked
+        # ffmpeg/libcjson1 advisories, reviewed the same day).
         ApprovedBase(
             ref="datalayer/python-cpu",
             python_versions=("3.13",),
@@ -119,7 +125,7 @@ APPROVED_BASES: dict[str, ApprovedBase] = {
                     # `.spec.VARIANTS`, spelled out: `spec` imports from this
                     # module, so importing it back here would be circular.
                     ("datalayer", "e2b", "daytona", "modal"),
-                    "sha256:cd09308a0c5e5adeec7fb5d8d29cf7455e78ba86f5c6c095a79068a280e1254f",
+                    "sha256:334adf6c2714c8919ef60beeca1db12e3531a391c9dde41932c782f81c432b36",
                 )
             },
             snapshots={"2026.09": "20260914T150000Z"},

@@ -52,9 +52,10 @@ def test_the_2026_09_channel_of_python_cuda_has_no_digest_until_it_is_pushed(
 def test_the_2026_09_channel_of_python_cpu_resolves_the_digest_its_release_pushed(
     variant: str,
 ) -> None:
-    """PLAN_ENV.md, E1-05: released 2026-09-12, same digest for every variant."""
+    """PLAN_ENV.md, E1-05: released 2026-09-14 (jupyter-python 0.2.2, E1-08's
+    scan fix), same digest for every variant."""
     ref = "datalayer/python-cpu"
-    digest = "sha256:cd09308a0c5e5adeec7fb5d8d29cf7455e78ba86f5c6c095a79068a280e1254f"
+    digest = "sha256:334adf6c2714c8919ef60beeca1db12e3531a391c9dde41932c782f81c432b36"
     assert APPROVED_BASES[ref].channels == {"2026.09": dict.fromkeys(VARIANTS, digest)}
     assert resolve_base(ref, "2026.09", variant) == digest
 
