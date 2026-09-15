@@ -119,6 +119,7 @@ never went through a `smoke_test` method either.
 
 from __future__ import annotations
 
+import shlex
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -140,6 +141,7 @@ from ..errors import (
 )
 from ..files import files_step
 from ..resolve import WHEELHOUSE_PATH, apt_pins_in
+from ..resolve_conda import conda_lock_protected_pins, is_conda_lock
 from ..spec import Environment
 from .managed import ManagedBuilder
 
@@ -191,6 +193,10 @@ class Builder(ManagedBuilder):
     variant = "e2b"
     item = "E2-03"
     title = "E2B"
+    #: A `packages` list and, for conda (E3-02), an `environment.yml`
+    #: dependency file installed with `micromamba`.
+    build_sources = ("packages", "dependencyFile")
+    dependency_formats = ("conda",)
     #: Firecracker microVMs: no GPU passthrough.
     gpu = False
     #: E0-04's spike found only a registry login for the private base, never
@@ -390,15 +396,35 @@ class Builder(ManagedBuilder):
                 chain.copy("datalayer-sandbox", _DOCTOR_PATH, mode=0o755, user="root")
                 .copy("wheelhouse", _WHEELHOUSE_PATH, user="root")
                 .copy("lock.txt", _LOCK_PATH, user="root")
-                .run_cmd(f'pip install --no-cache-dir "uv=={_UV_VERSION}"', user="root")
-                # Packages install as root (E0-04): a user install lands
-                # under /home/user, which the runtime mounts over.
-                .run_cmd(
+            )
+            if is_conda_lock(request.lock_text):
+                # A conda source (E3-02): `micromamba install --file` reads the
+                # `@EXPLICIT` lock without re-solving, and the protected pip
+                # pins the resolver forced over the pip layer come from the
+                # lock's own `# datalayer-protected:` header, so the kernel
+                # stack (E1-04) is present the same as for a pip source.
+                chain = chain.run_cmd(
+                    f"micromamba install --yes --name base --file {_LOCK_PATH}",
+                    user="root",
+                )
+                pins = conda_lock_protected_pins(request.lock_text)
+                if pins:
+                    requirements = " ".join(shlex.quote(pin) for pin in pins)
+                    chain = chain.run_cmd(
+                        f"pip install --no-cache-dir --find-links {_WHEELHOUSE_PATH} "
+                        f"{requirements}",
+                        user="root",
+                    )
+            else:
+                chain = chain.run_cmd(
+                    f'pip install --no-cache-dir "uv=={_UV_VERSION}"', user="root"
+                ).run_cmd(
+                    # Packages install as root (E0-04): a user install lands
+                    # under /home/user, which the runtime mounts over.
                     "uv pip sync --system --require-hashes "
                     f"--find-links {_WHEELHOUSE_PATH} {_LOCK_PATH}",
                     user="root",
                 )
-            )
             for command in files_step(request.environment, variant=self.variant):
                 chain = chain.run_cmd(command)
             for command in spec.commands.post_install:

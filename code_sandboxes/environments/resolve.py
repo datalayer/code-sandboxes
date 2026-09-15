@@ -1252,6 +1252,19 @@ def resolve_environment(
     )
     dependency_file = environment.spec.build.dependency_file
     if source == "dependencyFile" and dependency_file is not None:
+        if dependency_file.source_format == "conda":
+            # A conda `environment.yml` resolves through its own micromamba
+            # solve into an explicit lock (E3-02), not uv's pip compile.
+            from .resolve_conda import resolve_conda_environment
+
+            return resolve_conda_environment(
+                environment_yml=dependency_file.content,
+                python_version=environment.spec.language.version,
+                resolved_bases=resolved_bases,
+                credential=credential,
+                log=say,
+                resolved_at=resolved_at,
+            )
         if dependency_file.source_format == "pyproject":
             # Verified, not re-resolved (E3-01): the author's own uv.lock is
             # the answer, and this only proves it still matches pyproject.toml.
