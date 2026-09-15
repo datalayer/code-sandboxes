@@ -196,7 +196,6 @@ UNSUPPORTED = "DL_ENV_CAPABILITY_UNSUPPORTED"
         ("spec.contract", "sandbox-contract/v9", "spec.contract", UNSUPPORTED),
         ("spec.base.ref", "python", "spec.base.ref", INVALID),
         ("spec.language.version", "3.9", "spec.language.version", INVALID),
-        ("spec.build.source", "dockerfile", "spec.build.source", UNSUPPORTED),
         ("spec.packages.python.manager", "conda", "spec.packages.python.manager", UNSUPPORTED),
         # E3-05: a secret no postInstall command names would be mounted nowhere.
         (
@@ -307,8 +306,8 @@ def test_all_baked_files_together_are_capped() -> None:
 
 
 def test_an_invalid_field_outranks_something_unsupported() -> None:
-    data = mutated("spec.build.source", "dockerfile")
-    assert _codes(data) == {"spec.build.source": UNSUPPORTED}
+    data = mutated("spec.packages.python.manager", "conda")
+    assert _codes(data) == {"spec.packages.python.manager": UNSUPPORTED}
     with pytest.raises(EnvironmentsError) as unsupported:
         validate_environment(data)
     assert unsupported.value.code is errors.CAPABILITY_UNSUPPORTED
@@ -319,8 +318,16 @@ def test_an_invalid_field_outranks_something_unsupported() -> None:
     assert invalid.value.code is errors.SPEC_INVALID
     assert {finding["field"] for finding in invalid.value.detail["findings"]} == {
         "metadata.name",
-        "spec.build.source",
+        "spec.packages.python.manager",
     }
+
+
+def test_a_dockerfile_source_is_accepted_and_keeps_its_own_base() -> None:
+    # E3-03: the base is the `FROM` its uploaded Dockerfile names, so
+    # `spec.base` is not checked against the approved table (as for `image`).
+    data = mutated("spec.build.source", "dockerfile")
+    data["spec"]["base"]["ref"] = "python"
+    assert _codes(data) == {}
 
 
 # -- Dependency files (E3-01) --------------------------------------------------
