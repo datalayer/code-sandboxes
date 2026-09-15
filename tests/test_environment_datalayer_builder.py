@@ -44,12 +44,13 @@ LOCK = (
 LOCK_DIGEST = "sha256:" + "dd" * 32
 
 #: A conda explicit lock (E3-02): the `@EXPLICIT` marker, one conda package
-#: URL, and the protected pip pins the resolver forced over the pip layer.
+#: URL, and the pip layer the solve resolved (the user's pip requirements and
+#: the protected pins over them).
 CONDA_LOCK = (
     "# Resolved by Datalayer (PLAN_ENV.md D-9). Do not edit: a change makes a new version.\n"
     "# python: 3.13\n"
     "# platform: linux-64\n"
-    "# datalayer-protected: ipykernel==7.3.0\n"
+    "# datalayer-pip: ipykernel==7.3.0\n"
     "@EXPLICIT\n"
     "https://conda.anaconda.org/conda-forge/linux-64/gdal-3.8.4-py313.conda#" + "ab" * 32 + "\n"
 )
@@ -271,17 +272,20 @@ class TestTheDockerfileItGenerates:
         assert "geopandas==1.1.1" not in dockerfile
 
     def test_a_conda_lock_installs_with_micromamba_and_then_the_pip_pins(self) -> None:
-        """A conda source (E3-02): the `@EXPLICIT` lock installs with
-        `micromamba`, and the protected pip pins the resolver forced over the
-        pip layer follow, so the kernel stack (E1-04) is present the same."""
+        """A conda source (E3-02): the `@EXPLICIT` lock installs with a pinned
+        `micromamba` copied in first, and the pip layer the solve resolved
+        follows, so the kernel stack (E1-04) is present the same."""
         request = a_request(lock_text=CONDA_LOCK, spec=CONDA_SPEC)
         dockerfile = a_builder().dockerfile(request)
         assert (
             "micromamba install --yes --name base --file /opt/datalayer/lock.txt" in dockerfile
         )
-        # The header's own protected pin, installed with pip after the conda layer.
-        pip = dockerfile.index("uv pip install --system")
+        # micromamba is copied in from its pinned image before it is invoked.
+        bootstrap = dockerfile.index("COPY --from=mambaorg/micromamba")
         micromamba = dockerfile.index("micromamba install")
+        assert bootstrap < micromamba
+        # The header's own pip layer, installed with pip after the conda layer.
+        pip = dockerfile.index("uv pip install --system")
         assert micromamba < pip
         assert "ipykernel==7.3.0" in dockerfile
         # A conda source never runs the pip-lock `uv pip sync`.

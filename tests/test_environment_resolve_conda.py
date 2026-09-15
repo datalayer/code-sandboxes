@@ -11,6 +11,7 @@ tested against the solver's own words rather than a paraphrase of them.
 
 from __future__ import annotations
 
+import subprocess
 from datetime import datetime, timezone
 
 import pytest
@@ -29,6 +30,7 @@ from code_sandboxes.environments.resolve_conda import (
     merge_conda_pip,
     parse_conda_environment,
     parse_conda_failure,
+    pip_requirements_from_env_yaml,
     rendered_environment,
     resolve_conda_environment,
 )
@@ -174,6 +176,53 @@ class TestParsingTheEnvironmentYml:
         with pytest.raises(EnvironmentsError):
             parse_conda_environment("channels: conda-forge\ndependencies:\n  - gdal\n")
 
+    def test_a_channel_url_carrying_a_credential_is_refused(self) -> None:
+        # The same refusal a credential-bearing pip index gets: the token
+        # belongs in the build's secrets, never verbatim in the spec.
+        text = (
+            "channels:\n"
+            "  - https://user:tok@conda.example.com/private\n"
+            "dependencies:\n  - gdal\n"
+        )
+        with pytest.raises(EnvironmentsError) as caught:
+            parse_conda_environment(text)
+        assert caught.value.code.code == "DL_ENV_SPEC_INVALID"
+        assert "credential" in caught.value.message
+        assert caught.value.detail["field"].endswith("channels[0]")
+
+    def test_a_plain_channel_url_without_a_credential_is_kept(self) -> None:
+        env = parse_conda_environment(
+            "channels:\n  - https://conda.anaconda.org/conda-forge\n"
+            "dependencies:\n  - gdal\n"
+        )
+        assert env.channels == ("https://conda.anaconda.org/conda-forge",)
+
+
+class TestReadingThePipExport:
+    def test_it_reads_the_pip_section_in_order(self) -> None:
+        export = (
+            "name: solved\n"
+            "channels:\n  - conda-forge\n"
+            "dependencies:\n"
+            "  - python=3.13\n"
+            "  - gdal=3.9.2\n"
+            "  - pip:\n"
+            "    - shapely==2.0.6\n"
+            "    - ipykernel==7.3.0\n"
+        )
+        assert pip_requirements_from_env_yaml(export) == (
+            "shapely==2.0.6",
+            "ipykernel==7.3.0",
+        )
+
+    def test_an_export_without_a_pip_section_is_an_empty_layer(self) -> None:
+        export = "dependencies:\n  - python=3.13\n  - gdal=3.9.2\n"
+        assert pip_requirements_from_env_yaml(export) == ()
+
+    def test_a_malformed_export_is_an_empty_layer_never_a_raise(self) -> None:
+        assert pip_requirements_from_env_yaml("dependencies: [\n") == ()
+        assert pip_requirements_from_env_yaml("- just\n- a\n- list\n") == ()
+
 
 # -- Datalayer's pins over the pip layer -------------------------------------
 
@@ -252,7 +301,10 @@ class TestTheLock:
         )
         assert document["format"] == CONDA_LOCK_FORMAT
         assert document["package_count"] == 2
-        assert "# datalayer-protected: ipykernel==7.3.0" in document["content"]
+        # The header carries the complete pip layer: the user's own pip
+        # requirement and the protected pin the resolver forced over it.
+        assert "# datalayer-pip: shapely==2.0.6" in document["content"]
+        assert "# datalayer-pip: ipykernel==7.3.0" in document["content"]
         assert "@EXPLICIT" in document["content"]
         again = conda_lock_document(
             CondaResolveOutcome(lock_text=EXPLICIT_LOCK),
@@ -285,6 +337,28 @@ class TestTheRunners:
         with pytest.raises(EnvironmentsError) as caught:
             runner.solve(CondaResolveRequest(environment_yml=A_YAML, python_version="3.13"))
         assert caught.value.code.code == "DL_ENV_CAPABILITY_UNSUPPORTED"
+
+    def test_an_export_that_times_out_is_a_provider_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The solve finishes, but the `env export` that reads the lock back
+        # exceeds the deadline: its timeout is classified the same as the
+        # solve's, never left as a raw subprocess.TimeoutExpired.
+        runner = MicromambaResolveRunner(micromamba="/usr/local/bin/micromamba", timeout=5.0)
+        calls = {"n": 0}
+
+        def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+            raise subprocess.TimeoutExpired(argv, 5.0)
+
+        monkeypatch.setattr(
+            "code_sandboxes.environments.resolve_conda.subprocess.run", fake_run
+        )
+        with pytest.raises(EnvironmentsError) as caught:
+            runner.solve(CondaResolveRequest(environment_yml=A_YAML, python_version="3.13"))
+        assert caught.value.code.code == "DL_ENV_PROVIDER_ERROR"
 
     def test_the_buildkit_runner_refuses_without_buildctl(self) -> None:
         runner = BuildkitCondaResolveRunner(buildctl="")
@@ -320,6 +394,11 @@ class TestTheRunners:
         assert "micromamba create" in dockerfile
         assert "PIP_FIND_LINKS" in dockerfile
         assert "micromamba env export --explicit" in dockerfile
+        # The pinned micromamba is copied in (the base bakes uv, not it), and
+        # the pip layer is exported alongside the explicit lock.
+        assert "COPY --from=mambaorg/micromamba" in dockerfile
+        assert "env export --prefix /solve/prefix > /solve/pip-env.yml" in dockerfile
+        assert "COPY --from=solve /solve/pip-env.yml /pip-env.yml" in dockerfile
 
 
 # -- The whole resolve, through the recorded runner --------------------------

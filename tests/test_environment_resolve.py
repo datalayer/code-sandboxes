@@ -454,6 +454,54 @@ class TestResolvingAVersion:
         assert raised.value.code.code == "DL_ENV_CAPABILITY_UNSUPPORTED"
         assert raised.value.detail["manager"] == "conda"
 
+    def test_a_conda_dependency_file_uses_the_conda_runner_it_is_given(self) -> None:
+        """The main API forwards its `conda_runner` to the conda solve, so a
+        local or test solver reaches it the same way `runner` reaches pip."""
+        from code_sandboxes.environments.resolve_conda import (
+            CondaResolveOutcome,
+            CondaResolveRequest,
+        )
+
+        class RecordedConda:
+            name = "recorded-conda"
+
+            def __init__(self, outcome: CondaResolveOutcome) -> None:
+                self._outcome = outcome
+                self.request: CondaResolveRequest | None = None
+
+            def solve(self, request, log=None):  # type: ignore[no-untyped-def]
+                self.request = request
+                return self._outcome
+
+        conda_runner = RecordedConda(
+            CondaResolveOutcome(
+                lock_text=(
+                    "# platform: linux-64\n@EXPLICIT\n"
+                    "https://conda.anaconda.org/conda-forge/linux-64/gdal-3.9.2.conda#"
+                    + "bb" * 32
+                    + "\n"
+                )
+            )
+        )
+        spec = a_spec(
+            packages={},
+            build={
+                "source": "dependencyFile",
+                "dependencyFile": {
+                    "sourceFormat": "conda",
+                    "content": "channels:\n  - conda-forge\ndependencies:\n  - gdal=3.9\n",
+                },
+            },
+        )
+        resolve_environment(
+            spec=spec,
+            variants=["datalayer"],
+            conda_runner=conda_runner,
+            bases=BASES,
+        )
+        assert conda_runner.request is not None
+        assert "gdal=3.9" in conda_runner.request.environment_yml
+
     def test_the_credentials_registry_auth_reaches_the_runner(self) -> None:
         class Credential:
             def registry_auth(self) -> dict[str, str]:

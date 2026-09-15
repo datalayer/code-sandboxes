@@ -613,3 +613,32 @@ class TestPublicationFindings:
         ]
         environment = parse_environment(data)
         assert publication_findings(environment) == []
+
+    def test_a_private_conda_channel_blocks_publication(self) -> None:
+        """D-12 the same for a conda source: a channel reached with a
+        credential the public does not hold can never be published."""
+        data = a_dependency_file_document(
+            sourceFormat="conda",
+            content=(
+                "channels:\n"
+                "  - conda-forge\n"
+                "  - https://conda.mycorp.internal/private\n"
+                "dependencies:\n  - gdal\n"
+            ),
+        )
+        del data["spec"]["buildSecrets"]
+        environment = parse_environment(data)
+        findings = publication_findings(environment)
+        assert len(findings) == 1
+        assert findings[0].field == "spec.build.dependencyFile.content.channels"
+        assert findings[0].code is errors.PUBLICATION_BLOCKED
+        assert "conda.mycorp.internal" in findings[0].message
+
+    def test_public_conda_channels_are_publishable(self) -> None:
+        data = a_dependency_file_document(
+            sourceFormat="conda",
+            content="channels:\n  - conda-forge\n  - bioconda\ndependencies:\n  - gdal\n",
+        )
+        del data["spec"]["buildSecrets"]
+        environment = parse_environment(data)
+        assert publication_findings(environment) == []
