@@ -107,7 +107,7 @@ GPU_SIZE_CLASSES: tuple[str, ...] = ("gpu-small", "gpu-large")
 
 BUILD_SOURCES: tuple[str, ...] = ("packages", "dependencyFile", "dockerfile", "image")
 #: What builds today; `dockerfile` is the one source still to come.
-SUPPORTED_BUILD_SOURCES: tuple[str, ...] = ("packages", "dependencyFile", "image")
+SUPPORTED_BUILD_SOURCES: tuple[str, ...] = ("packages", "dependencyFile", "dockerfile", "image")
 SUPPORTED_PACKAGE_MANAGERS: tuple[str, ...] = ("uv", "pip")
 #: `requirements.txt` and `pyproject.toml`/`uv.lock` are archived on the
 #: version they resolved (E3-01); this bounds what a spec may carry inline,
@@ -593,10 +593,12 @@ def spec_findings(
             )
         )
 
-    # An `image` source brings its own base (E3-04): `spec.base` names
-    # nothing Datalayer approved, so checking it against the table would
-    # refuse every import for the one reason imports exist to avoid.
-    if spec.build.source != "image":
+    # An `image` source brings its own base (E3-04), and a `dockerfile`
+    # source's base is the `FROM` its uploaded Dockerfile names (E3-03,
+    # validated against the approved bases by `check_dockerfile`, not here):
+    # `spec.base` names nothing Datalayer approved for either, so checking it
+    # against the table would refuse every one for the reason they exist.
+    if spec.build.source not in ("image", "dockerfile"):
         base = bases.get(spec.base.ref)
         if base is None:
             findings.append(

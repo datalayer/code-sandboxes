@@ -24,26 +24,34 @@ import argparse
 import re
 import shlex
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
 from .bases import is_approved_repository
-from .errors import CAPABILITY_UNSUPPORTED, EnvironmentsError
+from .errors import CAPABILITY_UNSUPPORTED, SPEC_INVALID, EnvironmentsError
 
 __all__ = [
     "CONTRACT_V1",
+    "MAX_CONTEXT_FILES",
+    "MAX_CONTEXT_FILE_BYTES",
+    "MAX_CONTEXT_TOTAL_BYTES",
     "SANDBOX_CONTRACT_V1",
     "SUPPORTED_CONTRACTS",
+    "BuildContextEntry",
+    "BuildContextFinding",
     "ContractRow",
     "DockerfileFinding",
     "DockerfileInstruction",
     "SandboxContract",
+    "check_build_context",
     "check_dockerfile",
     "contract_markdown",
     "get_contract",
     "parse_dockerfile",
+    "validate_build_context",
     "validate_dockerfile",
 ]
 
@@ -449,6 +457,94 @@ def check_dockerfile(text: str, *, contract: SandboxContract = SANDBOX_CONTRACT_
         raise EnvironmentsError(
             CAPABILITY_UNSUPPORTED,
             f"line {first.line}: {first.message}",
+            detail={"findings": [finding.to_dict() for finding in findings]},
+        )
+
+
+# --- The build context (E3-03) -------------------------------------------------------
+
+#: A `dockerfile` source uploads a build context to object storage. These bound
+#: what Runtimes accepts before it issues a presigned URL, so a context cannot
+#: be a way to smuggle a host file in (a symlink or `..`), or to fill a bucket.
+MAX_CONTEXT_FILES = 2000
+MAX_CONTEXT_FILE_BYTES = 50 * 1024 * 1024
+MAX_CONTEXT_TOTAL_BYTES = 100 * 1024 * 1024
+
+_CONTEXT_SEPARATOR = re.compile(r"[\\/]")
+
+
+@dataclass(frozen=True)
+class BuildContextEntry:
+    """One member of an uploaded build context: its path, size, and whether it is a symlink."""
+
+    path: str
+    size_bytes: int = 0
+    is_symlink: bool = False
+
+
+@dataclass(frozen=True)
+class BuildContextFinding:
+    """Something in a build context that must not be uploaded."""
+
+    path: str
+    message: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {"path": self.path, "message": self.message}
+
+
+def validate_build_context(
+    entries: Sequence[BuildContextEntry],
+) -> list[BuildContextFinding]:
+    """Everything in a build context the upload refuses, in the order given.
+
+    Refused: an absolute path, a `..` that would escape the context, a symlink
+    (which could point at a host file the build then reads), a file over the
+    per-file limit, and — once — a context with too many files or too many
+    bytes in all.
+    """
+    findings: list[BuildContextFinding] = []
+    total = 0
+    for entry in entries:
+        path = entry.path
+        components = _CONTEXT_SEPARATOR.split(path)
+        if not path or all(part in ("", ".") for part in components):
+            findings.append(BuildContextFinding(path, "is not a path inside the context"))
+        elif path.startswith("/") or path.startswith("\\"):
+            findings.append(BuildContextFinding(path, "is an absolute path, not a context path"))
+        elif ".." in components:
+            findings.append(BuildContextFinding(path, "escapes the context with `..`"))
+        if entry.is_symlink:
+            findings.append(
+                BuildContextFinding(path, "is a symlink, which could read a host file")
+            )
+        if entry.size_bytes > MAX_CONTEXT_FILE_BYTES:
+            findings.append(
+                BuildContextFinding(
+                    path, f"is over the {MAX_CONTEXT_FILE_BYTES}-byte per-file limit"
+                )
+            )
+        total += entry.size_bytes
+    if len(entries) > MAX_CONTEXT_FILES:
+        findings.append(
+            BuildContextFinding("", f"has more than {MAX_CONTEXT_FILES} files")
+        )
+    if total > MAX_CONTEXT_TOTAL_BYTES:
+        findings.append(
+            BuildContextFinding("", f"is over the {MAX_CONTEXT_TOTAL_BYTES}-byte total limit")
+        )
+    return findings
+
+
+def check_build_context(entries: Sequence[BuildContextEntry]) -> None:
+    """Refuse a build context the upload does not allow, naming the first fault."""
+    findings = validate_build_context(entries)
+    if findings:
+        first = findings[0]
+        where = f"`{first.path}`: " if first.path else ""
+        raise EnvironmentsError(
+            SPEC_INVALID,
+            f"{where}{first.message}",
             detail={"findings": [finding.to_dict() for finding in findings]},
         )
 
