@@ -78,6 +78,7 @@ from ..resolve import (
     apt_snapshot_in,
     locked_versions,
 )
+from ..resolve_conda import conda_lock_protected_pins, is_conda_lock
 from ..spec import BuildSecret, Environment, command_names_secret
 
 __all__ = [
@@ -229,8 +230,8 @@ class Builder:
             findings.append(
                 CapabilityFinding(
                     code=CAPABILITY_UNSUPPORTED.code,
-                    message="conda environments are resolved by their own solver, "
-                    "which is not built yet",
+                    message="a conda environment is brought as a `dependencyFile` "
+                    "whose `sourceFormat` is `conda`, not through `packages`",
                     field="spec.packages.python.manager",
                 )
             )
@@ -253,7 +254,8 @@ class Builder:
                     field="spec.platform.architecture",
                 )
             )
-        if lock_text is not None and not locked_versions(lock_text):
+        pins_or_lock = lock_text is not None and not is_conda_lock(lock_text)
+        if pins_or_lock and not locked_versions(lock_text):
             findings.append(
                 CapabilityFinding(
                     code=SPEC_INVALID.code,
@@ -323,18 +325,40 @@ class Builder:
                 f"COPY wheelhouse/ {imported_wheelhouse}/",
                 'RUN pip install --no-cache-dir "uv==0.12.11"',
             ]
-        lines.extend(
-            [
-                "COPY lock.txt /opt/datalayer/lock.txt",
-                # `sync` and not `install`: the artifact holds the lock's set,
-                # and `--require-hashes` means every byte was the resolved one.
-                # `--find-links` for what no index has — a protected pin's
-                # own wheel, the fork's local version above all (E1-04).
-                "RUN --mount=type=cache,target=/root/.cache/uv "
-                f"uv pip sync --system --require-hashes --find-links {find_links} "
-                "/opt/datalayer/lock.txt",
-            ]
-        )
+        if is_conda_lock(request.lock_text):
+            # A conda source (E3-02): the lock is an `@EXPLICIT` file
+            # `micromamba create --file` installs without re-solving, and the
+            # protected pip pins the resolver forced over the pip layer are in
+            # the lock's own `# datalayer-protected:` header. The conda layer
+            # goes into the base's own environment; the pip layer follows, so
+            # the kernel stack (E1-04) is present the same as every source.
+            pins = conda_lock_protected_pins(request.lock_text)
+            lines.extend(
+                [
+                    "COPY lock.txt /opt/datalayer/lock.txt",
+                    "RUN --mount=type=cache,target=/opt/conda/pkgs "
+                    "micromamba install --yes --name base --file /opt/datalayer/lock.txt",
+                ]
+            )
+            if pins:
+                requirements = " ".join(shlex.quote(pin) for pin in pins)
+                lines.append(
+                    "RUN --mount=type=cache,target=/root/.cache/uv "
+                    f"uv pip install --system --find-links {find_links} {requirements}"
+                )
+        else:
+            lines.extend(
+                [
+                    "COPY lock.txt /opt/datalayer/lock.txt",
+                    # `sync` and not `install`: the artifact holds the lock's set,
+                    # and `--require-hashes` means every byte was the resolved one.
+                    # `--find-links` for what no index has — a protected pin's
+                    # own wheel, the fork's local version above all (E1-04).
+                    "RUN --mount=type=cache,target=/root/.cache/uv "
+                    f"uv pip sync --system --require-hashes --find-links {find_links} "
+                    "/opt/datalayer/lock.txt",
+                ]
+            )
         # A build secret is mounted on the postInstall commands that name it
         # and nowhere else (§4.1, D-11): never an `ARG` or `ENV`, which bakes a
         # value into the image's history, never the package-install or files

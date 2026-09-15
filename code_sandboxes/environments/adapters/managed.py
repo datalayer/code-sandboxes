@@ -36,7 +36,7 @@ from ..builders import (
     ValidationResult,
 )
 from ..errors import CAPABILITY_UNSUPPORTED, SPEC_INVALID, EnvironmentsError
-from ..spec import GPU_SIZE_CLASSES, Environment
+from ..spec import GPU_SIZE_CLASSES, Environment, EnvironmentSpec
 
 __all__ = ["ManagedBuilder"]
 
@@ -67,6 +67,11 @@ class ManagedBuilder:
     supports_build_secrets = True
     #: The build sources it will accept in this phase.
     build_sources: tuple[str, ...] = ("packages",)
+    #: When `dependencyFile` is among `build_sources`, the `sourceFormat`s the
+    #: variant's own build actually installs. A conda source (E3-02) installs
+    #: with `micromamba`; a `pyproject`/`requirements` dependencyFile is not
+    #: built for a managed variant yet (E3-01), so it is not listed here.
+    dependency_formats: tuple[str, ...] = ()
     package_managers: tuple[str, ...] = ("uv", "pip")
     #: Dockerfile instructions its own builder does not implement (§6).
     forbidden_instructions: tuple[str, ...] = ()
@@ -121,6 +126,8 @@ class ManagedBuilder:
                     field="spec.build.source",
                 )
             )
+        elif spec.build.source == "dependencyFile":
+            findings.extend(self._dependency_file_findings(spec))
         if spec.packages.python.manager not in self.package_managers:
             findings.append(
                 CapabilityFinding(
@@ -141,34 +148,7 @@ class ManagedBuilder:
                 )
             )
         if not self.gpu:
-            # A GPU is asked for two ways, and the spec's own validation
-            # couples them; a `validate` can be reached before that, so both
-            # are read here rather than trusting the coupling.
-            if spec.resources.size_class in GPU_SIZE_CLASSES:
-                findings.append(
-                    CapabilityFinding(
-                        code=CAPABILITY_UNSUPPORTED.code,
-                        message=(
-                            f"{self.title} has no GPU, so `{spec.resources.size_class}` cannot be "
-                            f"built for it. Drop {self.variant} from the variants, or build "
-                            "the GPU classes for modal or daytona, which run them on their "
-                            "own hardware"
-                        ),
-                        field="spec.resources.sizeClass",
-                    )
-                )
-            elif spec.resources.accelerator != "none":
-                findings.append(
-                    CapabilityFinding(
-                        code=CAPABILITY_UNSUPPORTED.code,
-                        message=(
-                            f"{self.title} has no GPU, so an accelerator cannot be built for it. "
-                            f"Drop {self.variant} from the variants, or build the GPU classes for "
-                            "modal or daytona, which run them on their own hardware"
-                        ),
-                        field="spec.resources.accelerator",
-                    )
-                )
+            findings.extend(self._gpu_findings(spec))
         if self.regions:
             asked = [
                 region
@@ -200,6 +180,58 @@ class ManagedBuilder:
                 )
             )
         return findings
+
+    def _gpu_findings(self, spec: EnvironmentSpec) -> list[CapabilityFinding]:
+        """A variant with no GPU refuses either way a GPU is asked for. A GPU
+        is asked two ways, and the spec's own validation couples them; a
+        `validate` can be reached before that, so both are read here rather
+        than trusting the coupling."""
+        if spec.resources.size_class in GPU_SIZE_CLASSES:
+            return [
+                CapabilityFinding(
+                    code=CAPABILITY_UNSUPPORTED.code,
+                    message=(
+                        f"{self.title} has no GPU, so `{spec.resources.size_class}` cannot be "
+                        f"built for it. Drop {self.variant} from the variants, or build "
+                        "the GPU classes for modal or daytona, which run them on their "
+                        "own hardware"
+                    ),
+                    field="spec.resources.sizeClass",
+                )
+            ]
+        if spec.resources.accelerator != "none":
+            return [
+                CapabilityFinding(
+                    code=CAPABILITY_UNSUPPORTED.code,
+                    message=(
+                        f"{self.title} has no GPU, so an accelerator cannot be built for it. "
+                        f"Drop {self.variant} from the variants, or build the GPU classes for "
+                        "modal or daytona, which run them on their own hardware"
+                    ),
+                    field="spec.resources.accelerator",
+                )
+            ]
+        return []
+
+    def _dependency_file_findings(self, spec: EnvironmentSpec) -> list[CapabilityFinding]:
+        """A `dependencyFile` this variant accepts still only builds the
+        `sourceFormat`s it has an install step for (E3-01, E3-02): a conda
+        file installs with `micromamba`, but a `pyproject` or `requirements`
+        one is not built for a managed variant yet."""
+        source_format = spec.build.dependency_file.source_format
+        if source_format in self.dependency_formats:
+            return []
+        return [
+            CapabilityFinding(
+                code=CAPABILITY_UNSUPPORTED.code,
+                message=(
+                    f"a `{source_format}` dependency file is not built for "
+                    f"{self.title} yet; it builds "
+                    f"{', '.join(self.dependency_formats) or 'no dependency file'}"
+                ),
+                field="spec.build.dependencyFile.sourceFormat",
+            )
+        ]
 
     def _own_findings(
         self, environment: Environment, lock_text: str | None

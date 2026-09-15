@@ -52,6 +52,30 @@ def environment(**spec: Any) -> Environment:
     return parse_environment(data)
 
 
+#: A `dependencyFile` conda source: an `environment.yml` a managed variant
+#: builds with `micromamba` (E3-02).
+CONDA_ENVIRONMENT_YML = (
+    "name: geo\n"
+    "channels: [conda-forge]\n"
+    "dependencies:\n"
+    "  - python=3.13\n"
+    "  - gdal\n"
+)
+
+
+def a_conda_environment(**spec: Any) -> Environment:
+    return environment(
+        build={
+            "source": "dependencyFile",
+            "dependencyFile": {
+                "sourceFormat": "conda",
+                "content": CONDA_ENVIRONMENT_YML,
+            },
+        },
+        **spec,
+    )
+
+
 def messages(report: CapabilityReport) -> str:
     return " | ".join(finding.message for finding in report.findings)
 
@@ -96,9 +120,10 @@ class TestTheCapabilitySets:
             seconds = get_builder(variant).capabilities().max_build_seconds
             assert seconds and 0 < seconds <= 60 * 60, variant
 
-    def test_this_phase_builds_a_package_list_and_nothing_else(self) -> None:
+    def test_this_phase_builds_a_package_list_and_a_conda_file(self) -> None:
         for variant in MANAGED:
-            assert get_builder(variant).capabilities().build_sources == ("packages",)
+            sources = get_builder(variant).capabilities().build_sources
+            assert sources == ("packages", "dependencyFile"), variant
 
 
 # -- what each one refuses ------------------------------------------------------
@@ -208,14 +233,29 @@ class TestWhatIsSaidBeforeAnythingIsQueued:
             report = get_builder(variant).validate(environment(build={"source": "dockerfile"}))
             assert report.supported is False, variant
             assert "`dockerfile` is not built for" in messages(report)
-            assert "it builds packages" in messages(report)
+            assert "it builds packages, dependencyFile" in messages(report)
 
-    def test_conda_is_not_resolved_for_a_managed_variant_yet(self) -> None:
+    def test_a_conda_dependency_file_is_buildable_on_every_managed_variant(self) -> None:
+        for variant in MANAGED:
+            report = get_builder(variant).validate(a_conda_environment())
+            assert report.supported is True, f"{variant}: {messages(report)}"
+
+    def test_a_pyproject_dependency_file_is_not_built_for_a_managed_variant_yet(self) -> None:
         report = get_builder("e2b").validate(
-            environment(packages={"python": {"manager": "conda", "dependencies": ["numpy"]}})
+            environment(
+                build={
+                    "source": "dependencyFile",
+                    "dependencyFile": {
+                        "sourceFormat": "pyproject",
+                        "content": "[project]\nname='x'\nversion='0'\n",
+                        "lockContent": "# lock\n",
+                    },
+                }
+            )
         )
         assert report.supported is False
-        assert "`conda` is not resolved for E2B yet" in messages(report)
+        assert "a `pyproject` dependency file is not built for E2B yet" in messages(report)
+        assert "spec.build.dependencyFile.sourceFormat" in fields(report)
 
     def test_e2b_and_daytona_refuse_a_build_secret_e0_04_found_no_mechanism_for(self) -> None:
         """E0-04's spike found only a registry login for the private base on

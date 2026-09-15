@@ -586,3 +586,30 @@ class TestPublicationFindings:
         accepting the same spec `publication_findings` refuses to publish."""
         environment = parse_environment(document())
         assert spec_findings(environment) == []
+
+    def test_a_private_index_blocks_publication(self) -> None:
+        """D-12: a published version resolves only from public indexes, since a
+        private one is reached with a credential the public does not hold."""
+        data = document()
+        del data["spec"]["buildSecrets"]
+        data["spec"]["packages"]["python"]["indexes"] = [
+            "https://pypi.org/simple",
+            "https://pypi.mycorp.internal/simple",
+        ]
+        environment = parse_environment(data)
+        findings = publication_findings(environment)
+        assert len(findings) == 1
+        assert findings[0].field == "spec.packages.python.indexes"
+        assert findings[0].code is errors.PUBLICATION_BLOCKED
+        assert "pypi.mycorp.internal" in findings[0].message
+
+    def test_only_public_indexes_are_publishable(self) -> None:
+        """The public index and its wheel host are both accepted; nothing else."""
+        data = document()
+        del data["spec"]["buildSecrets"]
+        data["spec"]["packages"]["python"]["indexes"] = [
+            "https://pypi.org/simple",
+            "https://files.pythonhosted.org/",
+        ]
+        environment = parse_environment(data)
+        assert publication_findings(environment) == []

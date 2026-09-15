@@ -546,8 +546,13 @@ def _gpu(sandbox: Sandbox, requested: bool, cuda: str | None, timeout: float | N
         problems.append("no GPU is visible")
     if cuda and not str(answer.get("cuda") or "").startswith(cuda):
         problems.append(f"CUDA is {answer.get('cuda')}, not {cuda}")
+    # A GPU version gates on this (E2-17): a version that asked for an
+    # accelerator and cannot see it, or sees the wrong CUDA, is not the
+    # version its spec describes. A version that asked for none never
+    # reaches here (the trivial pass above), so the extended tier still
+    # gates nothing for a CPU version.
     return _result(
-        11, not problems, gating=False, detail="; ".join(problems) or None, actual=answer
+        11, not problems, gating=True, detail="; ".join(problems) or None, actual=answer
     )
 
 
@@ -625,10 +630,17 @@ def run_extended_tier(
     concurrent_kernels: int = 4,
     timeout: float | None = 120.0,
 ) -> ValidationResult:
-    """Appendix B checks 10-14: recorded per variant, gating nothing."""
+    """Appendix B checks 10-14: recorded per variant. Only check 11 gates, and
+    only for a version that asked for an accelerator (E2-17) — a GPU version
+    that cannot see its GPU is not what its spec describes; every other
+    extended check records without gating."""
     checks = [
         _guard(10, False, lambda: _egress(sandbox, egress_allowed, egress_blocked, timeout)),
-        _guard(11, False, lambda: _gpu(sandbox, accelerator_requested, cuda_version, timeout)),
+        _guard(
+            11,
+            accelerator_requested,
+            lambda: _gpu(sandbox, accelerator_requested, cuda_version, timeout),
+        ),
         _guard(12, False, lambda: _throughput(sandbox, contract, minimum_mib_per_second, timeout)),
         _guard(13, False, lambda: _cold_start(cold_start_seconds, cold_start_budget)),
         _guard(14, False, lambda: _concurrent(sandbox, concurrent_kernels, timeout)),
@@ -649,7 +661,10 @@ def run_conformance(
     extended: Mapping[str, Any] | None = None,
     timeout: float | None = 120.0,
 ) -> ValidationResult:
-    """Both tiers: the core tier decides, the extended tier is recorded beside it."""
+    """Both tiers together. The core tier decides; the extended tier is recorded
+    beside it, save for check 11, which also decides for a version that asked for
+    an accelerator (E2-17) — a GPU version that cannot see its GPU has not built
+    what its spec described."""
     core = run_core_tier(
         sandbox,
         python_version=python_version,

@@ -58,6 +58,7 @@ __all__ = [
     "SIZE_CLASSES",
     "SUPPORTED_BUILD_SOURCES",
     "VARIANTS",
+    "PUBLIC_PACKAGE_INDEX_HOSTS",
     "Accelerator",
     "ArtifactStatus",
     "Base",
@@ -84,6 +85,7 @@ __all__ = [
     "VersionStatus",
     "assert_publishable",
     "command_names_secret",
+    "index_is_public",
     "parse_environment",
     "parse_requirements_txt",
     "publication_findings",
@@ -167,6 +169,31 @@ class Platform(_Model):
     architecture: Literal["linux/amd64"] = "linux/amd64"
 
 
+#: The package indexes D-12 counts as public: a version may be published only
+#: when every index it resolves from is one of these, since a private index is
+#: reached with a credential the public does not hold. Matched on host, so the
+#: trailing `/simple` or its absence never decides it. `pypi.org` is the index;
+#: `files.pythonhosted.org` is where its wheels are served from.
+PUBLIC_PACKAGE_INDEX_HOSTS = frozenset(
+    {"pypi.org", "files.pythonhosted.org"}
+)
+
+
+def _package_index_host(url: str) -> str:
+    """The host an index URL names, lower-cased and without its port, or `""`."""
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
+    try:
+        return (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def index_is_public(url: str) -> bool:
+    """Whether an index URL is one D-12 lets a published version resolve from."""
+    return _package_index_host(url) in PUBLIC_PACKAGE_INDEX_HOSTS
+
+
 class PythonPackages(_Model):
     manager: Literal["uv", "pip", "conda"] = "uv"
     dependencies: list[str] = Field(default_factory=list)
@@ -242,17 +269,20 @@ class Compatibility(_Model):
 
 
 class DependencyFileSpec(_Model):
-    """A `requirements.txt`, or a `pyproject.toml` with its `uv.lock` (E3-01).
+    """A `requirements.txt`, a `pyproject.toml` with its `uv.lock`, or a conda
+    `environment.yml` (E3-01, E3-02).
 
     ``requirements`` resolves the way ``packages`` does — the protected
     constraints merged in, the same solve. ``pyproject`` does not resolve at
     all: its own ``uv.lock`` is verified against the current
     ``pyproject.toml`` and exported, never re-solved, because a lock the
-    author already made is the whole point of bringing one.
+    author already made is the whole point of bringing one. ``conda`` resolves
+    the ``environment.yml`` in its own ``micromamba`` solve into an explicit
+    lock, with the protected constraints merged over its ``pip:`` layer.
     """
 
-    source_format: Literal["requirements", "pyproject"] = "requirements"
-    #: The `requirements.txt` text, or the `pyproject.toml` text.
+    source_format: Literal["requirements", "pyproject", "conda"] = "requirements"
+    #: The `requirements.txt`, `pyproject.toml` or conda `environment.yml` text.
     content: str = ""
     #: The `uv.lock` text. Required, and only meaningful, for `pyproject`.
     lock_content: str = ""
@@ -409,7 +439,11 @@ def _dependency_file_findings(dependency_file: DependencyFileSpec | None) -> lis
     findings: list[SpecFinding] = []
     if not dependency_file.content.strip():
         name = (
-            "pyproject.toml" if dependency_file.source_format == "pyproject" else "requirements.txt"
+            "pyproject.toml"
+            if dependency_file.source_format == "pyproject"
+            else "environment.yml"
+            if dependency_file.source_format == "conda"
+            else "requirements.txt"
         )
         findings.append(SpecFinding(f"{field}.content", f"is empty; it is the {name} text"))
     elif dependency_file.source_format == "requirements":
@@ -419,6 +453,8 @@ def _dependency_file_findings(dependency_file: DependencyFileSpec | None) -> lis
                 findings.append(
                     SpecFinding(f"{field}.content[{index}]", f"`{requirement}`: {problem}")
                 )
+    elif dependency_file.source_format == "conda":
+        findings.extend(_conda_environment_findings(dependency_file.content))
     if len(dependency_file.content.encode("utf-8")) > MAX_DEPENDENCY_FILE_BYTES:
         findings.append(
             SpecFinding(f"{field}.content", f"is over {MAX_DEPENDENCY_FILE_BYTES} bytes")
@@ -438,10 +474,29 @@ def _dependency_file_findings(dependency_file: DependencyFileSpec | None) -> lis
         findings.append(
             SpecFinding(
                 f"{field}.lockContent",
-                "is only read for a `pyproject` source; a `requirements` source resolves fresh",
+                "is only read for a `pyproject` source; a `requirements` or `conda` source "
+                "resolves fresh",
             )
         )
     return findings
+
+
+def _conda_environment_findings(content: str) -> list[SpecFinding]:
+    """An `environment.yml`'s own shape, before it reaches the conda solver (E3-02).
+
+    The same validate-before-resolve rule every source follows: a malformed
+    `environment.yml` is the version's to fix, and refusing it here — with the
+    field the resolver would have named — is cheaper than a solve that fails on
+    it after taking a worker.
+    """
+    from .resolve_conda import parse_conda_environment
+
+    field = "spec.build.dependencyFile.content"
+    try:
+        parse_conda_environment(content)
+    except EnvironmentsError as error:
+        return [SpecFinding(error.detail.get("field", field), error.message, error.code)]
+    return []
 
 
 def _image_findings(image: ImageSourceSpec | None) -> list[SpecFinding]:
@@ -810,17 +865,15 @@ def publication_findings(environment: Environment) -> list[SpecFinding]:
 
     D-12: *"A promoted version becomes public only by being published, and
     only when every input is public — public indexes, no ``files``, no
-    ``buildSecrets``, an approved base."* This function holds only the
-    ``buildSecrets`` half of that boundary — a build secret is IAM-held and
-    fetched for one build's own use, so it is never public by definition,
-    whether the version is otherwise made of nothing but public inputs or
-    not. The rest of D-12's boundary (public indexes, no baked ``files``, an
-    approved base) belongs to the publish route itself once it exists
-    (E2-15, not built yet as of this writing — there is no
-    ``services/library`` "environment" artifact type and no publish endpoint
-    in ``services/runtimes/datalayer_runtimes/services/environments.py`` to
-    call this from today). This is the seam that route calls when it lands,
-    named the way every other rule of the specification is.
+    ``buildSecrets``, an approved base."* This function holds the input half
+    of that boundary that the spec alone decides against a credential the
+    public does not hold: a build secret is IAM-held and so never public, and
+    a private package index is reached with a credential no public reader has.
+    The parts of D-12 that depend on a version's *status* rather than its
+    spec — a passing scan, a signed artifact, and that the datalayer variant's
+    base is an approved one — are the publish route's own to check against the
+    artifact it publishes (E2-15), since ``publication_findings`` is handed
+    the spec and nothing built from it.
 
     Deliberately never applied to `promote()` (the private, per-owner
     lifecycle step that makes a version an environment's active one): a
@@ -828,17 +881,33 @@ def publication_findings(environment: Environment) -> list[SpecFinding]:
     ever builds or launches it (D-12's own words). Only the act of making a
     version world-visible is refused.
     """
-    if not environment.spec.build_secrets:
-        return []
-    ids = ", ".join(secret.id for secret in environment.spec.build_secrets)
-    return [
-        SpecFinding(
-            "spec.buildSecrets",
-            f"a version with a build secret ({ids}) can never be published to the "
-            "public Library (D-12); remove it, or keep the version private",
-            PUBLICATION_BLOCKED,
+    findings: list[SpecFinding] = []
+    if environment.spec.build_secrets:
+        ids = ", ".join(secret.id for secret in environment.spec.build_secrets)
+        findings.append(
+            SpecFinding(
+                "spec.buildSecrets",
+                f"a version with a build secret ({ids}) can never be published to the "
+                "public Library (D-12); remove it, or keep the version private",
+                PUBLICATION_BLOCKED,
+            )
         )
+    private = [
+        url
+        for url in environment.spec.packages.python.indexes
+        if not index_is_public(url)
     ]
+    if private:
+        findings.append(
+            SpecFinding(
+                "spec.packages.python.indexes",
+                f"a version that resolves from a private index ({', '.join(private)}) "
+                "can never be published to the public Library (D-12); publish only from "
+                f"public indexes ({', '.join(sorted(PUBLIC_PACKAGE_INDEX_HOSTS))})",
+                PUBLICATION_BLOCKED,
+            )
+        )
+    return findings
 
 
 def assert_publishable(environment: Environment) -> None:

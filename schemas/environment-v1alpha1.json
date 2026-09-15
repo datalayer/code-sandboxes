@@ -154,7 +154,7 @@
     },
     "DependencyFileSpec": {
       "additionalProperties": false,
-      "description": "A `requirements.txt`, or a `pyproject.toml` with its `uv.lock` (E3-01).\n\n``requirements`` resolves the way ``packages`` does \u2014 the protected\nconstraints merged in, the same solve. ``pyproject`` does not resolve at\nall: its own ``uv.lock`` is verified against the current\n``pyproject.toml`` and exported, never re-solved, because a lock the\nauthor already made is the whole point of bringing one.",
+      "description": "A `requirements.txt`, a `pyproject.toml` with its `uv.lock`, or a conda\n`environment.yml` (E3-01, E3-02).\n\n``requirements`` resolves the way ``packages`` does \u2014 the protected\nconstraints merged in, the same solve. ``pyproject`` does not resolve at\nall: its own ``uv.lock`` is verified against the current\n``pyproject.toml`` and exported, never re-solved, because a lock the\nauthor already made is the whole point of bringing one. ``conda`` resolves\nthe ``environment.yml`` in its own ``micromamba`` solve into an explicit\nlock, with the protected constraints merged over its ``pip:`` layer.",
       "properties": {
         "content": {
           "default": "",
@@ -170,7 +170,8 @@
           "default": "requirements",
           "enum": [
             "requirements",
-            "pyproject"
+            "pyproject",
+            "conda"
           ],
           "title": "Sourceformat",
           "type": "string"
