@@ -78,7 +78,12 @@ from ..resolve import (
     apt_snapshot_in,
     locked_versions,
 )
-from ..resolve_conda import conda_lock_protected_pins, is_conda_lock
+from ..resolve_conda import (
+    MICROMAMBA_BINARY,
+    conda_lock_pip_requirements,
+    is_conda_lock,
+    micromamba_bootstrap_dockerfile_line,
+)
 from ..spec import BuildSecret, Environment, command_names_secret
 
 __all__ = [
@@ -327,21 +332,26 @@ class Builder:
             ]
         if is_conda_lock(request.lock_text):
             # A conda source (E3-02): the lock is an `@EXPLICIT` file
-            # `micromamba create --file` installs without re-solving, and the
-            # protected pip pins the resolver forced over the pip layer are in
-            # the lock's own `# datalayer-protected:` header. The conda layer
-            # goes into the base's own environment; the pip layer follows, so
-            # the kernel stack (E1-04) is present the same as every source.
-            pins = conda_lock_protected_pins(request.lock_text)
+            # `micromamba install --file` installs without re-solving, and the
+            # pip layer the solve resolved — the user's own pip requirements and
+            # the protected pins forced over them — is in the lock's own
+            # `# datalayer-pip:` header. The conda layer goes into the base's
+            # own environment; the pip layer follows, so the kernel stack
+            # (E1-04) and everything the solve installed is present the same as
+            # every source. micromamba is copied in from its pinned image
+            # first: the approved base bakes uv and the wheelhouse but not it.
+            pip_requirements = conda_lock_pip_requirements(request.lock_text)
             lines.extend(
                 [
+                    micromamba_bootstrap_dockerfile_line(),
                     "COPY lock.txt /opt/datalayer/lock.txt",
                     "RUN --mount=type=cache,target=/opt/conda/pkgs "
-                    "micromamba install --yes --name base --file /opt/datalayer/lock.txt",
+                    f"{MICROMAMBA_BINARY} install --yes --name base "
+                    "--file /opt/datalayer/lock.txt",
                 ]
             )
-            if pins:
-                requirements = " ".join(shlex.quote(pin) for pin in pins)
+            if pip_requirements:
+                requirements = " ".join(shlex.quote(req) for req in pip_requirements)
                 lines.append(
                     "RUN --mount=type=cache,target=/root/.cache/uv "
                     f"uv pip install --system --find-links {find_links} {requirements}"

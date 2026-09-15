@@ -147,7 +147,7 @@ from ..errors import (
 from ..files import files_step
 from ..redact import redact
 from ..resolve import WHEELHOUSE_IMAGE_PATH, apt_pins_in
-from ..resolve_conda import conda_lock_protected_pins, is_conda_lock
+from ..resolve_conda import conda_lock_pip_requirements, is_conda_lock
 from ..spec import GPU_SIZE_CLASSES, BuildSecret, Environment, command_names_secret
 from .managed import ManagedBuilder
 
@@ -214,14 +214,16 @@ def _scrubbed(text: str, values: dict[str, str]) -> str:
 
 def _install_packages(image: Any, lock_text: str) -> Any:
     """The package layer for this lock: a conda source (E3-02) installs the
-    `@EXPLICIT` lock with Modal's own `micromamba_install` and layers the
-    protected pip pins the resolver forced (from the lock's own
-    `# datalayer-protected:` header); a pip source runs `uv pip sync`."""
+    `@EXPLICIT` lock with Modal's own `micromamba_install` — which brings
+    micromamba itself, so no bootstrap is needed here — and layers the pip
+    layer the solve resolved (the user's pip requirements and the protected
+    pins over them, from the lock's own `# datalayer-pip:` header); a pip
+    source runs `uv pip sync`."""
     if is_conda_lock(lock_text):
         image = image.micromamba_install(spec_file=_LOCK_PATH)
-        pins = conda_lock_protected_pins(lock_text)
-        if pins:
-            image = image.pip_install(*pins, find_links=WHEELHOUSE_IMAGE_PATH)
+        pip_requirements = conda_lock_pip_requirements(lock_text)
+        if pip_requirements:
+            image = image.pip_install(*pip_requirements, find_links=WHEELHOUSE_IMAGE_PATH)
         return image
     return image.run_commands(
         f'pip install --no-cache-dir "uv=={_UV_VERSION}"',

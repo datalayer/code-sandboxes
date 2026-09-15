@@ -194,6 +194,47 @@ def index_is_public(url: str) -> bool:
     return _package_index_host(url) in PUBLIC_PACKAGE_INDEX_HOSTS
 
 
+#: The conda channels D-12 counts as public: a published conda version
+#: (E3-02's ``dependencyFile``) may resolve only from these, since a private
+#: channel is reached with a token no public reader holds — the same boundary
+#: :data:`PUBLIC_PACKAGE_INDEX_HOSTS` draws for pip indexes. The bare names
+#: anaconda.org serves openly, and the hosts a channel URL may name; any other
+#: name or host is private and blocks publication.
+PUBLIC_CONDA_CHANNELS = frozenset(
+    {
+        "conda-forge",
+        "bioconda",
+        "defaults",
+        "nodefaults",
+        "main",
+        "r",
+        "anaconda",
+        "pkgs/main",
+        "pkgs/r",
+        "msys2",
+    }
+)
+PUBLIC_CONDA_CHANNEL_HOSTS = frozenset(
+    {"conda.anaconda.org", "repo.anaconda.com", "anaconda.org"}
+)
+
+
+def channel_is_public(channel: str) -> bool:
+    """Whether a conda channel is one D-12 lets a published version resolve from.
+
+    A channel is a URL, whose host must be a public conda host, or a bare name,
+    which is public only when it is one of the well-known open channels — an
+    unlisted name (say a private org's) is treated as private, since a bare name
+    on anaconda.org may still need a token the public does not have.
+    """
+    text = channel.strip()
+    if not text:
+        return True
+    if "://" in text:
+        return _package_index_host(text) in PUBLIC_CONDA_CHANNEL_HOSTS
+    return text.lower() in PUBLIC_CONDA_CHANNELS
+
+
 class PythonPackages(_Model):
     manager: Literal["uv", "pip", "conda"] = "uv"
     dependencies: list[str] = Field(default_factory=list)
@@ -907,7 +948,44 @@ def publication_findings(environment: Environment) -> list[SpecFinding]:
                 PUBLICATION_BLOCKED,
             )
         )
+    private_channels = [
+        channel for channel in _conda_channels(environment) if not channel_is_public(channel)
+    ]
+    if private_channels:
+        findings.append(
+            SpecFinding(
+                "spec.build.dependencyFile.content.channels",
+                "a version that resolves from a private conda channel "
+                f"({', '.join(private_channels)}) can never be published to the public "
+                "Library (D-12); publish only from public channels "
+                f"({', '.join(sorted(PUBLIC_CONDA_CHANNELS))})",
+                PUBLICATION_BLOCKED,
+            )
+        )
     return findings
+
+
+def _conda_channels(environment: Environment) -> tuple[str, ...]:
+    """The channels a conda ``dependencyFile`` names, or none for any other source.
+
+    A conda ``environment.yml``'s ``channels`` are package inputs the same as a
+    pip source's indexes, so publication weighs them the same (D-12). A file
+    that will not parse has no channels to weigh here — validation refuses it
+    before it is ever published — so a parse failure is an empty tuple, not a
+    raise.
+    """
+    build = environment.spec.build
+    dependency_file = build.dependency_file
+    if build.source != "dependencyFile" or dependency_file is None:
+        return ()
+    if dependency_file.source_format != "conda":
+        return ()
+    from .resolve_conda import parse_conda_environment
+
+    try:
+        return parse_conda_environment(dependency_file.content).channels
+    except EnvironmentsError:
+        return ()
 
 
 def assert_publishable(environment: Environment) -> None:

@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 from .bases import APPROVED_BASES, ApprovedBase, channel_snapshot, resolve_base
 from .build_secrets import resolve_build_secret
@@ -75,6 +75,9 @@ from .spec import (
     parse_environment,
     parse_requirements_txt,
 )
+
+if TYPE_CHECKING:
+    from .resolve_conda import CondaResolveRunner
 
 __all__ = [
     "APT_PIN_PREFIX",
@@ -1158,6 +1161,7 @@ def resolve_environment(
     credential: Any = None,
     log: Callable[[str], None] | None = None,
     runner: ResolveRunner | None = None,
+    conda_runner: CondaResolveRunner | None = None,
     bases: dict[str, ApprovedBase] = APPROVED_BASES,
     resolved_at: datetime | None = None,
     uv: str | None = None,
@@ -1185,6 +1189,12 @@ def resolve_environment(
         Where the solve's output goes, line by line: the build's log.
     runner
         Where the solve runs. D-9's BuildKit solve by default.
+    conda_runner
+        Where a conda ``dependencyFile``'s own ``micromamba`` solve runs
+        (E3-02): the conda seam's runner, injected by tests and by ``plane
+        local`` the same way ``runner`` is for a pip source, and D-9's BuildKit
+        conda solve by default. A pip source ignores it, and a conda source
+        ignores ``runner``, since the two solves are different tools.
     bases
         The approved bases, injected by tests and by a plane whose channel is
         published somewhere else.
@@ -1263,6 +1273,7 @@ def resolve_environment(
                 resolved_bases=resolved_bases,
                 credential=credential,
                 log=say,
+                runner=conda_runner,
                 resolved_at=resolved_at,
             )
         if dependency_file.source_format == "pyproject":

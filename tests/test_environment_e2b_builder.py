@@ -40,7 +40,7 @@ CONDA_LOCK = (
     "# Resolved by Datalayer (PLAN_ENV.md D-9). Do not edit: a change makes a new version.\n"
     "# python: 3.13\n"
     "# platform: linux-64\n"
-    "# datalayer-protected: ipykernel==7.3.0\n"
+    "# datalayer-pip: ipykernel==7.3.0\n"
     "@EXPLICIT\n"
     "https://conda.anaconda.org/conda-forge/linux-64/gdal-3.8.4-py313.conda#" + "ab" * 32 + "\n"
 )
@@ -410,11 +410,16 @@ class TestBuildingATemplate:
         assert not any(call.name == "run_cmd" and "apt-get" in call.args[0] for call in fake.calls)
 
     def test_a_conda_lock_installs_with_micromamba_and_then_the_pip_pins(self) -> None:
-        """A conda source (E3-02): `micromamba install --file` reads the
-        `@EXPLICIT` lock, and the protected pip pins the resolver forced over
-        the pip layer follow — never the pip-lock `uv pip sync`."""
+        """A conda source (E3-02): micromamba is bootstrapped, `micromamba
+        install --file` reads the `@EXPLICIT` lock, and the pip layer the solve
+        resolved follows — never the pip-lock `uv pip sync`."""
         fake = FakeTemplate()
         a_builder(fake).build(a_request(lock_text=CONDA_LOCK, spec=CONDA_SPEC))
+        bootstrap = next(
+            i
+            for i, call in enumerate(fake.calls)
+            if call.name == "run_cmd" and "micro.mamba.pm" in call.args[0]
+        )
         micromamba = next(
             i
             for i, call in enumerate(fake.calls)
@@ -425,7 +430,7 @@ class TestBuildingATemplate:
             for i, call in enumerate(fake.calls)
             if call.name == "run_cmd" and "ipykernel==7.3.0" in call.args[0]
         )
-        assert micromamba < pip
+        assert bootstrap < micromamba < pip
         assert not any(
             call.name == "run_cmd" and "uv pip sync" in call.args[0] for call in fake.calls
         )

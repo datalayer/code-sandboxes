@@ -51,7 +51,7 @@ CONDA_LOCK = (
     "# Resolved by Datalayer (PLAN_ENV.md D-9). Do not edit: a change makes a new version.\n"
     "# python: 3.13\n"
     "# platform: linux-64\n"
-    "# datalayer-protected: ipykernel==7.3.0\n"
+    "# datalayer-pip: ipykernel==7.3.0\n"
     "@EXPLICIT\n"
     "https://conda.anaconda.org/conda-forge/linux-64/gdal-3.8.4-py313.conda#" + "ab" * 32 + "\n"
 )
@@ -517,8 +517,8 @@ class TestBuildingAnImage:
 
     def test_a_conda_lock_installs_with_micromamba_and_then_the_pip_pins(self) -> None:
         """A conda source (E3-02): Modal's own `micromamba_install` reads the
-        `@EXPLICIT` lock, and `pip_install` layers the protected pip pins the
-        resolver forced — never the pip-lock `uv pip sync`."""
+        `@EXPLICIT` lock, and `pip_install` layers the pip layer the solve
+        resolved — never the pip-lock `uv pip sync`."""
         modal = FakeModalModule()
         a_builder(modal=modal).build(a_request(lock_text=CONDA_LOCK, spec=CONDA_SPEC))
         [image] = modal.Image.created

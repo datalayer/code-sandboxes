@@ -141,7 +141,11 @@ from ..errors import (
 )
 from ..files import files_step
 from ..resolve import WHEELHOUSE_PATH, apt_pins_in
-from ..resolve_conda import conda_lock_protected_pins, is_conda_lock
+from ..resolve_conda import (
+    conda_lock_pip_requirements,
+    is_conda_lock,
+    micromamba_bootstrap_command,
+)
 from ..spec import Environment
 from .managed import ManagedBuilder
 
@@ -399,17 +403,20 @@ class Builder(ManagedBuilder):
             )
             if is_conda_lock(request.lock_text):
                 # A conda source (E3-02): `micromamba install --file` reads the
-                # `@EXPLICIT` lock without re-solving, and the protected pip
-                # pins the resolver forced over the pip layer come from the
-                # lock's own `# datalayer-protected:` header, so the kernel
-                # stack (E1-04) is present the same as for a pip source.
+                # `@EXPLICIT` lock without re-solving, and the pip layer the
+                # solve resolved — the user's pip requirements and the protected
+                # pins over them — comes from the lock's own `# datalayer-pip:`
+                # header, so the kernel stack (E1-04) and everything the solve
+                # installed is present the same as for a pip source. micromamba
+                # is installed first: the approved base bakes uv but not it.
+                chain = chain.run_cmd(micromamba_bootstrap_command(), user="root")
                 chain = chain.run_cmd(
                     f"micromamba install --yes --name base --file {_LOCK_PATH}",
                     user="root",
                 )
-                pins = conda_lock_protected_pins(request.lock_text)
-                if pins:
-                    requirements = " ".join(shlex.quote(pin) for pin in pins)
+                pip_requirements = conda_lock_pip_requirements(request.lock_text)
+                if pip_requirements:
+                    requirements = " ".join(shlex.quote(req) for req in pip_requirements)
                     chain = chain.run_cmd(
                         f"pip install --no-cache-dir --find-links {_WHEELHOUSE_PATH} "
                         f"{requirements}",
