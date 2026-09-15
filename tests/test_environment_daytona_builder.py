@@ -45,6 +45,25 @@ LOCK = (
 APT_LOCK = LOCK + "# datalayer-apt: gdal-bin=3.8.4+dfsg-3build2\n"
 LOCK_DIGEST = "sha256:" + "dd" * 32
 
+#: A conda explicit lock (E3-02) and its `dependencyFile` source.
+CONDA_LOCK = (
+    "# Resolved by Datalayer (PLAN_ENV.md D-9). Do not edit: a change makes a new version.\n"
+    "# python: 3.13\n"
+    "# platform: linux-64\n"
+    "# datalayer-pip: ipykernel==7.3.0\n"
+    "@EXPLICIT\n"
+    "https://conda.anaconda.org/conda-forge/linux-64/gdal-3.8.4-py313.conda#" + "ab" * 32 + "\n"
+)
+CONDA_SPEC = {
+    "build": {
+        "source": "dependencyFile",
+        "dependencyFile": {
+            "sourceFormat": "conda",
+            "content": "name: geo\nchannels: [conda-forge]\ndependencies: [python=3.13, gdal]\n",
+        },
+    },
+}
+
 
 class Credential:
     """The build's owner secrets, as the workflow mints them (D-8, D-17, E2-01)."""
@@ -458,6 +477,20 @@ class TestBuildingASnapshot:
         ]
         assert "--require-hashes" in sync.args[0]
         assert "--find-links /opt/datalayer/wheelhouse" in sync.args[0]
+
+    def test_a_conda_lock_installs_with_micromamba_and_then_the_pip_pins(self) -> None:
+        """A conda source (E3-02): micromamba is bootstrapped, `micromamba
+        install --file` reads the `@EXPLICIT` lock, and the pip layer the solve
+        resolved follows — never the pip-lock `uv pip sync`."""
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request(lock_text=CONDA_LOCK, spec=CONDA_SPEC))
+        image = daytona.client.snapshot.create_calls[0].args[0].image
+        runs = calls_named(image, "run_commands")
+        bootstrap = next(i for i, call in enumerate(runs) if "micro.mamba.pm" in call.args[0])
+        micromamba = next(i for i, call in enumerate(runs) if "micromamba install" in call.args[0])
+        pip = next(i for i, call in enumerate(runs) if "ipykernel==7.3.0" in call.args[0])
+        assert bootstrap < micromamba < pip
+        assert not any("uv pip sync" in call.args[0] for call in runs)
 
     def test_user_root_brackets_the_install_steps(self) -> None:
         """Daytona honours the base's `USER`, unlike E2B (E0-04): no synthetic

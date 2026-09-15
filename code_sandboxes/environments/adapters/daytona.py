@@ -87,6 +87,7 @@ item 7).
 
 from __future__ import annotations
 
+import shlex
 import tempfile
 import uuid
 from collections.abc import Callable
@@ -110,6 +111,11 @@ from ..errors import (
 )
 from ..files import files_step
 from ..resolve import WHEELHOUSE_IMAGE_PATH, apt_pins_in
+from ..resolve_conda import (
+    conda_lock_pip_requirements,
+    is_conda_lock,
+    micromamba_bootstrap_command,
+)
 from ..spec import GPU_SIZE_CLASSES, Environment
 from .managed import ManagedBuilder
 
@@ -171,6 +177,10 @@ class Builder(ManagedBuilder):
     variant = "daytona"
     item = "E2-04"
     title = "Daytona"
+    #: A `packages` list and, for conda (E3-02), an `environment.yml`
+    #: dependency file installed with `micromamba`.
+    build_sources = ("packages", "dependencyFile")
+    dependency_formats = ("conda",)
     #: Daytona runs GPUs, on its own hardware and the owner's account (E2-17).
     #: This builder does not build one yet: see `_own_findings`.
     gpu = True
@@ -343,28 +353,43 @@ class Builder(ManagedBuilder):
                 # wheelhouse again would only duplicate what `uv pip sync`
                 # can already reach at `WHEELHOUSE_IMAGE_PATH`. Only the
                 # lock is genuinely per-build.
-                image = (
-                    image.add_local_file(str(lock_file), _LOCK_PATH)
+                image = image.add_local_file(str(lock_file), _LOCK_PATH)
+                if is_conda_lock(request.lock_text):
+                    # A conda source (E3-02): `micromamba install --file`
+                    # reads the `@EXPLICIT` lock without re-solving, and the
+                    # pip layer the solve resolved — the user's pip
+                    # requirements and the protected pins over them — comes
+                    # from the lock's own `# datalayer-pip:` header, so the
+                    # kernel stack (E1-04) and everything the solve installed is
+                    # present the same as for a pip source. micromamba is
+                    # installed first: the approved base bakes uv but not it.
+                    image = image.run_commands(micromamba_bootstrap_command())
+                    image = image.run_commands(
+                        f"micromamba install --yes --name base --file {_LOCK_PATH}"
+                    )
+                    pip_requirements = conda_lock_pip_requirements(request.lock_text)
+                    if pip_requirements:
+                        requirements = " ".join(shlex.quote(req) for req in pip_requirements)
+                        image = image.run_commands(
+                            "pip install --no-cache-dir "
+                            f"--find-links {WHEELHOUSE_IMAGE_PATH} {requirements}"
+                        )
+                else:
                     # `uv` is not installed here: the approved base already
                     # bakes it (E1-05, `resolve.py`'s own `bootstrap_uv`
                     # docstring — "an approved Datalayer base already has it
-                    # baked in"), and this phase's `build_sources` is
-                    # `("packages",)` only, so every build starts from that
-                    # base. Reinstalling it added an extra un-hashed network
-                    # fetch outside the resolved lock for no reason (found in
-                    # review) — matching the Datalayer builder's own
-                    # `dockerfile()`, which installs `uv` only for the
-                    # `image` source, not implemented for this variant yet.
+                    # baked in"). Reinstalling it added an extra un-hashed
+                    # network fetch outside the resolved lock for no reason
+                    # (found in review).
                     #
                     # Packages install as root, the same reason the
                     # Datalayer and E2B builders give: a user install lands
                     # under the content directory's own home, which the
                     # runtime mounts over.
-                    .run_commands(
+                    image = image.run_commands(
                         "uv pip sync --system --require-hashes "
                         f"--find-links {WHEELHOUSE_IMAGE_PATH} {_LOCK_PATH}"
                     )
-                )
                 image = image.dockerfile_commands([f"USER 1000:100\nWORKDIR {_CONTENT_DIR}"])
                 for command in files_step(request.environment, variant=self.variant):
                     image = image.run_commands(command)

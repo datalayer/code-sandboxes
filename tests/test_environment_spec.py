@@ -196,7 +196,6 @@ UNSUPPORTED = "DL_ENV_CAPABILITY_UNSUPPORTED"
         ("spec.contract", "sandbox-contract/v9", "spec.contract", UNSUPPORTED),
         ("spec.base.ref", "python", "spec.base.ref", INVALID),
         ("spec.language.version", "3.9", "spec.language.version", INVALID),
-        ("spec.build.source", "dockerfile", "spec.build.source", UNSUPPORTED),
         ("spec.packages.python.manager", "conda", "spec.packages.python.manager", UNSUPPORTED),
         # E3-05: a secret no postInstall command names would be mounted nowhere.
         (
@@ -307,8 +306,8 @@ def test_all_baked_files_together_are_capped() -> None:
 
 
 def test_an_invalid_field_outranks_something_unsupported() -> None:
-    data = mutated("spec.build.source", "dockerfile")
-    assert _codes(data) == {"spec.build.source": UNSUPPORTED}
+    data = mutated("spec.packages.python.manager", "conda")
+    assert _codes(data) == {"spec.packages.python.manager": UNSUPPORTED}
     with pytest.raises(EnvironmentsError) as unsupported:
         validate_environment(data)
     assert unsupported.value.code is errors.CAPABILITY_UNSUPPORTED
@@ -319,8 +318,16 @@ def test_an_invalid_field_outranks_something_unsupported() -> None:
     assert invalid.value.code is errors.SPEC_INVALID
     assert {finding["field"] for finding in invalid.value.detail["findings"]} == {
         "metadata.name",
-        "spec.build.source",
+        "spec.packages.python.manager",
     }
+
+
+def test_a_dockerfile_source_is_accepted_and_keeps_its_own_base() -> None:
+    # E3-03: the base is the `FROM` its uploaded Dockerfile names, so
+    # `spec.base` is not checked against the approved table (as for `image`).
+    data = mutated("spec.build.source", "dockerfile")
+    data["spec"]["base"]["ref"] = "python"
+    assert _codes(data) == {}
 
 
 # -- Dependency files (E3-01) --------------------------------------------------
@@ -586,3 +593,59 @@ class TestPublicationFindings:
         accepting the same spec `publication_findings` refuses to publish."""
         environment = parse_environment(document())
         assert spec_findings(environment) == []
+
+    def test_a_private_index_blocks_publication(self) -> None:
+        """D-12: a published version resolves only from public indexes, since a
+        private one is reached with a credential the public does not hold."""
+        data = document()
+        del data["spec"]["buildSecrets"]
+        data["spec"]["packages"]["python"]["indexes"] = [
+            "https://pypi.org/simple",
+            "https://pypi.mycorp.internal/simple",
+        ]
+        environment = parse_environment(data)
+        findings = publication_findings(environment)
+        assert len(findings) == 1
+        assert findings[0].field == "spec.packages.python.indexes"
+        assert findings[0].code is errors.PUBLICATION_BLOCKED
+        assert "pypi.mycorp.internal" in findings[0].message
+
+    def test_only_public_indexes_are_publishable(self) -> None:
+        """The public index and its wheel host are both accepted; nothing else."""
+        data = document()
+        del data["spec"]["buildSecrets"]
+        data["spec"]["packages"]["python"]["indexes"] = [
+            "https://pypi.org/simple",
+            "https://files.pythonhosted.org/",
+        ]
+        environment = parse_environment(data)
+        assert publication_findings(environment) == []
+
+    def test_a_private_conda_channel_blocks_publication(self) -> None:
+        """D-12 the same for a conda source: a channel reached with a
+        credential the public does not hold can never be published."""
+        data = a_dependency_file_document(
+            sourceFormat="conda",
+            content=(
+                "channels:\n"
+                "  - conda-forge\n"
+                "  - https://conda.mycorp.internal/private\n"
+                "dependencies:\n  - gdal\n"
+            ),
+        )
+        del data["spec"]["buildSecrets"]
+        environment = parse_environment(data)
+        findings = publication_findings(environment)
+        assert len(findings) == 1
+        assert findings[0].field == "spec.build.dependencyFile.content.channels"
+        assert findings[0].code is errors.PUBLICATION_BLOCKED
+        assert "conda.mycorp.internal" in findings[0].message
+
+    def test_public_conda_channels_are_publishable(self) -> None:
+        data = a_dependency_file_document(
+            sourceFormat="conda",
+            content="channels:\n  - conda-forge\n  - bioconda\ndependencies:\n  - gdal\n",
+        )
+        del data["spec"]["buildSecrets"]
+        environment = parse_environment(data)
+        assert publication_findings(environment) == []

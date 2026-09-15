@@ -49,8 +49,12 @@ from .contract import (
     CONTRACT_V1,
     SANDBOX_CONTRACT_V1,
     SUPPORTED_CONTRACTS,
+    BuildContextEntry,
+    BuildContextFinding,
     SandboxContract,
+    check_build_context,
     check_dockerfile,
+    validate_build_context,
     validate_dockerfile,
 )
 from .errors import ERROR_CODES, EnvironmentsError, ErrorCode, map_provider_error
@@ -91,6 +95,8 @@ __all__ = [
     "ApprovedBase",
     "ArtifactReference",
     "Attestor",
+    "BuildContextEntry",
+    "BuildContextFinding",
     "BuildRequest",
     "BuildkitResolveRunner",
     "CapabilityReport",
@@ -114,6 +120,7 @@ __all__ = [
     "can_transition",
     "canonical_digest",
     "canonical_json",
+    "check_build_context",
     "check_dockerfile",
     "decide",
     "fingerprint_matches",
@@ -131,6 +138,7 @@ __all__ = [
     "spec_digest",
     "spec_findings",
     "transition",
+    "validate_build_context",
     "validate_dockerfile",
     "validate_environment",
 ]

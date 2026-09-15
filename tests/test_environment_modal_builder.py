@@ -46,6 +46,25 @@ LOCK = (
 APT_LOCK = LOCK + "# datalayer-apt: gdal-bin=3.8.4+dfsg-3build2\n"
 LOCK_DIGEST = "sha256:" + "dd" * 32
 
+#: A conda explicit lock (E3-02) and its `dependencyFile` source.
+CONDA_LOCK = (
+    "# Resolved by Datalayer (PLAN_ENV.md D-9). Do not edit: a change makes a new version.\n"
+    "# python: 3.13\n"
+    "# platform: linux-64\n"
+    "# datalayer-pip: ipykernel==7.3.0\n"
+    "@EXPLICIT\n"
+    "https://conda.anaconda.org/conda-forge/linux-64/gdal-3.8.4-py313.conda#" + "ab" * 32 + "\n"
+)
+CONDA_SPEC = {
+    "build": {
+        "source": "dependencyFile",
+        "dependencyFile": {
+            "sourceFormat": "conda",
+            "content": "name: geo\nchannels: [conda-forge]\ndependencies: [python=3.13, gdal]\n",
+        },
+    },
+}
+
 
 class Credential:
     """The build's owner secrets, as the workflow mints them (D-8, D-17, E2-01)."""
@@ -112,6 +131,14 @@ class FakeImage:
     def run_commands(self, *commands: str, secrets: Any = None) -> FakeImage:
         kwargs = {} if secrets is None else {"secrets": list(secrets)}
         self.calls.append(Call("run_commands", commands, kwargs))
+        return self
+
+    def micromamba_install(self, *, spec_file: str) -> FakeImage:
+        self.calls.append(Call("micromamba_install", (), {"spec_file": spec_file}))
+        return self
+
+    def pip_install(self, *packages: str, find_links: str | None = None) -> FakeImage:
+        self.calls.append(Call("pip_install", packages, {"find_links": find_links}))
         return self
 
     def workdir(self, path: str) -> FakeImage:
@@ -487,6 +514,22 @@ class TestBuildingAnImage:
         [sync] = [arg for arg in sync_call.args if "uv pip sync" in arg]
         assert "--require-hashes" in sync
         assert "--find-links /opt/datalayer/wheelhouse" in sync
+
+    def test_a_conda_lock_installs_with_micromamba_and_then_the_pip_pins(self) -> None:
+        """A conda source (E3-02): Modal's own `micromamba_install` reads the
+        `@EXPLICIT` lock, and `pip_install` layers the pip layer the solve
+        resolved — never the pip-lock `uv pip sync`."""
+        modal = FakeModalModule()
+        a_builder(modal=modal).build(a_request(lock_text=CONDA_LOCK, spec=CONDA_SPEC))
+        [image] = modal.Image.created
+        [mamba] = calls_named(image, "micromamba_install")
+        assert mamba.kwargs["spec_file"] == "/opt/datalayer/lock.txt"
+        [pip] = calls_named(image, "pip_install")
+        assert "ipykernel==7.3.0" in pip.args
+        mamba_at = image.calls.index(mamba)
+        pip_at = image.calls.index(pip)
+        assert mamba_at < pip_at
+        assert not run_commands_containing(image, "uv pip sync")
 
     def test_no_user_line_is_ever_emitted(self) -> None:
         """Modal ignores `USER` entirely (found live): writing one would be

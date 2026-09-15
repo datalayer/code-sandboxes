@@ -282,6 +282,36 @@ def test_egress_and_gpu_are_judged_against_what_was_asked() -> None:
     assert "CUDA is 12.2, not 12.4" in by_id(result, 11).detail
 
 
+def test_check_eleven_gates_a_gpu_version_that_cannot_see_its_gpu() -> None:
+    """E2-17: the GPU check is the one extended check that gates, and only
+    for a version that asked for an accelerator — a GPU version whose GPU is
+    not visible is not the version its spec describes."""
+    sandbox = ScriptedSandbox({11: {"returncode": 0, "gpus": [], "cuda": None}})
+    result = run_extended_tier(sandbox, accelerator_requested=True, cuda_version="12.4")
+    gpu = by_id(result, 11)
+    assert gpu.gating
+    assert not gpu.passed and not result.passed
+    assert "no GPU is visible" in gpu.detail
+
+
+def test_check_eleven_gates_when_a_gpu_version_sees_its_gpu() -> None:
+    """The same version, its GPU and CUDA as the spec asked: the gating check
+    passes, so the extended tier passes."""
+    sandbox = ScriptedSandbox()
+    result = run_extended_tier(sandbox, accelerator_requested=True, cuda_version="12.4")
+    gpu = by_id(result, 11)
+    assert gpu.gating and gpu.passed and result.passed
+
+
+def test_a_cpu_version_never_gates_on_the_gpu_check() -> None:
+    """No accelerator asked for: check 11 is the trivial recorded pass, and
+    the extended tier still gates nothing."""
+    result = run_extended_tier(ScriptedSandbox())
+    gpu = by_id(result, 11)
+    assert not gpu.gating and gpu.passed
+    assert not any(item.gating for item in result.checks)
+
+
 def test_the_probes_run_for_real_in_a_local_sandbox(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

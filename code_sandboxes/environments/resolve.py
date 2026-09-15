@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 from .bases import APPROVED_BASES, ApprovedBase, channel_snapshot, resolve_base
 from .build_secrets import resolve_build_secret
@@ -75,6 +75,9 @@ from .spec import (
     parse_environment,
     parse_requirements_txt,
 )
+
+if TYPE_CHECKING:
+    from .resolve_conda import CondaResolveRunner
 
 __all__ = [
     "APT_PIN_PREFIX",
@@ -1158,6 +1161,7 @@ def resolve_environment(
     credential: Any = None,
     log: Callable[[str], None] | None = None,
     runner: ResolveRunner | None = None,
+    conda_runner: CondaResolveRunner | None = None,
     bases: dict[str, ApprovedBase] = APPROVED_BASES,
     resolved_at: datetime | None = None,
     uv: str | None = None,
@@ -1185,6 +1189,12 @@ def resolve_environment(
         Where the solve's output goes, line by line: the build's log.
     runner
         Where the solve runs. D-9's BuildKit solve by default.
+    conda_runner
+        Where a conda ``dependencyFile``'s own ``micromamba`` solve runs
+        (E3-02): the conda seam's runner, injected by tests and by ``plane
+        local`` the same way ``runner`` is for a pip source, and D-9's BuildKit
+        conda solve by default. A pip source ignores it, and a conda source
+        ignores ``runner``, since the two solves are different tools.
     bases
         The approved bases, injected by tests and by a plane whose channel is
         published somewhere else.
@@ -1252,6 +1262,20 @@ def resolve_environment(
     )
     dependency_file = environment.spec.build.dependency_file
     if source == "dependencyFile" and dependency_file is not None:
+        if dependency_file.source_format == "conda":
+            # A conda `environment.yml` resolves through its own micromamba
+            # solve into an explicit lock (E3-02), not uv's pip compile.
+            from .resolve_conda import resolve_conda_environment
+
+            return resolve_conda_environment(
+                environment_yml=dependency_file.content,
+                python_version=environment.spec.language.version,
+                resolved_bases=resolved_bases,
+                credential=credential,
+                log=say,
+                runner=conda_runner,
+                resolved_at=resolved_at,
+            )
         if dependency_file.source_format == "pyproject":
             # Verified, not re-resolved (E3-01): the author's own uv.lock is
             # the answer, and this only proves it still matches pyproject.toml.

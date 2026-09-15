@@ -147,6 +147,7 @@ from ..errors import (
 from ..files import files_step
 from ..redact import redact
 from ..resolve import WHEELHOUSE_IMAGE_PATH, apt_pins_in
+from ..resolve_conda import conda_lock_pip_requirements, is_conda_lock
 from ..spec import GPU_SIZE_CLASSES, BuildSecret, Environment, command_names_secret
 from .managed import ManagedBuilder
 
@@ -211,6 +212,29 @@ def _scrubbed(text: str, values: dict[str, str]) -> str:
     return redact(text, values.values()) if values else text
 
 
+def _install_packages(image: Any, lock_text: str) -> Any:
+    """The package layer for this lock: a conda source (E3-02) installs the
+    `@EXPLICIT` lock with Modal's own `micromamba_install` — which brings
+    micromamba itself, so no bootstrap is needed here — and layers the pip
+    layer the solve resolved (the user's pip requirements and the protected
+    pins over them, from the lock's own `# datalayer-pip:` header); a pip
+    source runs `uv pip sync`."""
+    if is_conda_lock(lock_text):
+        image = image.micromamba_install(spec_file=_LOCK_PATH)
+        pip_requirements = conda_lock_pip_requirements(lock_text)
+        if pip_requirements:
+            image = image.pip_install(*pip_requirements, find_links=WHEELHOUSE_IMAGE_PATH)
+        return image
+    return image.run_commands(
+        f'pip install --no-cache-dir "uv=={_UV_VERSION}"',
+        # Packages install as root: every Modal build step already runs as
+        # root regardless of any `USER` line (see the module docstring), so
+        # this is stating what is already true rather than asking for it.
+        "uv pip sync --system --require-hashes "
+        f"--find-links {WHEELHOUSE_IMAGE_PATH} {_LOCK_PATH}",
+    )
+
+
 def _post_install(
     image: Any, commands: list[str], declared: list[BuildSecret], step_secrets: dict[str, Any]
 ) -> Any:
@@ -227,6 +251,10 @@ class Builder(ManagedBuilder):
     variant = "modal"
     item = "E2-05"
     title = "Modal"
+    #: A `packages` list and, for conda (E3-02), an `environment.yml`
+    #: dependency file installed with `micromamba_install`.
+    build_sources = ("packages", "dependencyFile")
+    dependency_formats = ("conda",)
     #: Modal runs GPUs, in the owner's workspace (E2-17). This builder does
     #: not build one yet: see `build`'s own guard.
     gpu = True
@@ -403,15 +431,7 @@ class Builder(ManagedBuilder):
                 image = image.add_local_file(
                     str(entrypoint_file), _ENTRYPOINT_PATH, copy=True
                 ).run_commands(f"chmod +x {_ENTRYPOINT_PATH}")
-                image = image.run_commands(
-                    f'pip install --no-cache-dir "uv=={_UV_VERSION}"',
-                    # Packages install as root: every Modal build step
-                    # already runs as root regardless of any `USER` line
-                    # (see the module docstring), so this is stating what
-                    # is already true rather than asking for it.
-                    "uv pip sync --system --require-hashes "
-                    f"--find-links {WHEELHOUSE_IMAGE_PATH} {_LOCK_PATH}",
-                )
+                image = _install_packages(image, request.lock_text)
                 for command in files_step(request.environment, variant=self.variant):
                     image = image.run_commands(command)
                 image = _post_install(image, spec.commands.post_install, declared, step_secrets)
