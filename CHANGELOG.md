@@ -8,19 +8,24 @@
 
 ## Unreleased
 
+## 1.9.14
+
+- **`datalayer/python-cpu:2026.09` base channel repinned** to the rebuilt
+  `jupyter-python:0.2.2` (now carrying `jupyter-kernels==1.2.23`) plus the
+  contract layer, digest
+  `sha256:aa5413000bb5b6ecd0a0cf03959b107f0d572f65bf230c08bbdf9a4569775545`,
+  released 2026-09-16 to `environments/base/python-cpu`. Every variant pins the
+  same digest.
+
 ## 1.9.13
 
-- **`marimo` sandbox** (#34, #35): a Jupyter server sandbox whose kernel also
-  holds Marimo's dataflow graph. `run_cell(cell_id, code)` runs a cell, then
-  the cells that depend on what it defined, in dependency order; a failing
-  cell stops the reaction. `register_cell`, `remove_cell`, `plan`, `graph`
-  and `cells` expose the graph; `run_code` keeps working, each call a cell of
-  its own, with the re-run cell ids on the result as `marimo_reactions`. The
-  graph is Marimo's own (`marimo._runtime.dataflow`), installed into the
-  kernel by one execute request and asked over the Jupyter protocol; marimo
-  is pip-installed into a kernel that lacks it unless `install_marimo=False`.
-  `get_manager("marimo")` is the `jupyter-server` manager under the marimo
-  variant. The same helper source drives jupyter-react's `variant="marimo"`.
+- **`jupyter-kernels==1.2.23` forced into `sandbox-contract/v1`**: it carries
+  the pooled kernel manager the runtime's Jupyter config selects
+  (`kernel_manager_class = jupyter_kernels.pool.mapping.PooledMappingKernelManager`),
+  replacing the deprecated private `datalayer-kernels`. PyPI serves it, so a
+  resolve satisfies it from the index and the wheelhouse carries no wheel for
+  it; the pin keeps `uv pip sync --require-hashes` from stripping it out of a
+  user environment's image.
 
 ## 1.9.12
 
