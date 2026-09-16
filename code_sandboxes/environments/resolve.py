@@ -889,7 +889,6 @@ def lock_document(
     python_version: str,
     base_reference: str,
     merged: MergedRequirements,
-    resolved_at: datetime | None = None,
 ) -> dict[str, Any]:
     """The stored lock: its text, its digest, and what a reader needs from it.
 
@@ -897,11 +896,19 @@ def lock_document(
     output, so the document is still a requirements file — ``pip install -r``
     reads it, and so does every tool that only knows that format — while
     saying everything the build installs.
+
+    **Nothing here is a wall clock.** The header carried a ``# resolved-at:``
+    line until 2026-09-16, and since the digest is over the whole text, two
+    resolves of the same spec, in the same base, pinning the same 320 packages
+    produced two different digests — the texts differed in that one line out
+    of 5,388, found by resolving the same environment twice on r1. The cache
+    key of section 5 is over the lock digest, so D-12's build cache could
+    never hit: `environments.cache.lookups` read `hit=false` 12 times out of
+    12. When the lock was resolved is on the lock document Runtimes stores, in
+    its ``created_at``, where it belongs.
     """
-    when = (resolved_at or _utcnow()).replace(microsecond=0).isoformat()
     header = [
         "# Resolved by Datalayer (PLAN_ENV.md D-9). Do not edit: a change makes a new version.",
-        f"# resolved-at: {when}",
         f"# python: {python_version}",
         f"# base: {base_reference}",
     ]
@@ -1163,7 +1170,6 @@ def resolve_environment(
     runner: ResolveRunner | None = None,
     conda_runner: CondaResolveRunner | None = None,
     bases: dict[str, ApprovedBase] = APPROVED_BASES,
-    resolved_at: datetime | None = None,
     uv: str | None = None,
     pyproject_run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
     image_transport: Any = None,
@@ -1198,8 +1204,6 @@ def resolve_environment(
     bases
         The approved bases, injected by tests and by a plane whose channel is
         published somewhere else.
-    resolved_at
-        The moment the lock records. Now by default.
     uv, pyproject_run
         A `pyproject` `dependencyFile` source's own verification (E3-01):
         the `uv` to check and export with, and how it is run — injected by
@@ -1274,7 +1278,6 @@ def resolve_environment(
                 credential=credential,
                 log=say,
                 runner=conda_runner,
-                resolved_at=resolved_at,
             )
         if dependency_file.source_format == "pyproject":
             # Verified, not re-resolved (E3-01): the author's own uv.lock is
@@ -1321,7 +1324,6 @@ def resolve_environment(
         python_version=environment.spec.language.version,
         base_reference=solving_in,
         merged=merged,
-        resolved_at=resolved_at,
     )
     say(
         f"Locked {document['package_count']} packages"

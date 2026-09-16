@@ -8,6 +8,23 @@
 
 ## Unreleased
 
+## 1.9.18
+
+- **A lock no longer carries a wall clock, so the build cache can hit**
+  (`environments/resolve.py`, `resolve_conda.py`; PLAN_ENVS.md E1-26, D-12).
+  The lock's header carried a `# resolved-at:` line, and its digest is over
+  the whole text — so two resolves of the same spec, in the same base,
+  pinning the same 320 packages, produced two different digests. Found by
+  resolving one environment twice on r1 on 2026-09-16: the texts differed in
+  exactly that one line out of 5,388. Section 5's cache key is over the lock
+  digest, so D-12's build cache could never hit, and it never had:
+  `environments.cache.lookups` read `hit=false` twelve times out of twelve.
+  When a lock was resolved is on the lock document Runtimes stores, in its
+  `created_at`, which is where it belongs. `resolved_at` is gone from
+  `lock_document`, `conda_lock_document`, `resolve_environment` and
+  `resolve_conda_environment`; the two tests that asserted determinism by
+  freezing the clock now assert it without one.
+
 ## 1.9.17
 
 - **An artifact's size is read from the registry** (`environments/attest.py`;
