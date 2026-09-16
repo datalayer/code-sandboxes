@@ -8,6 +8,19 @@
 
 ## Unreleased
 
+## 1.9.17
+
+- **An artifact's size is read from the registry** (`environments/attest.py`;
+  PLAN_ENVS.md E1-25). `attest_artifact` took `size_bytes` from its caller and
+  nobody ever passed one — the builder answers a reference, not a weight — so
+  every artefact was recorded with `sizeBytes: null` and
+  `environments.artifact.bytes`, the series section 14 tracks the artifact
+  size in, had no point in it although artifacts had been recorded (seen on r1,
+  2026-09-16, through the OTEL query API). `Attestor.size_of()` asks the
+  registry, with the client the scan is already read from, and a size that
+  cannot be read is logged rather than raised: a missing number on a dashboard
+  is not a reason to refuse an artifact that is otherwise signed. 3 new tests.
+
 ## 1.9.15
 
 - **A restart restarts the kernel, not just this client's socket**
