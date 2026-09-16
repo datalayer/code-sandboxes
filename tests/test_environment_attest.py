@@ -80,7 +80,7 @@ def basic(identifier: str, severity: str, *, package: str = "openssl") -> dict:
 
 
 class FakeEcr:
-    """The two ECR calls the attestor makes, and nothing else."""
+    """The three ECR calls the attestor makes, and nothing else."""
 
     def __init__(
         self,
@@ -90,6 +90,7 @@ class FakeEcr:
         enhanced_findings=True,
         manifest: dict | None = None,
         pages: list[list[dict]] | None = None,
+        size_bytes: int | None = 2_147_483_648,
     ) -> None:
         self.statuses = list(statuses)
         self.findings = list(findings)
@@ -99,8 +100,12 @@ class FakeEcr:
         self.pages = pages
         self.enhanced_findings = enhanced_findings
         self.manifest = manifest
+        #: What `describe_images` answers for the digest; None makes it raise
+        #: `ImageNotFoundException`, the way a registry that lost it would.
+        self.size_bytes = size_bytes
         self.asked = 0
         self.scanned: list[str] = []
+        self.sized: list[str] = []
 
     def batch_get_image(self, repositoryName, imageIds, acceptedMediaTypes):  # noqa: N803 - boto3's spelling
         manifest = self.manifest or {
@@ -116,6 +121,14 @@ class FakeEcr:
                 }
             ]
         }
+
+    def describe_images(self, repositoryName, imageIds):  # noqa: N803 - boto3's spelling
+        self.sized.append(imageIds[0]["imageDigest"])
+        if self.size_bytes is None:
+            error = Exception("ImageNotFoundException")
+            error.response = {"Error": {"Code": "ImageNotFoundException"}}
+            raise error
+        return {"imageDetails": [{"imageSizeInBytes": self.size_bytes}]}
 
     def describe_image_scan_findings(self, repositoryName, imageId, nextToken=None):  # noqa: N803 - boto3's spelling
         self.asked += 1
@@ -629,6 +642,33 @@ class TestAttestingAnArtifact:
     def test_the_policy_it_was_decided_under_is_part_of_the_record(self) -> None:
         answer = attest_artifact(artifact=self.an_artifact(), attestor=an_attestor())
         assert answer["scan_summary"]["policy"] == DEFAULT_POLICY.body()
+
+    def test_the_size_is_read_from_the_registry_when_nobody_hands_one_down(self) -> None:
+        """Which is every real call: the builder answers a reference, not a
+        weight, so `environments.artifact.bytes` — section 14's artifact size
+        — had no point in it although artifacts had been recorded (E1-25)."""
+        ecr = FakeEcr(size_bytes=2_147_483_648)
+        answer = attest_artifact(artifact=self.an_artifact(), attestor=an_attestor(ecr=ecr))
+        assert answer["size_bytes"] == 2_147_483_648
+        assert ecr.sized == [DIGEST]
+
+    def test_a_size_handed_down_is_kept_and_the_registry_is_not_asked(self) -> None:
+        ecr = FakeEcr()
+        answer = attest_artifact(
+            artifact=self.an_artifact(), size_bytes=116_183_040, attestor=an_attestor(ecr=ecr)
+        )
+        assert answer["size_bytes"] == 116_183_040
+        assert ecr.sized == []
+
+    def test_a_size_that_cannot_be_read_is_not_a_reason_to_refuse(self) -> None:
+        """A missing number on a dashboard, against an artifact nothing can
+        launch: the artifact is signed and the attestation stands."""
+        said: list[str] = []
+        attestor = an_attestor(ecr=FakeEcr(size_bytes=None), log=said.append)
+        answer = attest_artifact(artifact=self.an_artifact(), attestor=attestor)
+        assert answer["size_bytes"] is None
+        assert answer["signature_ref"] == f"{REGISTRY}/{REPOSITORY}@{DIGEST}"
+        assert any("size could not be read" in line for line in said)
 
 
 def test_nothing_reaches_a_registry_when_nothing_could_sign() -> None:

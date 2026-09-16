@@ -536,9 +536,34 @@ class Attestor:
             signature_ref=signature,
             sbom_ref=sbom_ref or f"{registry}/{repository}@{digest}.sbom",
             provenance_ref=provenance_ref or f"{registry}/{repository}@{digest}.att",
-            size_bytes=size_bytes,
+            size_bytes=size_bytes
+            if size_bytes is not None
+            else self.size_of(repository=repository, digest=digest),
             signed_now=signed_now,
         )
+
+    def size_of(self, *, repository: str, digest: str) -> int | None:
+        """What the registry says the artifact weighs, or None.
+
+        Nobody hands the size down: the builder answers a reference, not a
+        weight, so until this asked the registry `size_bytes` was always None
+        — and with it `environments.artifact.bytes`, the series section 14
+        tracks the artifact size in, which had no point in it on 2026-09-16
+        although artifacts had been recorded. The registry has known all
+        along; the scan is read from the same client.
+
+        Never a reason to fail an attestation: a size that could not be read
+        is a missing number on a dashboard, and the artifact is still signed.
+        """
+        try:
+            images = self._client().describe_images(
+                repositoryName=repository, imageIds=[{"imageDigest": digest}]
+            )["imageDetails"]
+        except Exception as error:
+            self._log(f"The artifact's size could not be read: {error}")
+            return None
+        size = (images[0] or {}).get("imageSizeInBytes") if images else None
+        return int(size) if size else None
 
     def _client(self) -> Any:
         if self._ecr is None:
