@@ -998,8 +998,12 @@ def test_the_solve_is_asked_to_pin_apt_at_the_base_channels_snapshot() -> None:
     runner = RecordedRunner(A_LOCK)
     resolve_environment(spec=a_spec(), variants=["datalayer"], runner=runner)
     assert runner.request is not None
+    # What this test is about: the solve is pinned at *the channel's* snapshot,
+    # whatever that is. The id itself is pinned once, in
+    # `test_environment_bases.py`, where it moves with the channel — repeating
+    # it here only meant a base release left two tests red instead of one.
     assert runner.request.apt_snapshot == channel_snapshot("datalayer/python-cpu", "2026.09")
-    assert runner.request.apt_snapshot == "20260914T150000Z"
+    assert runner.request.apt_snapshot
 
 
 class TestTheBuildkitRunner:

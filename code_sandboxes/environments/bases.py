@@ -126,7 +126,16 @@ APPROVED_BASES: dict[str, ApprovedBase] = {
                     # `.spec.VARIANTS`, spelled out: `spec` imports from this
                     # module, so importing it back here would be circular.
                     ("datalayer", "e2b", "daytona", "modal"),
-                    "sha256:aa5413000bb5b6ecd0a0cf03959b107f0d572f65bf230c08bbdf9a4569775545",
+                    # 2026-09-16: kernels now start in the contract's own
+                    # working directory. The image already declared `WORKDIR
+                    # /home/datalayer/content`, but a kernel's cwd is the
+                    # Jupyter server's to choose, and jupyter-python's config
+                    # roots it at `$HOME` — so every environment's kernel ran
+                    # in `/home/datalayer` and Appendix B check 2 read "cwd is
+                    # '/home/datalayer', not '/home/datalayer/content'". The
+                    # contract layer now sets `MappingKernelManager.root_dir`,
+                    # which moves the kernel without moving the file browser.
+                    "sha256:122d3e31f5e2507251457cbf47871c39ac1753adb1d83777ab0743fa11cd6148",
                 )
             },
             snapshots={"2026.09": "20260916T120000Z"},

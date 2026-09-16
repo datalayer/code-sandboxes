@@ -607,6 +607,58 @@ class JupyterServerSandbox(Sandbox):
             logger.warning(f"Failed to interrupt Jupyter kernel: {e}")
             return False
 
+    def restart_kernel(self) -> bool:
+        """Restart the kernel itself, through the server's own REST API.
+
+        Not `stop()` then `start()`: those are this *client's* lifecycle, and
+        when the server is somebody else's — a Datalayer runtime pod, which
+        is every attached sandbox — stopping the client only drops the
+        websocket. The kernel is a process on the server and keeps running,
+        so a reconnect lands back in the same interpreter with every global
+        still set.
+
+        That is what Appendix B check 7 ("nothing is assumed to persist
+        across restarts") measures, and it read `state survived the restart`
+        for exactly this reason — found live on r1, 2026-09-16, the first
+        drill whose smoke test reached the check. `POST
+        /api/kernels/{id}/restart` is the one that restarts the kernel, the
+        same way `_do_interrupt` already uses the API rather than the
+        client's own lifecycle.
+
+        Answers whether the server accepted it; never raises, so a caller
+        that cannot restart reports a failed check rather than an error.
+        """
+        if not self._server_url or not self._client:
+            return False
+        kernel_id = getattr(self._client, "id", None)
+        if not kernel_id:
+            return False
+        try:
+            response = requests.post(
+                f"{self._server_url}/api/kernels/{kernel_id}/restart",
+                params={"token": self._token},
+                headers=self._headers or None,
+                timeout=30,
+            )
+        except Exception as error:
+            # A restart that cannot even be asked for is a failed check, not
+            # an error to raise at the caller, exactly as `_do_interrupt` is.
+            logger.warning(f"Failed to restart Jupyter kernel: {error}")
+            return False
+        if not response.ok:
+            logger.warning(
+                "Failed to restart Jupyter kernel: the server answered %s", response.status_code
+            )
+            return False
+        # The websocket the client holds is to the kernel that has just been
+        # replaced; reconnecting is what makes the next execution land in the
+        # new interpreter rather than on a channel nobody is reading.
+        with contextlib.suppress(Exception):
+            self._client.stop()
+        with contextlib.suppress(Exception):
+            self._client.start()
+        return True
+
     @marks_execution
     def run_code(  # noqa: C901
         self,

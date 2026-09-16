@@ -52,10 +52,17 @@ def test_the_2026_09_channel_of_python_cuda_has_no_digest_until_it_is_pushed(
 def test_the_2026_09_channel_of_python_cpu_resolves_the_digest_its_release_pushed(
     variant: str,
 ) -> None:
-    """PLAN_ENV.md, E1-05: released 2026-09-14 (jupyter-python 0.2.2, E1-08's
-    scan fix), same digest for every variant."""
+    """PLAN_ENV.md, E1-05: the digest the channel's last release pushed, the
+    same one for every variant.
+
+    **This moves with every base release**, and `bases.py` is where it moves
+    first: two releases (2026-09-15's and 2026-09-16's) changed the channel
+    and left this assertion on 2026-09-14's digest, so it sat red rather than
+    catching anything. Current: released 2026-09-16, the contract layer that
+    starts kernels in `/home/datalayer/content` (E1-05, Appendix B check 2).
+    """
     ref = "datalayer/python-cpu"
-    digest = "sha256:334adf6c2714c8919ef60beeca1db12e3531a391c9dde41932c782f81c432b36"
+    digest = "sha256:122d3e31f5e2507251457cbf47871c39ac1753adb1d83777ab0743fa11cd6148"
     assert APPROVED_BASES[ref].channels == {"2026.09": dict.fromkeys(VARIANTS, digest)}
     assert resolve_base(ref, "2026.09", variant) == digest
 
@@ -114,8 +121,12 @@ def test_each_base_is_published_under_its_own_repository() -> None:
 
 
 def test_the_2026_09_channel_of_python_cpu_pins_apt_to_its_snapshot() -> None:
-    """D-9: the moment just after the channel's image upgraded its packages."""
-    assert channel_snapshot("datalayer/python-cpu", "2026.09") == "20260914T150000Z"
+    """D-9: the moment just after the channel's image upgraded its packages.
+
+    Moves with the channel, like the digest above, and had rotted the same
+    way — left on 2026-09-14's id after the channel moved to 2026-09-16's.
+    """
+    assert channel_snapshot("datalayer/python-cpu", "2026.09") == "20260916T120000Z"
     assert channel_snapshot("datalayer/python-cuda", "2026.09") == ""
     assert channel_snapshot("datalayer/nothing", "2026.09") == ""
 
