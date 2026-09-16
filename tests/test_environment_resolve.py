@@ -141,10 +141,12 @@ class TestTheProtectedPins:
             "jupyter-client",
             "jupyter-server",
             "jupyter-server-nbmodel",
+            "jupyter-kernels",
             "datalayer",
         }
         assert all(pin.version for pin in pins.values())
         assert pins["jupyter-server"].version == "2.21.0+datalayer.1"
+        assert pins["jupyter-kernels"].version == "1.2.23"
 
     def test_a_requirement_that_agrees_with_a_pin_is_dropped_for_it(self) -> None:
         # The fork satisfies `>=2.19`, which is what jupyterlab asks for, so
@@ -643,6 +645,7 @@ EXPORTED = (
     "jupyter-client==8.9.1 \\\n    --hash=sha256:" + "cc" * 32 + "\n"
     "jupyter-server==2.21.0+datalayer.1 \\\n    --hash=sha256:" + "dd" * 32 + "\n"
     "jupyter-server-nbmodel==0.2.8 \\\n    --hash=sha256:" + "ee" * 32 + "\n"
+    "jupyter-kernels==1.2.23 \\\n    --hash=sha256:" + "a7" * 32 + "\n"
     "datalayer==1.7.4 \\\n    --hash=sha256:" + "ff" * 32 + "\n"
 )
 
@@ -658,7 +661,7 @@ class TestAPyprojectFile:
             pyproject_run=uv,
         )
         assert answer["content"] == EXPORTED
-        assert answer["package_count"] == 6
+        assert answer["package_count"] == 7
         assert answer["python_version"] == "3.13"
         assert uv.calls[0][:2] == ["/usr/bin/uv", "lock"]
         assert uv.calls[1][:2] == ["/usr/bin/uv", "export"]
