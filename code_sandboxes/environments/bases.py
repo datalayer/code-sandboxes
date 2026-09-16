@@ -109,8 +109,9 @@ APPROVED_BASES: dict[str, ApprovedBase] = {
     base.ref: base
     for base in (
         # E1-05: jupyter-python:0.2.2 (Ubuntu security packages and conda's own
-        # OpenSSL upgraded, JupyterLab's staging yarn.lock dropped) plus the
-        # contract layer, released 2026-09-14 to environments/base/python-cpu.
+        # OpenSSL upgraded, JupyterLab's staging yarn.lock dropped, jupyter-kernels
+        # installed) plus the contract layer, released 2026-09-16 to
+        # environments/base/python-cpu.
         # One image, so every variant pins the same digest until a variant
         # needs a base of its own. The prior digest, jupyter-python:0.2.1,
         # carried 31 fixable-critical findings the scan (E1-08) blocks every
@@ -125,10 +126,10 @@ APPROVED_BASES: dict[str, ApprovedBase] = {
                     # `.spec.VARIANTS`, spelled out: `spec` imports from this
                     # module, so importing it back here would be circular.
                     ("datalayer", "e2b", "daytona", "modal"),
-                    "sha256:334adf6c2714c8919ef60beeca1db12e3531a391c9dde41932c782f81c432b36",
+                    "sha256:aa5413000bb5b6ecd0a0cf03959b107f0d572f65bf230c08bbdf9a4569775545",
                 )
             },
-            snapshots={"2026.09": "20260914T150000Z"},
+            snapshots={"2026.09": "20260916T120000Z"},
         ),
         # E2-17: jupyter-python-cuda plus the same layer.
         ApprovedBase(

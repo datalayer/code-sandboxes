@@ -8,6 +8,25 @@
 
 ## Unreleased
 
+## 1.9.14
+
+- **`datalayer/python-cpu:2026.09` base channel repinned** to the rebuilt
+  `jupyter-python:0.2.2` (now carrying `jupyter-kernels==1.2.23`) plus the
+  contract layer, digest
+  `sha256:aa5413000bb5b6ecd0a0cf03959b107f0d572f65bf230c08bbdf9a4569775545`,
+  released 2026-09-16 to `environments/base/python-cpu`. Every variant pins the
+  same digest.
+
+## 1.9.13
+
+- **`jupyter-kernels==1.2.23` forced into `sandbox-contract/v1`**: it carries
+  the pooled kernel manager the runtime's Jupyter config selects
+  (`kernel_manager_class = jupyter_kernels.pool.mapping.PooledMappingKernelManager`),
+  replacing the deprecated private `datalayer-kernels`. PyPI serves it, so a
+  resolve satisfies it from the index and the wheelhouse carries no wheel for
+  it; the pin keeps `uv pip sync --require-hashes` from stripping it out of a
+  user environment's image.
+
 ## 1.9.12
 
 - **`owner_repository`, `owner_cache_repository` and `ECR_ENVIRONMENT_PREFIX`
