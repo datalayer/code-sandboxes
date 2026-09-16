@@ -8,6 +8,38 @@
 
 ## Unreleased
 
+## 1.9.15
+
+- **A restart restarts the kernel, not just this client's socket**
+  (`jupyter_server_sandbox`, `client`; PLAN_ENV.md E0-09, Appendix B check
+  7). `CodeSandboxClient.restart()` was `stop()` then `start()`, which is
+  right for a sandbox this process owns — it is destroyed and recreated, and
+  nothing survives — and wrong for one *attached* to a Jupyter server
+  somebody else runs, which is every Datalayer runtime pod: stopping drops
+  the websocket while the kernel process keeps running, so the reconnect
+  lands in the same interpreter with every global still set. Check 7 is
+  "nothing is assumed to persist across restarts", and it read `state survived the restart ('True')` for exactly this reason — found live on r1,
+  2026-09-16, the first drill whose smoke test reached the check.
+  `JupyterServerSandbox.restart_kernel()` now asks the server's own
+  `POST /api/kernels/{id}/restart` (the way `_do_interrupt` already uses the
+  API rather than the client's lifecycle) and reconnects onto the new
+  kernel; `restart()` prefers it and falls back to the lifecycle for every
+  variant that draws no such distinction. 7 new tests.
+- **`datalayer/python-cpu:2026.09` repinned** to
+  `sha256:122d3e31f5e2507251457cbf47871c39ac1753adb1d83777ab0743fa11cd6148`:
+  the contract layer now sets `MappingKernelManager.root_dir`, so kernels
+  start in `/home/datalayer/content`. The image already declared `WORKDIR`
+  there and `sandbox-contract/v1`'s User row already required it, but a
+  kernel's cwd is the Jupyter server's to choose and jupyter-python's config
+  roots it at `$HOME` — so every environment's kernel ran in
+  `/home/datalayer` and Appendix B check 2 read `cwd is '/home/datalayer', not '/home/datalayer/content'`. The file browser stays rooted at `$HOME`,
+  where a person expects to see everything they have; only the kernel moves.
+- Two assertions that had rotted through three base releases are pinned in
+  one place again: the channel's digest and its apt snapshot were duplicated
+  across `test_environment_bases.py` and `test_environment_resolve.py`, and
+  2026-09-15's and 2026-09-16's releases left both red rather than catching
+  anything.
+
 ## 1.9.14
 
 - **`datalayer/python-cpu:2026.09` base channel repinned** to the rebuilt
