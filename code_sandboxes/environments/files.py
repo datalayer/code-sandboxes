@@ -25,12 +25,15 @@ __all__ = ["build_entries", "files_step"]
 def build_entries(
     environment: Environment, *, source_of: Callable[[FileEntry], str] | None = None
 ) -> list[BuildEntry]:
-    """The spec's files as build entries.
+    """The spec's baked files as build entries: ``files`` then ``contentsBuild``.
 
-    ``source_of`` turns a ``contentRef`` into a URL the build can fetch —
-    a presigned URL for a ``blob://`` reference — and defaults to the
-    reference itself. A file without its sha256 is refused: the build
-    verifies every byte it bakes.
+    ``files`` a user uploaded (referenced by ``contentRef``) and
+    ``contentsBuild`` fetched from an external ``source`` are both baked the
+    same way, so they are the same kind of entry here. ``source_of`` turns a
+    ``contentRef`` into a URL the build can fetch — a presigned URL for a
+    ``blob://`` reference — and defaults to the reference itself; a
+    ``contentsBuild`` source is already a URL and is used as is. A file without
+    its sha256 is refused: the build verifies every byte it bakes.
     """
     entries: list[BuildEntry] = []
     for index, entry in enumerate(environment.spec.files):
@@ -48,6 +51,15 @@ def build_entries(
                 size_bytes=entry.size_bytes,
             )
         )
+    for built in environment.spec.contents_build:
+        entries.append(
+            BuildEntry(
+                source_uri=built.source,
+                destination_path=built.path,
+                sha256=built.sha256,
+                size_bytes=built.size_bytes,
+            )
+        )
     return entries
 
 
@@ -63,7 +75,7 @@ def files_step(
     """
     if variant not in VARIANTS:
         raise ValueError(f"{variant!r} is not a variant")
-    if not environment.spec.files:
+    if not environment.spec.files and not environment.spec.contents_build:
         return []
     build = EnvironmentBuild(
         environment=environment.metadata.name,

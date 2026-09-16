@@ -152,6 +152,45 @@
       "title": "Compatibility",
       "type": "object"
     },
+    "ContentsBuildEntry": {
+      "additionalProperties": false,
+      "description": "One immutable file the Environment bakes from an external source.\n\nUnlike ``files`` \u2014 which a user uploads, referenced by ``contentRef`` \u2014 a\n``contentsBuild`` entry names an external ``source`` URL fetched at build\ntime and verified against ``sha256`` (required: the build verifies every\nbyte it bakes). Both are baked the same way, into every provider artifact.",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "sizeBytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sizebytes"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "path",
+        "sha256"
+      ],
+      "title": "ContentsBuildEntry",
+      "type": "object"
+    },
     "DependencyFileSpec": {
       "additionalProperties": false,
       "description": "A `requirements.txt`, a `pyproject.toml` with its `uv.lock`, or a conda\n`environment.yml` (E3-01, E3-02).\n\n``requirements`` resolves the way ``packages`` does \u2014 the protected\nconstraints merged in, the same solve. ``pyproject`` does not resolve at\nall: its own ``uv.lock`` is verified against the current\n``pyproject.toml`` and exported, never re-solved, because a lock the\nauthor already made is the whole point of bringing one. ``conda`` resolves\nthe ``environment.yml`` in its own ``micromamba`` solve into an explicit\nlock, with the protected constraints merged over its ``pip:`` layer.",
@@ -201,6 +240,13 @@
         },
         "compatibility": {
           "$ref": "#/$defs/Compatibility"
+        },
+        "contentsBuild": {
+          "items": {
+            "$ref": "#/$defs/ContentsBuildEntry"
+          },
+          "title": "Contentsbuild",
+          "type": "array"
         },
         "contract": {
           "default": "sandbox-contract/v1",

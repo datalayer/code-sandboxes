@@ -280,6 +280,58 @@ def test_a_file_is_not_baked_without_its_digest() -> None:
         files_step(environment(), variant="kaggle")
 
 
+CONTENTS_SHA = "c" * 64
+
+
+def test_the_files_step_bakes_a_contents_build_manifest_from_an_external_source() -> None:
+    env = environment(
+        files=[],
+        contents_build=[
+            {
+                "source": "https://data.example/iris.csv",
+                "path": "/opt/datalayer/contents/iris.csv",
+                "sha256": CONTENTS_SHA,
+            }
+        ],
+    )
+    commands = files_step(env, variant="modal")
+    # The external source is fetched as it is (no contentRef to sign) and verified.
+    assert (
+        "curl -fsSL https://data.example/iris.csv -o /opt/datalayer/contents/iris.csv"
+        in commands[0]
+    )
+    assert f'echo "{CONTENTS_SHA}  /opt/datalayer/contents/iris.csv" | sha256sum -c' in commands[0]
+    assert "environment-contents.json" in commands[-1]
+
+
+def test_files_and_contents_build_are_baked_together() -> None:
+    env = environment(
+        contents_build=[
+            {
+                "source": "https://data.example/iris.csv",
+                "path": "/opt/datalayer/contents/iris.csv",
+                "sha256": CONTENTS_SHA,
+            }
+        ]
+    )
+    entries = build_entries(env, source_of=lambda entry: "https://signed.example/notes.md")
+    # The uploaded file first, then the external build entry — both baked, one engine.
+    assert [entry.destination_path for entry in entries] == [
+        "/home/datalayer/content/notes.md",
+        "/opt/datalayer/contents/iris.csv",
+    ]
+    assert entries[0].source_uri == "https://signed.example/notes.md"
+    assert entries[1].source_uri == "https://data.example/iris.csv"
+    assert entries[1].sha256 == CONTENTS_SHA
+
+
+def test_a_contents_build_entry_without_its_digest_will_not_parse() -> None:
+    with pytest.raises(Exception):
+        environment(
+            contents_build=[{"source": "https://data.example/x", "path": "/opt/x"}]
+        )
+
+
 def test_the_neutral_modules_import_no_provider_sdk() -> None:
     """What a service may import must not drag a provider in."""
     code = (
