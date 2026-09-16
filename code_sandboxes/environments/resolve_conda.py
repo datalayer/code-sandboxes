@@ -644,24 +644,28 @@ class BuildkitCondaResolveRunner:
         carries the whole of what the solve resolved, not the conda layer alone.
         """
         micromamba = shlex.quote(MICROMAMBA_BINARY)
-        return "\n".join(
-            [
-                f"FROM {request.base_reference} AS solve",
-                "USER root",
-                "WORKDIR /solve",
-                micromamba_bootstrap_dockerfile_line(),
-                "COPY environment.yml ./environment.yml",
-                "ENV PIP_FIND_LINKS=" + shlex.quote(WHEELHOUSE_IMAGE_PATH),
-                "RUN --mount=type=cache,target=/opt/conda/pkgs "
-                f"{micromamba} create --yes --prefix /solve/prefix "
-                f"--platform {shlex.quote(request.platform)} --file environment.yml",
-                f"RUN {micromamba} env export --explicit --prefix /solve/prefix > /solve/lock.txt",
-                f"RUN {micromamba} env export --prefix /solve/prefix > /solve/pip-env.yml",
-                "FROM scratch",
-                "COPY --from=solve /solve/lock.txt /lock.txt",
-                "COPY --from=solve /solve/pip-env.yml /pip-env.yml",
-            ]
-        ) + "\n"
+        return (
+            "\n".join(
+                [
+                    f"FROM {request.base_reference} AS solve",
+                    "USER root",
+                    "WORKDIR /solve",
+                    micromamba_bootstrap_dockerfile_line(),
+                    "COPY environment.yml ./environment.yml",
+                    "ENV PIP_FIND_LINKS=" + shlex.quote(WHEELHOUSE_IMAGE_PATH),
+                    "RUN --mount=type=cache,target=/opt/conda/pkgs "
+                    f"{micromamba} create --yes --prefix /solve/prefix "
+                    f"--platform {shlex.quote(request.platform)} --file environment.yml",
+                    f"RUN {micromamba} env export --explicit "
+                    "--prefix /solve/prefix > /solve/lock.txt",
+                    f"RUN {micromamba} env export --prefix /solve/prefix > /solve/pip-env.yml",
+                    "FROM scratch",
+                    "COPY --from=solve /solve/lock.txt /lock.txt",
+                    "COPY --from=solve /solve/pip-env.yml /pip-env.yml",
+                ]
+            )
+            + "\n"
+        )
 
     def solve(
         self, request: CondaResolveRequest, log: Callable[[str], None] | None = None
@@ -800,7 +804,6 @@ def conda_lock_document(
     base_reference: str,
     merged: MergedRequirements,
     platform: str = CONDA_PLATFORM,
-    resolved_at: datetime | None = None,
 ) -> dict[str, Any]:
     """The stored conda lock: its text, its digest, and what a reader needs.
 
@@ -814,10 +817,8 @@ def conda_lock_document(
     could read the prefix back, and the merged requirements otherwise, so it is
     always complete rather than the protected pins alone.
     """
-    when = (resolved_at or _utcnow()).replace(microsecond=0).isoformat()
     header = [
         "# Resolved by Datalayer (PLAN_ENV.md D-9). Do not edit: a change makes a new version.",
-        f"# resolved-at: {when}",
         f"# python: {python_version}",
         f"# platform: {platform}",
         f"# base: {base_reference}",
@@ -854,7 +855,6 @@ def resolve_conda_environment(
     credential: Any = None,
     log: Callable[[str], None] | None = None,
     runner: CondaResolveRunner | None = None,
-    resolved_at: datetime | None = None,
 ) -> dict[str, Any]:
     """A conda version's lock, from its ``environment.yml`` (E3-02).
 
@@ -892,7 +892,6 @@ def resolve_conda_environment(
         base_reference=solving_in,
         merged=merged,
         platform=platform,
-        resolved_at=resolved_at,
     )
     say(f"Locked {document['package_count']} conda packages as {document['digest']}")
     return {**document, "resolved_bases": dict(resolved_bases)}

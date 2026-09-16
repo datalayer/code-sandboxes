@@ -13,7 +13,6 @@ paraphrase of them that cannot go out of date.
 from __future__ import annotations
 
 import subprocess
-from datetime import datetime, timezone
 
 import httpx
 import pytest
@@ -266,7 +265,6 @@ class TestTheLock:
             python_version="3.13",
             base_reference="environments/base/python-cpu@sha256:" + "11" * 32,
             merged=merge_requirements(["geopandas==1.1.1"]),
-            resolved_at=datetime(2026, 9, 12, 8, 30, tzinfo=timezone.utc),
         )
         assert document["format"] == LOCK_FORMAT
         assert document["digest"].startswith("sha256:")
@@ -275,7 +273,6 @@ class TestTheLock:
         content = document["content"]
         assert f"{APT_PIN_PREFIX}gdal-bin=3.8.4+dfsg-3build2" in content
         assert "# datalayer-protected: ipykernel==7.3.0" in content
-        assert "# resolved-at: 2026-09-12T08:30:00+00:00" in content
         # The snapshot the pins came from, which the builder installs from.
         from code_sandboxes.environments.resolve import apt_pins_in, apt_snapshot_in
 
@@ -289,15 +286,24 @@ class TestTheLock:
         }
 
     def test_the_same_lock_digests_the_same_and_a_changed_one_does_not(self) -> None:
+        """And nothing here may pin a clock to make it true.
+
+        The header carried a `# resolved-at:` line until 2026-09-16, and this
+        test passed only because it froze the moment. Resolving the same spec
+        twice on r1 produced two digests differing in that one line out of
+        5,388, and section 5's cache key is over the lock digest — so D-12's
+        build cache had never hit, 12 lookups out of 12.
+        """
         arguments = {
             "python_version": "3.13",
             "base_reference": "environments/base/python-cpu@sha256:" + "11" * 32,
             "merged": MergedRequirements((), (), ()),
-            "resolved_at": datetime(2026, 9, 12, tzinfo=timezone.utc),
         }
         first = lock_document(A_LOCK, **arguments)
         again = lock_document(A_LOCK, **arguments)
         assert first["digest"] == again["digest"]
+        assert first["content"] == again["content"]
+        assert "resolved-at" not in first["content"]
         moved = lock_document(
             ResolveOutcome(lock_text=A_LOCK.lock_text.replace("1.1.1", "1.1.2")), **arguments
         )

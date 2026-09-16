@@ -12,7 +12,6 @@ tested against the solver's own words rather than a paraphrase of them.
 from __future__ import annotations
 
 import subprocess
-from datetime import datetime, timezone
 
 import pytest
 
@@ -192,8 +191,7 @@ class TestParsingTheEnvironmentYml:
 
     def test_a_plain_channel_url_without_a_credential_is_kept(self) -> None:
         env = parse_conda_environment(
-            "channels:\n  - https://conda.anaconda.org/conda-forge\n"
-            "dependencies:\n  - gdal\n"
+            "channels:\n  - https://conda.anaconda.org/conda-forge\n" "dependencies:\n  - gdal\n"
         )
         assert env.channels == ("https://conda.anaconda.org/conda-forge",)
 
@@ -235,17 +233,13 @@ class TestMergingThePipLayer:
         assert {"shapely", "ipykernel", "jupyter-server"} <= names
 
     def test_a_pip_requirement_contradicting_a_pin_is_refused(self) -> None:
-        env = parse_conda_environment(
-            "dependencies:\n  - pip:\n    - ipykernel==6.0.0\n"
-        )
+        env = parse_conda_environment("dependencies:\n  - pip:\n    - ipykernel==6.0.0\n")
         with pytest.raises(EnvironmentsError) as caught:
             merge_conda_pip(env)
         assert caught.value.code.code == "DL_ENV_PROTECTED_PACKAGE"
 
     def test_the_interpreter_is_pinned_and_never_doubled(self) -> None:
-        env = parse_conda_environment(
-            "dependencies:\n  - python=3.11\n  - gdal=3.9\n"
-        )
+        env = parse_conda_environment("dependencies:\n  - python=3.11\n  - gdal=3.9\n")
         merged = merge_conda_pip(env)
         rendered = rendered_environment(env, merged, python_version="3.13")
         assert rendered.count("python=3.13") == 1
@@ -291,13 +285,11 @@ class TestTheLock:
     def test_the_document_records_the_pins_and_is_deterministic(self) -> None:
         env = parse_conda_environment(A_YAML)
         merged = merge_conda_pip(env)
-        at = datetime(2026, 9, 14, tzinfo=timezone.utc)
         document = conda_lock_document(
             CondaResolveOutcome(lock_text=EXPLICIT_LOCK),
             python_version="3.13",
             base_reference="registry/base@sha256:" + "11" * 32,
             merged=merged,
-            resolved_at=at,
         )
         assert document["format"] == CONDA_LOCK_FORMAT
         assert document["package_count"] == 2
@@ -311,9 +303,13 @@ class TestTheLock:
             python_version="3.13",
             base_reference="registry/base@sha256:" + "11" * 32,
             merged=merged,
-            resolved_at=at,
         )
+        # Deterministic without anybody pinning a clock: the header carried a
+        # `# resolved-at:` line until 2026-09-16, which made two resolves of
+        # one spec two different digests and kept D-12's cache from ever
+        # hitting.
         assert document["digest"] == again["digest"]
+        assert "resolved-at" not in document["content"]
 
     def test_an_export_without_the_marker_is_a_provider_error(self) -> None:
         env = parse_conda_environment(A_YAML)
@@ -353,9 +349,7 @@ class TestTheRunners:
                 return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
             raise subprocess.TimeoutExpired(argv, 5.0)
 
-        monkeypatch.setattr(
-            "code_sandboxes.environments.resolve_conda.subprocess.run", fake_run
-        )
+        monkeypatch.setattr("code_sandboxes.environments.resolve_conda.subprocess.run", fake_run)
         with pytest.raises(EnvironmentsError) as caught:
             runner.solve(CondaResolveRequest(environment_yml=A_YAML, python_version="3.13"))
         assert caught.value.code.code == "DL_ENV_PROVIDER_ERROR"
