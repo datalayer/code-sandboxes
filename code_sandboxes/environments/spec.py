@@ -259,6 +259,21 @@ class FileEntry(_Model):
     sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
+class ContentsBuildEntry(_Model):
+    """One immutable file the Environment bakes from an external source.
+
+    Unlike ``files`` — which a user uploads, referenced by ``contentRef`` — a
+    ``contentsBuild`` entry names an external ``source`` URL fetched at build
+    time and verified against ``sha256`` (required: the build verifies every
+    byte it bakes). Both are baked the same way, into every provider artifact.
+    """
+
+    source: str
+    path: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int | None = Field(default=None, ge=0)
+
+
 class Commands(_Model):
     post_install: list[str] = Field(default_factory=list)
 
@@ -365,6 +380,7 @@ class EnvironmentSpec(_Model):
     platform: Platform = Field(default_factory=Platform)
     packages: Packages = Field(default_factory=Packages)
     files: list[FileEntry] = Field(default_factory=list)
+    contents_build: list[ContentsBuildEntry] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     commands: Commands = Field(default_factory=Commands)
     build_secrets: list[BuildSecret] = Field(default_factory=list)
