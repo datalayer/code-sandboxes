@@ -42,7 +42,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any
 
-from .models import SandboxInfo, SandboxStatus, normalize_variant
+from .models import SandboxEnvironment, SandboxInfo, SandboxStatus, normalize_variant
 
 __all__ = [
     "SandboxManagementError",
@@ -93,6 +93,69 @@ class SandboxManager(ABC):
     def _unsupported(self, verb: str, reason: str) -> SandboxManagementError:
         return SandboxManagementError(
             f"The {self.variant} variant does not support {verb}: {reason}"
+        )
+
+    def environments(self) -> list[SandboxEnvironment]:
+        """The environments this manager's provider ships, or none when it cannot say."""
+        from .providers import get_provider
+
+        provider = get_provider(self.variant)
+        return list(provider.environments()) if provider is not None else []
+
+    def _configure(self, kwargs: dict[str, Any]) -> SandboxEnvironment | None:
+        """Move `create`'s own options onto the sandbox's config; answer the environment.
+
+        A `Sandbox` reads the environment and the name from its
+        `SandboxConfig`. Passed as bare keywords they land in its `**kwargs`
+        and are dropped there in silence, so `create` answers `running` for a
+        default sandbox under a generated name — and says nothing about
+        either. `DatalayerSandboxManager` learned this once, in the words of
+        its own `create`; every other manager still had the hole. Found on
+        2026-09-17: `sandboxes create daytona -e eric/daytona-drift -n x`
+        launched `daytonaio/sandbox:0.8.0` with no name, and so did
+        `-e this-environment-does-not-exist-at-all`.
+
+        The option is `environment`, spelled the way `SandboxConfig` spells
+        it, everywhere and by every caller. An environment the provider does
+        not ship is **refused**, naming what it does ship: a person who asks
+        for `daytona-gpu` and is handed a CPU sandbox has been told the wrong
+        thing, which is worse than being told no.
+        """
+        from .models import SandboxConfig
+
+        asked = kwargs.pop("environment", None)
+        name = kwargs.pop("name", None)
+        environment: SandboxEnvironment | None = None
+        updates: dict[str, Any] = {}
+        if name:
+            updates["name"] = name
+        if asked:
+            environment = self._shipped(str(asked))
+            updates["environment"] = environment.name
+            # The card the environment names, which is what every adapter's
+            # own resource shaping reads. What each provider takes *besides*
+            # a card — Daytona's `spot`, for one — stays its own to apply.
+            if environment.gpu:
+                updates["gpu"] = environment.gpu
+        if updates:
+            config = kwargs.pop("config", None) or SandboxConfig()
+            kwargs["config"] = config.model_copy(update=updates)
+        return environment
+
+    def _shipped(self, name: str) -> SandboxEnvironment:
+        """The shipped environment of that name, or a refusal naming the rest."""
+        shipped = self.environments()
+        for environment in shipped:
+            if environment.name == name:
+                return environment
+        offered = (
+            f"it ships {', '.join(sorted(item.name for item in shipped))}"
+            if shipped
+            else "it ships none that can be named — `sandboxes environments` "
+            "says what any provider offers"
+        )
+        raise SandboxManagementError(
+            f"The {self.variant} variant ships no environment {name!r}: {offered}"
         )
 
 
@@ -226,6 +289,7 @@ class DockerSandboxManager(SandboxManager):
 
         # auto_remove would erase the container the moment this process lets
         # go of it — the opposite of a detached create.
+        self._configure(kwargs)
         sandbox = DockerSandbox(auto_remove=False, **kwargs)
         sandbox.start()
         info = sandbox.info
@@ -616,6 +680,7 @@ class ModalSandboxManager(SandboxManager):
     def create(self, **kwargs: Any) -> SandboxInfo:
         from .modal_sandbox import ModalSandbox
 
+        self._configure(kwargs)
         sandbox = ModalSandbox(app_name=self._app_name, **kwargs)
         sandbox.start()
         info = sandbox.info
@@ -739,6 +804,16 @@ class DaytonaSandboxManager(SandboxManager):
         from .daytona_sandbox import DaytonaSandbox
 
         given = {key: value for key, value in self._settings.items() if value}
+        environment = self._configure(kwargs)
+        # Preemptible capacity is Daytona's own argument, not a card, so the
+        # base helper cannot set it: `daytona-gpu-spot` differs from
+        # `daytona-gpu` by exactly this and by nothing the config carries.
+        if environment is not None:
+            metadata = environment.metadata or {}
+            if metadata.get("spot"):
+                kwargs.setdefault("spot", True)
+            if environment.gpu_count:
+                kwargs.setdefault("gpu_count", int(environment.gpu_count))
         # Detached, so it outlives this call: stopping it is `delete`.
         sandbox = DaytonaSandbox(delete_on_stop=False, **given, **kwargs)
         sandbox.start()
@@ -850,17 +925,13 @@ class DatalayerSandboxManager(SandboxManager):
         `SandboxConfig`. Passed as keywords, they fell into its extra arguments,
         so both CLIs started every runtime in `ai-agents-env` under a generated
         name: asked for `python-cpu-env`, the platform claimed an agents pod.
-        `environment_name` is the `datalayer sandboxes create` spelling, and
-        `environment` the `code-sandboxes create` one.
         """
         from .datalayer_sandbox import DatalayerSandbox
         from .models import SandboxConfig
 
         config = kwargs.pop("config", None) or SandboxConfig()
-        environment_name = kwargs.pop("environment_name", None)
-        environment = kwargs.pop("environment", None)
         chosen = {
-            "environment": environment_name or environment,
+            "environment": kwargs.pop("environment", None),
             # The version of a user environment, read from the config by the
             # sandbox exactly as the environment is (PLAN_ENV.md, E1-19); left
             # in the extra arguments it would be dropped, and the CLI would
@@ -965,6 +1036,7 @@ class E2BSandboxManager(SandboxManager):
     def create(self, **kwargs: Any) -> SandboxInfo:
         from .e2b_sandbox import E2BSandbox
 
+        self._configure(kwargs)
         sandbox = E2BSandbox(**self._opts(), **kwargs)
         sandbox.start()
         info = sandbox.info
@@ -1062,6 +1134,7 @@ class CoreWeaveSandboxManager(SandboxManager):
         given = {key: value for key, value in self._settings.items() if value}
         # No session process: a sandbox nothing is holding open should not be
         # paying for a driver waiting on a stdin that will never be written.
+        self._configure(kwargs)
         sandbox = CoreWeaveSandbox(stateful=False, **given, **kwargs)
         sandbox.start()
         info = sandbox.info
@@ -1141,6 +1214,7 @@ class CloudflareSandboxManager(SandboxManager):
         from .cloudflare_sandbox import CloudflareSandbox
 
         given = {key: value for key, value in self._settings.items() if value}
+        self._configure(kwargs)
         sandbox = CloudflareSandbox(**given, **kwargs)
         sandbox.start()
         info = sandbox.info
