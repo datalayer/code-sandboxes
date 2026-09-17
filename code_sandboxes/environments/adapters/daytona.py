@@ -179,7 +179,12 @@ class Builder(ManagedBuilder):
     title = "Daytona"
     #: A `packages` list and, for conda (E3-02), an `environment.yml`
     #: dependency file installed with `micromamba`.
-    build_sources = ("packages", "dependencyFile")
+    build_sources = ("packages", "dependencyFile", "dockerfile")
+    #: None beyond the contract's own (E3-03): `Image.from_dockerfile` keeps
+    #: the Dockerfile text as it is and Daytona builds it on a real Docker
+    #: builder, so the grammar it accepts is Docker's. Checked in the SDK on
+    #: 2026-09-17.
+    forbidden_instructions = ()
     dependency_formats = ("conda",)
     #: Daytona runs GPUs, on its own hardware and the owner's account (E2-17).
     #: This builder does not build one yet: see `_own_findings`.

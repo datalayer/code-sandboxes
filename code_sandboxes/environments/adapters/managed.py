@@ -73,7 +73,11 @@ class ManagedBuilder:
     #: built for a managed variant yet (E3-01), so it is not listed here.
     dependency_formats: tuple[str, ...] = ()
     package_managers: tuple[str, ...] = ("uv", "pip")
-    #: Dockerfile instructions its own builder does not implement (§6).
+    #: Dockerfile instructions its own builder does not implement (§6, E3-03).
+    #: Checked against a `dockerfile`-sourced spec at `validate`, before
+    #: anything is queued — the point being to refuse an instruction a variant
+    #: would otherwise drop, rather than hand back an image quietly missing
+    #: whatever it asked for.
     forbidden_instructions: tuple[str, ...] = ()
     #: Where its artifacts live; empty when the variant is regionless.
     regions: tuple[str, ...] = ()
@@ -128,6 +132,8 @@ class ManagedBuilder:
             )
         elif spec.build.source == "dependencyFile":
             findings.extend(self._dependency_file_findings(spec))
+        elif spec.build.source == "dockerfile":
+            findings.extend(self._dockerfile_findings(spec))
         if spec.packages.python.manager not in self.package_managers:
             findings.append(
                 CapabilityFinding(
@@ -268,6 +274,36 @@ class ManagedBuilder:
         raise self._not_built("delete an artifact")
 
     # -- helpers for the subclasses -------------------------------------------
+
+    def _dockerfile_findings(self, spec: Any) -> list[CapabilityFinding]:
+        """Every instruction in the spec's Dockerfile this variant would not honour.
+
+        The contract's own refusals are `spec.py`'s to make and apply to every
+        variant alike; this is the narrower question of what *this* builder
+        does with a Dockerfile it accepts. Each is named with its line, since
+        a Dockerfile is somebody's file.
+        """
+        if not self.forbidden_instructions:
+            return []
+        dockerfile = getattr(spec.build, "dockerfile", None)
+        content = getattr(dockerfile, "content", "") or ""
+        if not content.strip():
+            return []
+        from ..contract import parse_dockerfile
+
+        refused = set(self.forbidden_instructions)
+        return [
+            CapabilityFinding(
+                code=CAPABILITY_UNSUPPORTED.code,
+                message=(
+                    f"line {instruction.line}: {self.title} does not implement "
+                    f"`{instruction.keyword}`"
+                ),
+                field="spec.build.dockerfile.content",
+            )
+            for instruction in parse_dockerfile(content)
+            if instruction.keyword in refused
+        ]
 
     @staticmethod
     def _spec_finding(message: str, field: str) -> CapabilityFinding:

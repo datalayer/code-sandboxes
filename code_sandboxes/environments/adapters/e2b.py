@@ -199,7 +199,24 @@ class Builder(ManagedBuilder):
     title = "E2B"
     #: A `packages` list and, for conda (E3-02), an `environment.yml`
     #: dependency file installed with `micromamba`.
-    build_sources = ("packages", "dependencyFile")
+    build_sources = ("packages", "dependencyFile", "dockerfile")
+    #: What E2B's own Dockerfile parser does not handle (E3-03). Read from the
+    #: SDK on 2026-09-17: `e2b.template.dockerfile_parser` branches on FROM,
+    #: RUN, COPY, ADD, WORKDIR, USER, ENV, ARG, CMD and ENTRYPOINT, and for
+    #: anything else **prints `Unsupported instruction` and carries on**. So a
+    #: template built from a Dockerfile naming one of these comes back without
+    #: it and reports success — which is exactly what a capability report
+    #: exists to prevent.
+    forbidden_instructions = (
+        "VOLUME",
+        "EXPOSE",
+        "HEALTHCHECK",
+        "SHELL",
+        "ONBUILD",
+        "STOPSIGNAL",
+        "LABEL",
+        "MAINTAINER",
+    )
     dependency_formats = ("conda",)
     #: Firecracker microVMs: no GPU passthrough.
     gpu = False

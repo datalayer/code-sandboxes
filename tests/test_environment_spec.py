@@ -322,12 +322,44 @@ def test_an_invalid_field_outranks_something_unsupported() -> None:
     }
 
 
-def test_a_dockerfile_source_is_accepted_and_keeps_its_own_base() -> None:
-    # E3-03: the base is the `FROM` its uploaded Dockerfile names, so
-    # `spec.base` is not checked against the approved table (as for `image`).
+def a_dockerfile_document(content: str) -> dict[str, Any]:
     data = mutated("spec.build.source", "dockerfile")
+    data["spec"]["build"]["dockerfile"] = {"content": content}
+    return data
+
+
+def test_a_dockerfile_source_is_accepted_and_keeps_its_own_base() -> None:
+    # E3-03: the base is the `FROM` the Dockerfile names, so `spec.base` is
+    # not checked against the approved table (as for `image`).
+    data = a_dockerfile_document("FROM datalayer/python-cpu:2026.09\nRUN true\n")
     data["spec"]["base"]["ref"] = "python"
     assert _codes(data) == {}
+
+
+def test_a_dockerfile_source_without_a_dockerfile_is_refused() -> None:
+    """`source: dockerfile` with nowhere to read the file from is not a spec."""
+    data = mutated("spec.build.source", "dockerfile")
+    assert _codes(data) == {"spec.build.dockerfile": "DL_ENV_SPEC_INVALID"}
+
+
+def test_an_empty_dockerfile_is_refused() -> None:
+    assert _codes(a_dockerfile_document("   \n")) == {
+        "spec.build.dockerfile.content": "DL_ENV_SPEC_INVALID"
+    }
+
+
+def test_the_contract_refuses_a_dockerfile_at_validate_naming_the_line() -> None:
+    """A Dockerfile is somebody's file: "it was refused" is not a reason.
+
+    The refusals are the contract's own — an unapproved base, the host
+    network, a privileged build, a Docker socket mount — and they are made
+    here, before anything is queued, rather than partway through a build.
+    """
+    data = a_dockerfile_document("FROM ubuntu:22.04\nRUN --network=host apt-get update\n")
+    assert _codes(data) == {"spec.build.dockerfile.content": "DL_ENV_SPEC_INVALID"}
+    messages = [finding.message for finding in spec_findings(parse_environment(data))]
+    assert any("line 1" in message and "approved" in message for message in messages)
+    assert any("line 2" in message and "host network" in message for message in messages)
 
 
 # -- Dependency files (E3-01) --------------------------------------------------
