@@ -568,11 +568,27 @@ class TestBuildingASnapshot:
         resources = daytona.client.snapshot.create_calls[0].args[0].resources
         assert (resources.cpu, resources.memory, resources.disk) == (cpu, memory, disk)
 
-    def test_the_region_is_passed_through(self) -> None:
+    def test_the_region_sent_is_daytonas_own_not_this_platforms(self) -> None:
+        """`request.region` is Datalayer's — `r1` — and Daytona answered
+        "Region not found" for it on the first real build (2026-09-17).
+
+        The owner names a Daytona region in `compatibility.regions`; that is
+        the one that scopes the snapshot.
+        """
         daytona = FakeDaytonaModule()
-        a_builder(daytona=daytona).build(a_request(region="eu"))
+        a_builder(daytona=daytona).build(
+            a_request(region="r1", spec={"compatibility": {"regions": ["eu"]}})
+        )
         params = daytona.client.snapshot.create_calls[0].args[0]
         assert params.region_id == "eu"
+
+    def test_with_no_region_named_the_account_default_decides(self) -> None:
+        """The field is left out rather than filled with something Daytona
+        does not know — which is what every snapshot in a real account has."""
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request(region="r1"))
+        params = daytona.client.snapshot.create_calls[0].args[0]
+        assert params.region_id is None
 
     def test_the_snapshot_is_named_after_the_environment_and_version(self) -> None:
         daytona = FakeDaytonaModule()
