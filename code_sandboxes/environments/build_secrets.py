@@ -25,8 +25,6 @@ its ``BUILD_SECRETS_READ`` scope for the other side of this same contract.
 
 from __future__ import annotations
 
-import base64
-import json
 import os
 from typing import Any
 
@@ -267,41 +265,24 @@ def resolve_provider_credential(
 
 
 def _provider_secrets_of(value: Any, variant: str) -> dict[str, str]:
-    """The environment names a provider credential carries, from what IAM held.
+    """The environment names a provider credential carries, as IAM answered.
 
-    Accepts the value as JSON, and as base64 of that JSON, because the secret
-    routes say values arrive base64-encoded from their clients while nothing
-    enforces it — a credential that cannot be read is a build that cannot run,
-    so both shapes are read rather than one being assumed.
+    A mapping of names to values: IAM gathers them from the secrets the owner
+    already keeps, one per environment variable, and decodes them, so the
+    worker is not asked to know how a secret is stored.
     """
-    if not isinstance(value, str) or not value.strip():
+    if not isinstance(value, dict) or not value:
         raise EnvironmentsError(
             CAPABILITY_UNSUPPORTED,
-            f"IAM answered the {variant} credential with no usable value",
-            detail={"variant": variant},
-            retryable=False,
-        )
-    text = value.strip()
-    parsed: Any = None
-    for candidate in (text, _decoded(text)):
-        if not candidate:
-            continue
-        try:
-            parsed = json.loads(candidate)
-        except ValueError:
-            continue
-        break
-    if not isinstance(parsed, dict) or not parsed:
-        raise EnvironmentsError(
-            CAPABILITY_UNSUPPORTED,
-            f"The {variant} credential is not a JSON object of environment names; "
-            "a provider credential holds the names that provider's own SDK reads",
+            f"IAM answered the {variant} credential with no usable value; a "
+            "provider credential is the environment names that provider's own "
+            "SDK reads",
             detail={"variant": variant},
             retryable=False,
         )
     secrets = {
         str(name): str(item)
-        for name, item in parsed.items()
+        for name, item in value.items()
         if str(name).strip() and str(item).strip()
     }
     if not secrets:
@@ -312,11 +293,3 @@ def _provider_secrets_of(value: Any, variant: str) -> dict[str, str]:
             retryable=False,
         )
     return secrets
-
-
-def _decoded(text: str) -> str:
-    """`text` as base64, or empty when it is not."""
-    try:
-        return base64.b64decode(text, validate=True).decode("utf-8")
-    except Exception:
-        return ""
