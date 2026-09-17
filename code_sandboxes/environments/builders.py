@@ -141,6 +141,14 @@ class ArtifactReference(_Model):
     provider_account: str | None = None
     contract_version: str
     architecture: str = "linux/amd64"
+    #: The layers this build left behind that deleting the artifact does not
+    #: delete (E2-05, E2-09). Modal is the variant that has them: each chained
+    #: builder call leaves an image of its own with an id, and Modal offers no
+    #: call that lists an account's images — `ImageGetOrCreate`, `ImageFromId`,
+    #: `ImageGetByTag`, `ImageListTags`, `ImageTagRevisions`, `ImagePublish`
+    #: and `ImageDelete`, and nothing that enumerates — so an intermediate
+    #: nobody wrote down is an intermediate nobody can ever find again.
+    intermediates: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _immutable(self) -> ArtifactReference:

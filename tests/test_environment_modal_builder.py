@@ -237,20 +237,41 @@ class FakeStub:
     `def`-ined, the same way `test_environment_daytona_builder.py` handles
     the same clash for `DockerRegistryApi`."""
 
-    def __init__(self, *, delete_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        delete_error: Exception | None = None,
+        image_delete_errors: dict[str, Exception] | None = None,
+    ) -> None:
         self.secret_delete_calls: list[Any] = []
         self._delete_error = delete_error
         self.SecretDelete = self._secret_delete
+        #: Every image this stub was asked to delete, in order.
+        self.image_delete_calls: list[str] = []
+        self._image_delete_errors = dict(image_delete_errors or {})
+        self.ImageDelete = self._image_delete
 
     async def _secret_delete(self, request: Any) -> None:
         self.secret_delete_calls.append(request)
         if self._delete_error:
             raise self._delete_error
 
+    async def _image_delete(self, request: Any) -> None:
+        image_id = request.kwargs["image_id"]
+        self.image_delete_calls.append(image_id)
+        error = self._image_delete_errors.get(image_id)
+        if error:
+            raise error
+
 
 class FakeClient:
-    def __init__(self, *, delete_error: Exception | None = None) -> None:
-        self.stub = FakeStub(delete_error=delete_error)
+    def __init__(
+        self,
+        *,
+        delete_error: Exception | None = None,
+        image_delete_errors: dict[str, Exception] | None = None,
+    ) -> None:
+        self.stub = FakeStub(delete_error=delete_error, image_delete_errors=image_delete_errors)
 
 
 class FakeClientFactory:
@@ -338,9 +359,13 @@ class FakeApiPb2:
 
     def __init__(self) -> None:
         self.SecretDeleteRequest = self._secret_delete_request
+        self.ImageDeleteRequest = self._image_delete_request
 
     def _secret_delete_request(self, *, secret_id: str) -> Call:
         return Call("SecretDeleteRequest", (), {"secret_id": secret_id})
+
+    def _image_delete_request(self, *, image_id: str) -> Call:
+        return Call("ImageDeleteRequest", (), {"image_id": image_id})
 
 
 class FakeSynchronizer:
@@ -854,3 +879,124 @@ class TestReadingTheRegistry:
         with pytest.raises(EnvironmentsError) as raised:
             a_builder(modal=modal).exists(an_artifact(provider_artifact_id="im-abc123"))
         assert raised.value.code.code == PROVIDER_ERROR.code
+
+
+class _Layer:
+    """One image in a chain, as `_intermediates_of` reads it."""
+
+    def __init__(self, *, object_id: Any = None, deps: Any = None) -> None:
+        self.object_id = object_id
+        self.deps = deps if deps is not None else (lambda: ())
+
+
+def _builder_with_client(
+    *, image_delete_errors: dict[str, Exception] | None = None
+) -> tuple[Builder, FakeClient]:
+    """A builder whose client this test can read the delete calls back from."""
+    client = FakeClient(image_delete_errors=image_delete_errors)
+    modal = FakeModalModule()
+    modal.Client = type(
+        "_C",
+        (),
+        {
+            "from_credentials": staticmethod(lambda *_: client),
+            "from_env": staticmethod(lambda: client),
+        },
+    )()
+    return a_builder(modal=modal), client
+
+
+# -- the layers a build leaves behind -----------------------------------------------------------
+
+
+class TestTheIntermediateLayers:
+    """What `build` records and `delete` collects (E2-05, E2-09).
+
+    Each chained builder call leaves an image with an id of its own, and
+    deleting the artifact does not delete them. Modal offers no call that
+    lists an account's images — `ImageGetOrCreate`, `ImageFromId`,
+    `ImageGetByTag`, `ImageListTags`, `ImageTagRevisions`, `ImagePublish` and
+    `ImageDelete`, and nothing that enumerates — so an intermediate nobody
+    wrote down at build time can never be found again.
+    """
+
+    def test_every_layer_under_the_artifact_is_recorded_deepest_first(self) -> None:
+        from code_sandboxes.environments.adapters.modal import _intermediates_of
+
+        base = _Layer(object_id="im-base", deps=lambda: ())
+        middle = _Layer(object_id="im-middle", deps=lambda: (base,))
+        built = _Layer(object_id="im-built", deps=lambda: (middle,))
+        # The built image is the artifact, not an intermediate.
+        assert _intermediates_of(built) == ("im-base", "im-middle")
+
+    def test_a_layer_with_no_id_is_not_recorded(self) -> None:
+        """Only a hydrated layer has an id worth writing down."""
+        from code_sandboxes.environments.adapters.modal import _intermediates_of
+
+        unbuilt = _Layer(object_id=None, deps=lambda: ())
+        built = _Layer(object_id="im-built", deps=lambda: (unbuilt,))
+        assert _intermediates_of(built) == ()
+
+    def test_a_chain_that_cannot_be_walked_is_no_layers_not_a_failure(self) -> None:
+        """A layer list is never worth failing a build over."""
+        from code_sandboxes.environments.adapters.modal import _intermediates_of
+
+        def _explode() -> Any:
+            raise RuntimeError("the SDK changed shape")
+
+        assert _intermediates_of(_Layer(object_id="im-1", deps=_explode)) == ()
+
+    def test_delete_removes_the_intermediates_then_the_artifact(self) -> None:
+        """The artifact last: an intermediate is only reachable while the
+        record naming it survives."""
+        builder, client = _builder_with_client()
+        builder.delete(
+            an_artifact(
+                intermediates=("im-base", "im-middle"),
+                provider_artifact_id="im-built",
+                immutable_reference="im-built",
+            )
+        )
+        assert client.stub.image_delete_calls == ["im-base", "im-middle", "im-built"]
+
+    def test_a_layer_already_gone_is_success(self) -> None:
+        """A replay of a collection deletes the same set again with no harm."""
+        builder, client = _builder_with_client(
+            image_delete_errors={"im-base": FakeNotFoundError("gone")}
+        )
+        builder.delete(
+            an_artifact(
+                intermediates=("im-base", "im-middle"),
+                provider_artifact_id="im-built",
+                immutable_reference="im-built",
+            )
+        )
+        assert client.stub.image_delete_calls == ["im-base", "im-middle", "im-built"]
+
+    def test_a_layer_that_is_not_ours_is_stepped_over(self) -> None:
+        """Modal's own `debian_slim` answers PermissionDenied, live on
+        2026-09-17: an image somebody else owns was never ours to collect."""
+        builder, client = _builder_with_client(
+            image_delete_errors={
+                "im-base": RuntimeError("You don't have permission to modify Image 'im-base'")
+            }
+        )
+        builder.delete(
+            an_artifact(
+                intermediates=("im-base",),
+                provider_artifact_id="im-built",
+                immutable_reference="im-built",
+            )
+        )
+        assert client.stub.image_delete_calls == ["im-base", "im-built"]
+
+    def test_the_artifacts_own_refusal_is_raised(self) -> None:
+        """A layer's refusal is survivable; the artifact's is the whole point."""
+        builder, _ = _builder_with_client(
+            image_delete_errors={"im-built": RuntimeError("modal is away")}
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            builder.delete(
+                an_artifact(provider_artifact_id="im-built", immutable_reference="im-built")
+            )
+        assert raised.value.code is PROVIDER_ERROR
