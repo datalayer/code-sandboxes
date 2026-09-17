@@ -19,12 +19,13 @@ from __future__ import annotations
 
 import json
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
 from code_sandboxes.environments.attest import Attestor, attest_artifact, licenses_of, signature_tag
 from code_sandboxes.environments.builders import ArtifactReference
-from code_sandboxes.environments.errors import EnvironmentsError
+from code_sandboxes.environments.errors import PROVIDER_ERROR, EnvironmentsError
 from code_sandboxes.environments.policy import (
     DEFAULT_POLICY,
     Finding,
@@ -613,27 +614,25 @@ class TestAttestingAnArtifact:
         assert cosign.argv == [], "a blocked artifact must not be signed"
 
     def test_a_reference_that_is_not_a_digest_cannot_be_attested(self) -> None:
-        artifact = ArtifactReference(
-            variant="modal",
-            immutable_reference="im-1234567890",
-            provider_artifact_id="im-1234567890",
-            contract_version="sandbox-contract/v1",
-        )
+        """A `datalayer` artifact must be a digest in this platform's registry.
+
+        `attest_artifact` takes `artifact: Any`, so nothing guarantees every
+        caller went through the model validator that would have refused this.
+        """
+        artifact = SimpleNamespace(variant="datalayer", immutable_reference="im-1234567890")
         with pytest.raises(EnvironmentsError) as raised:
             attest_artifact(artifact=artifact, attestor=an_attestor())
         assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
 
     def test_a_malformed_digest_cannot_be_attested_either(self) -> None:
         """`sha256:bad` starts with `sha256:` too: only a whole one is
-        accepted (found on PR #27's Copilot review). `e2b` rather than
-        `datalayer`, whose own model validator already refuses a malformed
-        digest before this function ever sees it — `attest_artifact` takes
-        `artifact: Any`, so nothing guarantees every caller went through it."""
-        artifact = ArtifactReference(
-            variant="e2b",
+        accepted (found on PR #27's Copilot review). Asked of `datalayer`,
+        since that is the variant this check is for — `attest_artifact` takes
+        `artifact: Any`, so nothing guarantees every caller went through the
+        model validator that would have refused it."""
+        artifact = SimpleNamespace(
+            variant="datalayer",
             immutable_reference=f"{REGISTRY}/{REPOSITORY}@sha256:bad",
-            provider_artifact_id="sha256:bad",
-            contract_version="sandbox-contract/v1",
         )
         with pytest.raises(EnvironmentsError) as raised:
             attest_artifact(artifact=artifact, attestor=an_attestor())
@@ -749,3 +748,43 @@ class TestLicencesFromTheSbom:
         """Never a reason to fail a build: a licence list is worth having, not dying for."""
         for document in (None, {}, {"packages": None}, {"components": [1, 2]}, "spdx"):
             assert licenses_of(document) == []
+
+
+class TestWhatIsAttestedAndWhatIsNot:
+    """D-11 is about the Datalayer artifact, not every artifact.
+
+    It lives in this platform's registry: the scanner reads it there, cosign
+    signs that digest, and the Operator refuses to start what is unsigned. A
+    managed artifact is none of those things — it lives in the owner's own
+    provider account (D-8), named the way that provider names it.
+    """
+
+    def _artifact(self, variant: str, reference: str):
+        return SimpleNamespace(variant=variant, immutable_reference=reference)
+
+    def test_a_daytona_snapshot_is_not_attested(self) -> None:
+        """Its reference is a uuid, and attesting it anyway failed the first
+        real Daytona build *after* the snapshot was already built
+        (2026-09-17)."""
+        answer = attest_artifact(
+            artifact=self._artifact("daytona", "51d10ab0-d98d-4117-bdb5-918e98646c92"),
+            size_bytes=1234,
+        )
+        assert answer["scan_summary"] == {}
+        assert answer["signature_ref"] == ""
+        assert answer["signed_now"] is False
+        # What the provider told us is still recorded.
+        assert answer["size_bytes"] == 1234
+
+    def test_an_e2b_build_id_and_a_modal_image_id_are_not_either(self) -> None:
+        for variant, reference in (("e2b", "bld-123"), ("modal", "im-abc123")):
+            answer = attest_artifact(artifact=self._artifact(variant, reference))
+            assert answer["signed_now"] is False, variant
+            assert answer["scan_summary"] == {}, variant
+
+    def test_a_datalayer_artifact_that_is_not_a_digest_still_fails(self) -> None:
+        """The check that matters is kept where it means something."""
+        with pytest.raises(EnvironmentsError) as raised:
+            attest_artifact(artifact=self._artifact("datalayer", "not-a-digest"))
+        assert raised.value.code is PROVIDER_ERROR
+        assert "cannot be attested" in str(raised.value)

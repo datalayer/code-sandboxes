@@ -675,14 +675,43 @@ def attest_artifact(
     answers the mapping the workflow stores: the scan's decision, the
     signature, the SBOM and provenance references, and the size.
     """
+    variant = str(getattr(artifact, "variant", "") or "")
     reference = str(getattr(artifact, "immutable_reference", "") or "")
+    if variant and variant != "datalayer":
+        # D-11 is about the Datalayer artifact: it lives in this platform's
+        # registry, the scanner reads it there, cosign signs that digest, and
+        # the Operator refuses to start what is unsigned. A managed artifact
+        # is none of those things — it lives in the owner's own provider
+        # account (D-8) and is referenced the way that provider names it: a
+        # Daytona snapshot uuid, an E2B build id, a Modal `im-…`. There is no
+        # digest in a repository to scan or sign, and no Operator starting it.
+        #
+        # Attesting one anyway is what the first real Daytona build did, and
+        # it failed *after* the snapshot was built — the work done, the
+        # artifact live at the provider, and the build recorded as failed
+        # (2026-09-17).
+        #
+        # Publishing is not weakened by this: E2-15's gate requires the
+        # **Datalayer** artifact to have passed its scan, and that one is
+        # still attested here.
+        if log:
+            log(f"{variant} artifacts are not attested: {reference} is not a digest in a registry")
+        return {
+            "scan_summary": {},
+            "sbom_ref": "",
+            "provenance_ref": "",
+            "signature_ref": "",
+            "size_bytes": size_bytes,
+            "signed_now": False,
+            "licenses": [],
+        }
     registry, _, rest = reference.partition("/")
     repository, _, digest = rest.partition("@")
     if not (registry and repository and _DIGEST.match(digest)):
         raise EnvironmentsError(
             PROVIDER_ERROR,
             f"`{reference}` is not a digest in a repository, so it cannot be attested",
-            detail={"reference": reference},
+            detail={"reference": reference, "variant": variant},
         )
     use = attestor or Attestor(
         key=str(getattr(credential, "signing_key", "") or ""),
