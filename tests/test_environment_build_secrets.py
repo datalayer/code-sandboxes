@@ -11,6 +11,9 @@ step that names it runs, never earlier and never logged.
 
 from __future__ import annotations
 
+import base64
+import json
+
 import httpx
 import pytest
 
@@ -18,8 +21,13 @@ from code_sandboxes.environments.build_secrets import (
     IAM_API_KEY_VARIABLE,
     IAM_URL_VARIABLE,
     resolve_build_secret,
+    resolve_provider_credential,
 )
-from code_sandboxes.environments.errors import BUILD_SECRET_UNAVAILABLE, EnvironmentsError
+from code_sandboxes.environments.errors import (
+    BUILD_SECRET_UNAVAILABLE,
+    CAPABILITY_UNSUPPORTED,
+    EnvironmentsError,
+)
 from code_sandboxes.environments.spec import BuildSecret
 
 SECRET = BuildSecret(id="dlsec_01J9BUILDSECRET0000000000", name="PIP_TOKEN")
@@ -215,3 +223,117 @@ def test_the_environment_variables_are_read_when_no_argument_is_given(monkeypatc
 
     value = resolve_build_secret(SECRET, owner_uid=OWNER, transport=httpx.MockTransport(handler))
     assert value == "tok-1"
+
+
+# -- the owner's own provider credential (E2-01, D-8) -------------------------------------------
+
+
+def _credential_transport(handler) -> httpx.MockTransport:
+    return httpx.MockTransport(handler)
+
+
+def test_the_credential_is_asked_for_by_variant_and_owner() -> None:
+    """A build knows whose it is and which variant it is building, never a secret id."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={"provider": "daytona", "value": json.dumps({"DAYTONA_API_KEY": "k"})},
+        )
+
+    secrets = resolve_provider_credential(
+        "daytona",
+        owner_uid="owner-1",
+        iam_url="https://iam.example",
+        api_key="worker-key",
+        transport=_credential_transport(handler),
+    )
+    assert secrets == {"DAYTONA_API_KEY": "k"}
+    (request,) = seen
+    assert request.url.path == "/api/iam/v1/secrets/provider/daytona/value"
+    assert request.url.params["owner_uid"] == "owner-1"
+    # The worker's own key, never a person's token.
+    assert request.headers["X-API-Key"] == "worker-key"
+    assert "authorization" not in {name.lower() for name in request.headers}
+
+
+def test_a_base64_value_is_read_too() -> None:
+    """The secret routes say clients encode values; nothing enforces it."""
+    raw = json.dumps({"E2B_API_KEY": "k", "E2B_TEAM_ID": "team"})
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"value": base64.b64encode(raw.encode()).decode()},
+        )
+
+    assert resolve_provider_credential(
+        "e2b",
+        owner_uid="owner-1",
+        iam_url="https://iam.example",
+        api_key="k",
+        transport=_credential_transport(handler),
+    ) == {"E2B_API_KEY": "k", "E2B_TEAM_ID": "team"}
+
+
+def test_an_owner_with_no_credential_is_refused_by_name_and_not_retried() -> None:
+    """Never a fallback to whatever keys the worker holds: that is the one
+    thing D-8 exists to prevent."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "No credential for that provider"})
+
+    with pytest.raises(EnvironmentsError) as raised:
+        resolve_provider_credential(
+            "modal",
+            owner_uid="owner-1",
+            iam_url="https://iam.example",
+            api_key="k",
+            transport=_credential_transport(handler),
+        )
+    assert raised.value.code is CAPABILITY_UNSUPPORTED
+    assert raised.value.retryable is False
+    assert "their own account" in str(raised.value)
+
+
+def test_iam_being_away_is_retryable() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"detail": "away"})
+
+    with pytest.raises(EnvironmentsError) as raised:
+        resolve_provider_credential(
+            "daytona",
+            owner_uid="owner-1",
+            iam_url="https://iam.example",
+            api_key="k",
+            transport=_credential_transport(handler),
+        )
+    assert raised.value.retryable is True
+
+
+def test_datalayer_is_not_a_variant_a_credential_is_kept_for() -> None:
+    """The platform's own builder uses the platform's own registry."""
+    with pytest.raises(EnvironmentsError) as raised:
+        resolve_provider_credential(
+            "datalayer", owner_uid="owner-1", iam_url="https://iam.example", api_key="k"
+        )
+    assert raised.value.code is CAPABILITY_UNSUPPORTED
+
+
+def test_a_credential_that_names_nothing_is_refused() -> None:
+    for value in ("{}", "not json", '"a string"', ""):
+
+        def handler(_request: httpx.Request, value: str = value) -> httpx.Response:
+            return httpx.Response(200, json={"value": value})
+
+        with pytest.raises(EnvironmentsError) as raised:
+            resolve_provider_credential(
+                "daytona",
+                owner_uid="owner-1",
+                iam_url="https://iam.example",
+                api_key="k",
+                transport=_credential_transport(handler),
+            )
+        assert raised.value.code is CAPABILITY_UNSUPPORTED, value
