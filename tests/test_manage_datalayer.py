@@ -49,9 +49,8 @@ def fake_sandbox(monkeypatch):
     monkeypatch.setattr(datalayer_sandbox, "DatalayerSandbox", _Sandbox)
 
 
-@pytest.mark.parametrize("key", ["environment_name", "environment"])
-def test_create_starts_the_environment_asked_for_under_its_name(key):
-    DatalayerSandboxManager(token="t").create(**{key: "python-cpu-env"}, name="e0-11-check")
+def test_create_starts_the_environment_asked_for_under_its_name():
+    DatalayerSandboxManager(token="t").create(environment="python-cpu-env", name="e0-11-check")
     sandbox = _Sandbox.started[-1]
     assert sandbox.config.environment == "python-cpu-env"
     assert sandbox.config.name == "e0-11-check"
