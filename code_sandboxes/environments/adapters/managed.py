@@ -24,6 +24,7 @@ An SDK imported at module scope would turn `validate` into a 500.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Callable
 
 from ..builders import (
@@ -261,7 +262,23 @@ class ManagedBuilder:
     def inspect(self, artifact: ArtifactReference) -> ArtifactMetadata:
         raise self._not_built("inspect an artifact")
 
-    def smoke_test(self, artifact: ArtifactReference) -> ValidationResult:
+    def smoke_test(
+        self,
+        artifact: ArtifactReference,
+        *,
+        environment: Any = None,
+        lock_text: str | None = None,
+        secret_values: Sequence[str] = (),
+    ) -> ValidationResult:
+        """Launch the artifact and run Appendix B's core tier in it (E2-03/04/05).
+
+        `environment` and `lock_text` are what the core tier needs and an
+        artifact does not carry: the Python version the spec asks for and the
+        packages its lock pins. The caller has both — it read them to build —
+        and passes them rather than making every adapter fetch them again.
+        They are keyword-only and optional so a caller that has neither still
+        type-checks, and an adapter that needs them says so itself.
+        """
         raise self._not_built("smoke-test an artifact")
 
     def resolve(self, version_ref: str) -> ArtifactReference:

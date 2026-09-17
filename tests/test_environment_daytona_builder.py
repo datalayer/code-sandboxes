@@ -833,3 +833,99 @@ class TestReadingTheRegistry:
         builder.build(a_request())
         builder.exists(an_artifact(provider_artifact_id="snp-999"))
         assert len(daytona.daytona_calls) == 1
+
+
+class TestSmokeTestingASnapshot:
+    """E2-04's own `Done when`: a sandbox launched from its id passes the core tier.
+
+    It refused through `ManagedBuilder` until 2026-09-17, and the build
+    workflow calls this step — so no Daytona build could reach `succeeded`:
+    the snapshot was built and live at the provider, and the build was
+    recorded failed.
+    """
+
+    def _environment(self):
+        return parse_environment(a_request().environment.model_dump(by_alias=True))
+
+    def test_it_launches_by_id_and_runs_the_core_tier(self, monkeypatch) -> None:
+        """A Daytona sandbox record keeps the snapshot's *name*, and a name is
+        republished, so only the id says which artifact ran (E0-04)."""
+        made: dict = {}
+        ran: dict = {}
+
+        class FakeSandbox:
+            def __init__(self, **kwargs):
+                made.update(kwargs)
+                self.events: list[str] = []
+
+            def start(self):
+                self.events.append("start")
+
+            def stop(self):
+                self.events.append("stop")
+
+        builder = a_builder()
+        monkeypatch.setattr(
+            "code_sandboxes.daytona_sandbox.DaytonaSandbox", FakeSandbox, raising=False
+        )
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_core_tier",
+            lambda sandbox, **kwargs: ran.update(kwargs) or "the-result",
+        )
+
+        answer = builder.smoke_test(
+            an_artifact(
+                variant="daytona",
+                immutable_reference="snap-1",
+                provider_artifact_id="snap-1",
+            ),
+            environment=self._environment(),
+            lock_text="",
+        )
+        assert answer == "the-result"
+        assert made["snapshot"] == "snap-1"
+        # A smoke test that leaves a sandbox running bills the owner for a check.
+        assert made["delete_on_stop"] is True
+        assert "restart" in ran and ran["python_version"]
+
+    def test_the_sandbox_is_deleted_even_when_the_tier_raises(self, monkeypatch) -> None:
+        events: list[str] = []
+
+        class FakeSandbox:
+            def __init__(self, **_kwargs):
+                pass
+
+            def start(self):
+                events.append("start")
+
+            def stop(self):
+                events.append("stop")
+
+        monkeypatch.setattr(
+            "code_sandboxes.daytona_sandbox.DaytonaSandbox", FakeSandbox, raising=False
+        )
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_core_tier",
+            lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("the tier blew up")),
+        )
+        with pytest.raises(EnvironmentsError):
+            a_builder().smoke_test(
+                an_artifact(
+                    variant="daytona", immutable_reference="snap-1", provider_artifact_id="snap-1"
+                ),
+                environment=self._environment(),
+                lock_text="",
+            )
+        assert events == ["start", "stop"]
+
+    def test_without_a_spec_it_says_what_it_needs(self) -> None:
+        """The core tier asks for the Python version and the pinned packages,
+        and an artifact carries neither."""
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder().smoke_test(
+                an_artifact(
+                    variant="daytona", immutable_reference="snap-1", provider_artifact_id="snap-1"
+                )
+            )
+        assert raised.value.code is CAPABILITY_UNSUPPORTED
+        assert "needs the version's spec" in str(raised.value)

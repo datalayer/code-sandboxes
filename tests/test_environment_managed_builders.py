@@ -379,12 +379,13 @@ class TestTheHalfThatIsNotBuiltYet:
             assert raised.value.detail["operation"], f"e2b.{operation}"
 
     def test_daytona_still_refuses_what_e2_04_did_not_build(self) -> None:
-        """`build`/`inspect`/`exists` are E2-04's; `smoke_test`, `resolve` and
-        `delete` are not — see test_environment_daytona_builder.py for what
-        is built."""
+        """`build`, `inspect`, `exists` and now `smoke_test` are E2-04's —
+        the last of them because this box's own `Done when` asks for "a
+        sandbox launched from its id passes the core tier", and until it was
+        built no Daytona build could reach `succeeded`. `resolve` and `delete`
+        are still not built — see test_environment_daytona_builder.py."""
         builder = get_builder("daytona")
         calls = {
-            "smoke_test": lambda: builder.smoke_test(None),  # type: ignore[arg-type]
             "resolve": lambda: builder.resolve("geo@1"),
             "delete": lambda: builder.delete(None),  # type: ignore[arg-type]
         }
