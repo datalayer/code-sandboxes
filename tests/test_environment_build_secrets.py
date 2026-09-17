@@ -11,9 +11,6 @@ step that names it runs, never earlier and never logged.
 
 from __future__ import annotations
 
-import base64
-import json
-
 import httpx
 import pytest
 
@@ -240,7 +237,7 @@ def test_the_credential_is_asked_for_by_variant_and_owner() -> None:
         seen.append(request)
         return httpx.Response(
             200,
-            json={"provider": "daytona", "value": json.dumps({"DAYTONA_API_KEY": "k"})},
+            json={"provider": "daytona", "value": {"DAYTONA_API_KEY": "k"}},
         )
 
     secrets = resolve_provider_credential(
@@ -259,15 +256,12 @@ def test_the_credential_is_asked_for_by_variant_and_owner() -> None:
     assert "authorization" not in {name.lower() for name in request.headers}
 
 
-def test_a_base64_value_is_read_too() -> None:
-    """The secret routes say clients encode values; nothing enforces it."""
-    raw = json.dumps({"E2B_API_KEY": "k", "E2B_TEAM_ID": "team"})
+def test_the_account_names_come_through_beside_the_key() -> None:
+    """`environments/accounts.py` fingerprints the account from these, so a
+    credential is more than the key that opens it."""
 
     def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={"value": base64.b64encode(raw.encode()).decode()},
-        )
+        return httpx.Response(200, json={"value": {"E2B_API_KEY": "k", "E2B_TEAM_ID": "team"}})
 
     assert resolve_provider_credential(
         "e2b",
@@ -323,9 +317,9 @@ def test_datalayer_is_not_a_variant_a_credential_is_kept_for() -> None:
 
 
 def test_a_credential_that_names_nothing_is_refused() -> None:
-    for value in ("{}", "not json", '"a string"', ""):
+    for value in ({}, "a string", None, {"": "v"}):
 
-        def handler(_request: httpx.Request, value: str = value) -> httpx.Response:
+        def handler(_request: httpx.Request, value=value) -> httpx.Response:
             return httpx.Response(200, json={"value": value})
 
         with pytest.raises(EnvironmentsError) as raised:
