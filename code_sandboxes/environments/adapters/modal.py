@@ -230,8 +230,7 @@ def _install_packages(image: Any, lock_text: str) -> Any:
         # Packages install as root: every Modal build step already runs as
         # root regardless of any `USER` line (see the module docstring), so
         # this is stating what is already true rather than asking for it.
-        "uv pip sync --system --require-hashes "
-        f"--find-links {WHEELHOUSE_IMAGE_PATH} {_LOCK_PATH}",
+        f"uv pip sync --system --require-hashes --find-links {WHEELHOUSE_IMAGE_PATH} {_LOCK_PATH}",
     )
 
 
@@ -243,6 +242,40 @@ def _post_install(
         named = [step_secrets[s.id] for s in declared if command_names_secret(command, s)]
         image = image.run_commands(command, secrets=named) if named else image.run_commands(command)
     return image
+
+
+def _intermediates_of(built: Any) -> tuple[str, ...]:
+    """Every layer under a built image, by id, deepest first (E2-05, E2-09).
+
+    Each chained builder call leaves an image of its own, and deleting the
+    artifact does not delete them. Modal offers no call that lists an
+    account's images, so an intermediate nobody wrote down at build time can
+    never be found again — which is why this is recorded rather than
+    discovered. Confirmed live on 2026-09-17: a three-call chain built through
+    `Image.build` hydrates an `object_id` on every image in `deps()`, not only
+    on the last.
+
+    The built image itself is not an intermediate: it is the artifact.
+    """
+    found: list[str] = []
+    seen: set[int] = set()
+
+    def walk(image: Any) -> None:
+        if id(image) in seen:
+            return
+        seen.add(id(image))
+        for dependency in getattr(image, "deps", lambda: ())():
+            if hasattr(dependency, "deps"):
+                walk(dependency)
+        object_id = getattr(image, "object_id", None)
+        if object_id and image is not built:
+            found.append(str(object_id))
+
+    try:
+        walk(built)
+    except Exception:
+        return ()
+    return tuple(dict.fromkeys(found))
 
 
 class Builder(ManagedBuilder):
@@ -479,6 +512,7 @@ class Builder(ManagedBuilder):
             mutable_alias=name,
             provider_account=provider_account(self.variant, self._provider_secrets()) or None,
             contract_version=spec.contract or SANDBOX_CONTRACT_V1.version,
+            intermediates=_intermediates_of(built),
         )
 
     def _resolved_secrets(self, request: BuildRequest) -> tuple[list[BuildSecret], dict[str, str]]:
@@ -630,6 +664,56 @@ class Builder(ManagedBuilder):
         except Exception as error:
             raise self._provider_error("ask whether the image exists", error) from error
         return True
+
+    def delete(self, artifact: ArtifactReference) -> None:
+        """Delete the image, and every intermediate layer this build recorded (E2-05, E2-09).
+
+        Deleting the artifact does not delete the layers under it, and Modal
+        offers no call that lists an account's images, so what is removed is
+        what `build` wrote down — an intermediate nobody recorded can never be
+        found again.
+
+        Two answers are outcomes rather than failures, both found live on
+        2026-09-17:
+
+        * **Already gone** is success. A replay of a collection must delete the
+          same set again with no harm, the same way the Datalayer collector
+          treats an artifact that is not there.
+        * **Not ours to delete.** The bottom of a chain can be an image the
+          workspace does not own — Modal's own `debian_slim` answers
+          `PermissionDenied` — and an image somebody else owns was never this
+          artifact's to collect. It is logged and stepped over, not raised.
+        """
+        sdk = self._modal_sdk()
+        client = self._client(sdk)
+        synchronizer, api_pb2 = self._modal_internals()
+
+        async def _delete(image_id: str) -> None:
+            await client.stub.ImageDelete(api_pb2.ImageDeleteRequest(image_id=image_id))
+
+        # The artifact last: an intermediate is only reachable while the
+        # record naming it survives, so a half-done collection that has
+        # dropped the image would strand them.
+        for image_id in (*artifact.intermediates, artifact.provider_artifact_id):
+            if not image_id:
+                continue
+            try:
+                # A bare coroutine on Modal's stub silently does nothing, so
+                # this runs on the SDK's own loop — see `_delete_secret`.
+                synchronizer.wrap(_delete)(image_id)
+            except sdk.exception.NotFoundError:
+                continue
+            except Exception as error:
+                if "permission" in str(error).lower():
+                    self._log(
+                        f"The Modal image {image_id} is not this account's to delete: {error}"
+                    )
+                    continue
+                if image_id == artifact.provider_artifact_id:
+                    raise self._provider_error("delete the image", error) from error
+                # One layer's refusal does not strand the rest, nor the
+                # artifact this was called to collect.
+                self._log(f"The Modal intermediate {image_id} could not be deleted: {error}")
 
     def _provider_error(self, what: str, error: BaseException) -> EnvironmentsError:
         return EnvironmentsError(
