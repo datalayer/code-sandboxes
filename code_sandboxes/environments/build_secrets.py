@@ -318,5 +318,5 @@ def _decoded(text: str) -> str:
     """`text` as base64, or empty when it is not."""
     try:
         return base64.b64decode(text, validate=True).decode("utf-8")
-    except Exception:  # noqa: BLE001 - not base64 is an answer, not a failure
+    except Exception:
         return ""
