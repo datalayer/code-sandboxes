@@ -106,6 +106,76 @@ def signature_tag(digest: str) -> str:
     return text.replace(":", "-", 1) + ".sig"
 
 
+#: Where a CycloneDX component keeps its licence, in the order they are read.
+_CYCLONEDX_LICENSE_KEYS = ("id", "name")
+#: Where an SPDX package keeps its licence. `licenseConcluded` is what the
+#: tool decided; `licenseDeclared` is what the package claimed. BuildKit
+#: writes SPDX, so this is the one that matters in practice.
+_SPDX_LICENSE_KEYS = ("licenseConcluded", "licenseDeclared")
+#: What SPDX writes when it could not tell, which is not a licence.
+_SPDX_UNKNOWN = frozenset({"NOASSERTION", "NONE", ""})
+
+
+def _spdx_licenses(document: Mapping[str, Any]) -> set[str]:
+    """What an SPDX document names, which is what BuildKit's `attest:sbom=` writes.
+
+    `licenseConcluded` is what the tool decided and `licenseDeclared` what the
+    package claimed, so the concluded one is read first and the declared one
+    only when it said nothing.
+    """
+    found: set[str] = set()
+    for package in document.get("packages") or ():
+        if not isinstance(package, Mapping):
+            continue
+        for key in _SPDX_LICENSE_KEYS:
+            value = str(package.get(key) or "").strip()
+            if value and value.upper() not in _SPDX_UNKNOWN:
+                found.add(value)
+                break
+    return found
+
+
+def _cyclonedx_licenses(document: Mapping[str, Any]) -> set[str]:
+    """What a CycloneDX document names, by id, by name, or as an expression."""
+    found: set[str] = set()
+    for component in document.get("components") or ():
+        if not isinstance(component, Mapping):
+            continue
+        for entry in component.get("licenses") or ():
+            if not isinstance(entry, Mapping):
+                continue
+            licence = entry.get("license")
+            if isinstance(licence, Mapping):
+                for key in _CYCLONEDX_LICENSE_KEYS:
+                    value = str(licence.get(key) or "").strip()
+                    if value:
+                        found.add(value)
+                        break
+            expression = str(entry.get("expression") or "").strip()
+            if expression:
+                found.add(expression)
+    return found
+
+
+def licenses_of(document: Any) -> list[str]:
+    """Every licence an SBOM names, deduplicated and sorted.
+
+    Reads both shapes the ecosystem writes: SPDX, which is what BuildKit's
+    `attest:sbom=` produces, and CycloneDX. A document in neither shape, or one
+    that names nothing, answers an empty list rather than raising: a
+    publication's licence list is worth having and never worth failing a build
+    over.
+
+    This is what a published version's snapshot carries (D-12, E2-16). Until
+    it did, `licenses` came from the scan summary — and the registry's scanner
+    reports vulnerabilities, not licences, so every publication froze an empty
+    list beside an SBOM reference.
+    """
+    if not isinstance(document, Mapping):
+        return []
+    return sorted(_spdx_licenses(document) | _cyclonedx_licenses(document))
+
+
 @dataclass(frozen=True)
 class AttestationResult:
     """What the workflow stores about an artifact once both gates have passed."""
@@ -117,6 +187,8 @@ class AttestationResult:
     size_bytes: int | None = None
     signed_now: bool = True
     """False when a replay found the signature that was already there."""
+    licenses: tuple[str, ...] = ()
+    """What the SBOM named, frozen onto the artifact for a publication to carry."""
 
     def body(self) -> dict[str, Any]:
         """The mapping `activities_environments.attest` answers."""
@@ -127,6 +199,7 @@ class AttestationResult:
             "signature_ref": self.signature_ref,
             "size_bytes": self.size_bytes,
             "signed_now": self.signed_now,
+            "licenses": list(self.licenses),
         }
 
 
@@ -515,8 +588,14 @@ class Attestor:
         size_bytes: int | None = None,
         sbom_ref: str = "",
         provenance_ref: str = "",
+        sbom: Any = None,
     ) -> AttestationResult:
-        """Scan, then sign: the order the Operator's check depends on (D-11)."""
+        """Scan, then sign: the order the Operator's check depends on (D-11).
+
+        `sbom`, when the caller has the document, is read for the licences a
+        publication carries; the registry's scanner reports vulnerabilities
+        and never licences, so there is nowhere else they come from.
+        """
         self.can_sign()
         decision = self.scan(repository=repository, digest=digest)
         if not decision.passed:
@@ -540,6 +619,7 @@ class Attestor:
             if size_bytes is not None
             else self.size_of(repository=repository, digest=digest),
             signed_now=signed_now,
+            licenses=tuple(licenses_of(sbom)),
         )
 
     def size_of(self, *, repository: str, digest: str) -> int | None:
