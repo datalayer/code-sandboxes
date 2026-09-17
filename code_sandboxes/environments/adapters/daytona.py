@@ -424,6 +424,11 @@ class Builder(ManagedBuilder):
                     self._log(line)
 
                 resources = self._resources(sdk, request.size_class)
+                # A snapshot is region-scoped, and the region that scopes it is
+                # Daytona's, not this platform's. `validate` already refuses
+                # more than one, so the first is the only one.
+                declared = list(request.environment.spec.compatibility.regions)
+                region = declared[0] if declared else None
                 try:
                     snapshot = client.snapshot.create(
                         sdk.CreateSnapshotParams(
@@ -431,7 +436,15 @@ class Builder(ManagedBuilder):
                             image=image,
                             resources=resources,
                             entrypoint=_CONTRACT_ENTRYPOINT,
-                            region_id=request.region,
+                            # Only a region Daytona knows. `request.region` is
+                            # *Datalayer's* — `r1` — and sending it answered
+                            # "Region not found" on the first real Daytona
+                            # build (2026-09-17). The owner names a Daytona
+                            # region in `compatibility.regions`; with none,
+                            # the field is left out and the account's own
+                            # default decides, which is what every snapshot
+                            # in the owner's account already has.
+                            **({"region_id": region} if region else {}),
                         ),
                         on_logs=on_logs,
                         timeout=self.max_build_seconds,
