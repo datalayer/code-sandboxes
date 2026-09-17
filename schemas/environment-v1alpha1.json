@@ -95,6 +95,17 @@
           ],
           "default": null
         },
+        "dockerfile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DockerfileSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "image": {
           "anyOf": [
             {
@@ -217,6 +228,19 @@
         }
       },
       "title": "DependencyFileSpec",
+      "type": "object"
+    },
+    "DockerfileSpec": {
+      "additionalProperties": false,
+      "description": "The Dockerfile a `dockerfile`-sourced version builds from (E3-03).\n\nInline, the way ``DependencyFileSpec`` carries a ``requirements.txt``: a\nfile the author brings lives in the spec, so ``check_dockerfile`` and\nevery variant's capability report can read it **before** anything is\nqueued \u2014 which is the whole point of refusing an instruction a variant\ndoes not implement at ``validate`` rather than halfway through a build.\n\nThe build *context* \u2014 the extra files a ``COPY`` needs \u2014 is the separate\nupload E3-03 describes, bounded and checked by ``validate_build_context``.\nA Dockerfile with no context is the common case and needs no upload at\nall.",
+      "properties": {
+        "content": {
+          "default": "",
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "title": "DockerfileSpec",
       "type": "object"
     },
     "EnvironmentSpec": {

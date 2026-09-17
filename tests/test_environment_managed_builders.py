@@ -55,11 +55,7 @@ def environment(**spec: Any) -> Environment:
 #: A `dependencyFile` conda source: an `environment.yml` a managed variant
 #: builds with `micromamba` (E3-02).
 CONDA_ENVIRONMENT_YML = (
-    "name: geo\n"
-    "channels: [conda-forge]\n"
-    "dependencies:\n"
-    "  - python=3.13\n"
-    "  - gdal\n"
+    "name: geo\nchannels: [conda-forge]\ndependencies:\n  - python=3.13\n  - gdal\n"
 )
 
 
@@ -102,15 +98,33 @@ class TestTheCapabilitySets:
         assert get_builder("modal").capabilities().supports_gpu is True
         assert get_builder("daytona").capabilities().supports_gpu is True
 
-    def test_only_modal_forbids_instructions_its_builder_never_implemented(self) -> None:
-        """Modal implements its own Dockerfile builder; the others hand a
-        Dockerfile to BuildKit, which implements all of them."""
+    def test_each_variant_forbids_what_its_own_builder_will_not_honour(self) -> None:
+        """Modal implements its own Dockerfile builder, and E2B parses a
+        Dockerfile into Template SDK calls; Daytona hands the text to a real
+        Docker builder, which implements all of them.
+
+        E2B's list is read from its SDK (E3-03, 2026-09-17):
+        `e2b.template.dockerfile_parser` branches on FROM, RUN, COPY, ADD,
+        WORKDIR, USER, ENV, ARG, CMD and ENTRYPOINT, and for anything else
+        **prints `Unsupported instruction` and carries on** — so a template
+        built from a Dockerfile naming one of these comes back without it and
+        reports success. That is the case a capability report exists for.
+        """
         assert set(get_builder("modal").capabilities().forbidden_instructions) == {
             "ONBUILD",
             "STOPSIGNAL",
             "VOLUME",
         }
-        assert get_builder("e2b").capabilities().forbidden_instructions == ()
+        assert set(get_builder("e2b").capabilities().forbidden_instructions) == {
+            "VOLUME",
+            "EXPOSE",
+            "HEALTHCHECK",
+            "SHELL",
+            "ONBUILD",
+            "STOPSIGNAL",
+            "LABEL",
+            "MAINTAINER",
+        }
         assert get_builder("daytona").capabilities().forbidden_instructions == ()
 
     def test_each_one_bounds_how_long_a_build_may_take(self) -> None:
@@ -120,10 +134,13 @@ class TestTheCapabilitySets:
             seconds = get_builder(variant).capabilities().max_build_seconds
             assert seconds and 0 < seconds <= 60 * 60, variant
 
-    def test_this_phase_builds_a_package_list_and_a_conda_file(self) -> None:
+    def test_this_phase_builds_a_package_list_a_conda_file_and_a_dockerfile(self) -> None:
+        """All three take a Dockerfile (E3-03), each through its own door:
+        E2B parses one into Template SDK calls, Daytona hands the text to a
+        real Docker builder, Modal builds it with its own frontend."""
         for variant in MANAGED:
             sources = get_builder(variant).capabilities().build_sources
-            assert sources == ("packages", "dependencyFile"), variant
+            assert sources == ("packages", "dependencyFile", "dockerfile"), variant
 
 
 # -- what each one refuses ------------------------------------------------------
@@ -230,10 +247,29 @@ class TestWhatIsSaidBeforeAnythingIsQueued:
 
     def test_a_source_this_phase_does_not_build_is_refused_by_name(self) -> None:
         for variant in MANAGED:
-            report = get_builder(variant).validate(environment(build={"source": "dockerfile"}))
+            report = get_builder(variant).validate(environment(build={"source": "image"}))
             assert report.supported is False, variant
-            assert "`dockerfile` is not built for" in messages(report)
-            assert "it builds packages, dependencyFile" in messages(report)
+            assert "`image` is not built for" in messages(report)
+            assert "it builds packages, dependencyFile, dockerfile" in messages(report)
+
+    def test_an_instruction_a_variant_would_drop_is_refused_with_its_line(self) -> None:
+        """The case this exists for: E2B's parser prints `Unsupported
+        instruction` and carries on, so without this the template comes back
+        missing what the Dockerfile asked for and the build reports success."""
+        dockerfile = "FROM datalayer/python-cpu:2026.09\nRUN true\nVOLUME /data\n"
+        report = get_builder("e2b").validate(
+            environment(build={"source": "dockerfile", "dockerfile": {"content": dockerfile}})
+        )
+        assert report.supported is False
+        assert "line 3: E2B does not implement `VOLUME`" in messages(report)
+
+    def test_a_dockerfile_a_variant_can_honour_is_accepted(self) -> None:
+        """Daytona builds the text as it is, so Docker's own grammar is the limit."""
+        dockerfile = "FROM datalayer/python-cpu:2026.09\nVOLUME /data\nEXPOSE 8888\n"
+        report = get_builder("daytona").validate(
+            environment(build={"source": "dockerfile", "dockerfile": {"content": dockerfile}})
+        )
+        assert report.supported is True, messages(report)
 
     def test_a_conda_dependency_file_is_buildable_on_every_managed_variant(self) -> None:
         for variant in MANAGED:
@@ -415,8 +451,11 @@ def test_every_variant_validates_with_no_provider_sdk_installed() -> None:
             assert builder.capabilities().variant == variant
             report = builder.validate(environment())
             assert report.supported is True, f"{variant}: {messages(report)}"
+            # A refusal each variant still makes, and makes without an SDK.
+            # `dockerfile` stopped being one when E3-03 gave all three a door
+            # into it, so a managed variant is asked about `image` instead.
             refused = get_builder(variant).validate(
-                environment(build={"source": "dockerfile"})
+                environment(build={"source": "image"})
                 if variant != "datalayer"
                 else environment(
                     resources={"sizeClass": "gpu-small", "accelerator": {"type": "A10G"}}

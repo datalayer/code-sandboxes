@@ -286,7 +286,7 @@ class Builder(ManagedBuilder):
     title = "Modal"
     #: A `packages` list and, for conda (E3-02), an `environment.yml`
     #: dependency file installed with `micromamba_install`.
-    build_sources = ("packages", "dependencyFile")
+    build_sources = ("packages", "dependencyFile", "dockerfile")
     dependency_formats = ("conda",)
     #: Modal runs GPUs, in the owner's workspace (E2-17). This builder does
     #: not build one yet: see `build`'s own guard.

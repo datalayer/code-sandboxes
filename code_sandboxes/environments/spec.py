@@ -55,10 +55,10 @@ __all__ = [
     "BUILD_SOURCES",
     "GPU_SIZE_CLASSES",
     "KIND",
+    "PUBLIC_PACKAGE_INDEX_HOSTS",
     "SIZE_CLASSES",
     "SUPPORTED_BUILD_SOURCES",
     "VARIANTS",
-    "PUBLIC_PACKAGE_INDEX_HOSTS",
     "Accelerator",
     "ArtifactStatus",
     "Base",
@@ -174,14 +174,12 @@ class Platform(_Model):
 #: reached with a credential the public does not hold. Matched on host, so the
 #: trailing `/simple` or its absence never decides it. `pypi.org` is the index;
 #: `files.pythonhosted.org` is where its wheels are served from.
-PUBLIC_PACKAGE_INDEX_HOSTS = frozenset(
-    {"pypi.org", "files.pythonhosted.org"}
-)
+PUBLIC_PACKAGE_INDEX_HOSTS = frozenset({"pypi.org", "files.pythonhosted.org"})
 
 
 def _package_index_host(url: str) -> str:
     """The host an index URL names, lower-cased and without its port, or `""`."""
-    from urllib.parse import urlsplit  # noqa: PLC0415
+    from urllib.parse import urlsplit
 
     try:
         return (urlsplit(url).hostname or "").lower()
@@ -214,9 +212,7 @@ PUBLIC_CONDA_CHANNELS = frozenset(
         "msys2",
     }
 )
-PUBLIC_CONDA_CHANNEL_HOSTS = frozenset(
-    {"conda.anaconda.org", "repo.anaconda.com", "anaconda.org"}
-)
+PUBLIC_CONDA_CHANNEL_HOSTS = frozenset({"conda.anaconda.org", "repo.anaconda.com", "anaconda.org"})
 
 
 def channel_is_public(channel: str) -> bool:
@@ -344,6 +340,25 @@ class DependencyFileSpec(_Model):
     lock_content: str = ""
 
 
+class DockerfileSpec(_Model):
+    """The Dockerfile a `dockerfile`-sourced version builds from (E3-03).
+
+    Inline, the way ``DependencyFileSpec`` carries a ``requirements.txt``: a
+    file the author brings lives in the spec, so ``check_dockerfile`` and
+    every variant's capability report can read it **before** anything is
+    queued — which is the whole point of refusing an instruction a variant
+    does not implement at ``validate`` rather than halfway through a build.
+
+    The build *context* — the extra files a ``COPY`` needs — is the separate
+    upload E3-03 describes, bounded and checked by ``validate_build_context``.
+    A Dockerfile with no context is the common case and needs no upload at
+    all.
+    """
+
+    #: The Dockerfile text.
+    content: str = ""
+
+
 class ImageSourceSpec(_Model):
     """An existing OCI image, imported as the build's base (E3-04).
 
@@ -370,6 +385,7 @@ class ImageSourceSpec(_Model):
 class BuildSpec(_Model):
     source: Literal["packages", "dependencyFile", "dockerfile", "image"] = "packages"
     dependency_file: DependencyFileSpec | None = None
+    dockerfile: DockerfileSpec | None = None
     image: ImageSourceSpec | None = None
 
 
@@ -484,6 +500,28 @@ def parse_requirements_txt(text: str) -> list[str]:
             continue
         lines.append(line)
     return lines
+
+
+def _dockerfile_findings(dockerfile: DockerfileSpec | None) -> list[SpecFinding]:
+    """What a `dockerfile`-sourced version must carry, and what the contract refuses.
+
+    The contract's own refusals are reported here, at `validate`, rather than
+    at build time: a `FROM` that is not an approved base, a privileged build,
+    the host network, a Docker socket mount, a host bind mount, and every
+    instruction §6 does not allow. Each is named with its line, because a
+    Dockerfile is somebody's file and "it was refused" is not a reason.
+    """
+    field = "spec.build.dockerfile"
+    if dockerfile is None:
+        return [SpecFinding(field, "is required when `spec.build.source` is `dockerfile`")]
+    if not dockerfile.content.strip():
+        return [SpecFinding(f"{field}.content", "is empty; it is the Dockerfile text")]
+    from .contract import validate_dockerfile
+
+    return [
+        SpecFinding(f"{field}.content", f"line {finding.line}: {finding.message}")
+        for finding in validate_dockerfile(dockerfile.content)
+    ]
 
 
 def _dependency_file_findings(dependency_file: DependencyFileSpec | None) -> list[SpecFinding]:
@@ -644,6 +682,8 @@ def spec_findings(
         )
     if spec.build.source == "dependencyFile":
         findings.extend(_dependency_file_findings(spec.build.dependency_file))
+    elif spec.build.source == "dockerfile":
+        findings.extend(_dockerfile_findings(spec.build.dockerfile))
     elif spec.build.source == "image":
         findings.extend(_image_findings(spec.build.image))
 
@@ -951,11 +991,7 @@ def publication_findings(environment: Environment) -> list[SpecFinding]:
                 PUBLICATION_BLOCKED,
             )
         )
-    private = [
-        url
-        for url in environment.spec.packages.python.indexes
-        if not index_is_public(url)
-    ]
+    private = [url for url in environment.spec.packages.python.indexes if not index_is_public(url)]
     if private:
         findings.append(
             SpecFinding(
