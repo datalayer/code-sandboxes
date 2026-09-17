@@ -22,7 +22,7 @@ import subprocess
 
 import pytest
 
-from code_sandboxes.environments.attest import Attestor, attest_artifact, signature_tag
+from code_sandboxes.environments.attest import Attestor, attest_artifact, licenses_of, signature_tag
 from code_sandboxes.environments.builders import ArtifactReference
 from code_sandboxes.environments.errors import EnvironmentsError
 from code_sandboxes.environments.policy import (
@@ -689,3 +689,63 @@ def test_nothing_reaches_a_registry_when_nothing_could_sign() -> None:
         attest_artifact(artifact=artifact, attestor=an_attestor(ecr=ecr, key=""))
     assert raised.value.detail["missing"] == "DATALAYER_ENVIRONMENTS_KMS_KEY"
     assert ecr.asked == 0, "the registry was asked before anything could have been signed"
+
+
+# -- the licences a publication carries ---------------------------------------------------------
+
+
+class TestLicencesFromTheSbom:
+    """What `licenses_of` reads, and what it refuses to guess.
+
+    A published version's page says it shows the licences its SBOM names
+    (D-12, E2-16). They had nowhere to come from: the snapshot read the scan
+    summary, and the registry's scanner reports vulnerabilities.
+    """
+
+    def test_it_reads_spdx_which_is_what_buildkit_writes(self) -> None:
+        document = {
+            "packages": [
+                {"name": "gdal", "licenseConcluded": "MIT"},
+                {"name": "numpy", "licenseConcluded": "BSD-3-Clause"},
+                {"name": "again", "licenseConcluded": "MIT"},
+            ]
+        }
+        assert licenses_of(document) == ["BSD-3-Clause", "MIT"]
+
+    def test_a_concluded_licence_wins_over_a_declared_one(self) -> None:
+        """`licenseConcluded` is what the tool decided; `licenseDeclared` is the claim."""
+        document = {
+            "packages": [
+                {"licenseConcluded": "Apache-2.0", "licenseDeclared": "MIT"},
+            ]
+        }
+        assert licenses_of(document) == ["Apache-2.0"]
+
+    def test_noassertion_is_not_a_licence_and_falls_through(self) -> None:
+        """SPDX writes NOASSERTION when it could not tell, which must not be shown."""
+        document = {
+            "packages": [
+                {"licenseConcluded": "NOASSERTION", "licenseDeclared": "BSD-3-Clause"},
+                {"licenseConcluded": "NONE", "licenseDeclared": ""},
+            ]
+        }
+        assert licenses_of(document) == ["BSD-3-Clause"]
+
+    def test_it_reads_cyclonedx_by_id_by_name_and_by_expression(self) -> None:
+        document = {
+            "components": [
+                {"licenses": [{"license": {"id": "Apache-2.0"}}]},
+                {"licenses": [{"license": {"name": "Public Domain"}}]},
+                {"licenses": [{"expression": "MIT OR Apache-2.0"}]},
+            ]
+        }
+        assert licenses_of(document) == [
+            "Apache-2.0",
+            "MIT OR Apache-2.0",
+            "Public Domain",
+        ]
+
+    def test_a_document_it_does_not_understand_names_nothing(self) -> None:
+        """Never a reason to fail a build: a licence list is worth having, not dying for."""
+        for document in (None, {}, {"packages": None}, {"components": [1, 2]}, "spdx"):
+            assert licenses_of(document) == []
