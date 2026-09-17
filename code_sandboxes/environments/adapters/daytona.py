@@ -90,7 +90,7 @@ from __future__ import annotations
 import shlex
 import tempfile
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -100,6 +100,7 @@ from ..builders import (
     ArtifactReference,
     BuildRequest,
     CapabilityFinding,
+    ValidationResult,
 )
 from ..contract import SANDBOX_CONTRACT_V1
 from ..errors import (
@@ -566,6 +567,89 @@ class Builder(ManagedBuilder):
         except Exception as error:
             raise self._provider_error("ask whether the snapshot exists", error) from error
         return True
+
+    def smoke_test(
+        self,
+        artifact: ArtifactReference,
+        *,
+        environment: Any = None,
+        lock_text: str | None = None,
+        secret_values: Sequence[str] = (),
+    ) -> ValidationResult:
+        """Launch the snapshot and run Appendix B's core tier in it (E2-04).
+
+        This box's own `Done when` asks for exactly this — "a sandbox launched
+        from its id passes the core tier" — and until 2026-09-17 it refused
+        through `ManagedBuilder`, so **no Daytona build could reach
+        `succeeded`**: the workflow calls this step, the snapshot was built and
+        live at the provider, and the build was recorded failed.
+
+        **Launched by id, never by name** (E0-04): a Daytona sandbox record
+        keeps the snapshot's *name*, and a name is republished, so only the id
+        says which artifact actually ran.
+
+        **Restarted by stopping and starting the sandbox**, not the kernel
+        (E0-04 again): Daytona's own daemon is PID 1 here, so there is no
+        kernel to restart, and check 8 means the thing that survives a real
+        restart.
+
+        The sandbox is deleted whether the tier passed or not — a smoke test
+        that leaves a sandbox running bills the owner for a check.
+        """
+        if environment is None:
+            raise EnvironmentsError(
+                CAPABILITY_UNSUPPORTED,
+                "A Daytona smoke test needs the version's spec: the core tier "
+                "asks for the Python version it declared and the packages its "
+                "lock pinned, and an artifact carries neither",
+                detail={"variant": self.variant},
+            )
+        from ..conformance import expected_packages, run_core_tier
+
+        snapshot = artifact.provider_artifact_id or artifact.immutable_reference
+        sandbox = self._smoke_test_sandbox(snapshot)
+        self._log(f"Launching {snapshot} to smoke-test it")
+        try:
+            sandbox.start()
+            return run_core_tier(
+                sandbox,
+                python_version=environment.spec.language.version,
+                expected_packages=expected_packages(environment, lock_text or ""),
+                secret_values=tuple(secret_values),
+                restart=lambda: self._restart(sandbox),
+            )
+        except EnvironmentsError:
+            raise
+        except Exception as error:
+            raise self._provider_error("smoke-test the snapshot", error) from error
+        finally:
+            try:
+                sandbox.stop()
+            except Exception as error:
+                self._log(f"The smoke-test sandbox could not be stopped: {error}")
+
+    def _smoke_test_sandbox(self, snapshot: str) -> Any:
+        """A sandbox of this build's own snapshot, deleted when it stops."""
+        from ...daytona_sandbox import DaytonaSandbox
+
+        secrets = self._provider_secrets()
+        return DaytonaSandbox(
+            api_key=secrets.get("DAYTONA_API_KEY"),
+            organization_id=secrets.get("DAYTONA_ORGANIZATION_ID"),
+            snapshot=snapshot,
+            delete_on_stop=True,
+        )
+
+    @staticmethod
+    def _restart(sandbox: Any) -> None:
+        """Check 8's restart, as Daytona can do it.
+
+        Its daemon is PID 1, so there is no kernel to restart: the sandbox
+        itself is stopped and started, which is the stronger version of the
+        same question.
+        """
+        sandbox.stop()
+        sandbox.start()
 
     def _provider_error(self, what: str, error: BaseException) -> EnvironmentsError:
         return EnvironmentsError(

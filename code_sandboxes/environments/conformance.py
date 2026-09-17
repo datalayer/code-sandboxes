@@ -457,6 +457,36 @@ def _secrets(
     )
 
 
+def expected_packages(environment: Any, lock_text: str) -> dict[str, str]:
+    """Each top-level distribution the spec names, pinned to what its lock resolved.
+
+    What Appendix B check 5 is given. Never every package the lock pins — most
+    of a real lock is transitive, and check 5 tries to *import* each name it is
+    handed; a build tool or a C-library-only wheel that was never meant to be
+    imported directly would fail a check with nothing wrong to report. The
+    spec's own `packages.python.dependencies` is what a person declared
+    wanting, so it is what disagreeing across variants (E2-08) means something
+    about.
+
+    Here rather than in the durable worker, which had the only copy, so that a
+    builder running its own smoke test asks the same question of its own
+    artifact (E2-03/04/05).
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+
+    from .resolve import locked_versions
+
+    pinned = locked_versions(lock_text) if lock_text else {}
+    names: list[str] = []
+    for text in environment.spec.packages.python.dependencies:
+        try:
+            names.append(canonicalize_name(Requirement(text).name))
+        except InvalidRequirement:
+            continue
+    return {name: pinned[name] for name in names if name in pinned}
+
+
 def run_core_tier(
     sandbox: Sandbox,
     *,
@@ -551,9 +581,7 @@ def _gpu(sandbox: Sandbox, requested: bool, cuda: str | None, timeout: float | N
     # version its spec describes. A version that asked for none never
     # reaches here (the trivial pass above), so the extended tier still
     # gates nothing for a CPU version.
-    return _result(
-        11, not problems, gating=True, detail="; ".join(problems) or None, actual=answer
-    )
+    return _result(11, not problems, gating=True, detail="; ".join(problems) or None, actual=answer)
 
 
 def _throughput(
