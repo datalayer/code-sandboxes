@@ -493,6 +493,57 @@ def test_modal_start_forwards_gpu_flavor(monkeypatch):
     sandbox.stop()
 
 
+def test_an_environments_artifact_is_held_by_sleep_not_its_cmd(monkeypatch):
+    """An artifact's CMD may be its base's `start-jupyter.sh`, which exits and
+    ends the sandbox (found live on 2026-09-18): the launch names the command
+    that holds the container, and Jupyter is started by exec when asked."""
+
+    class _FakeApp:
+        pass
+
+    class _FakeSandboxObj:
+        object_id = "modal-object-id"
+
+        def exec(self, *_args, **_kwargs):
+            raise RuntimeError("no driver in this test")
+
+        def terminate(self):
+            return None
+
+        def detach(self):
+            return None
+
+    captured: dict = {}
+
+    class _FakeModal:
+        class App:
+            @staticmethod
+            def lookup(_name, create_if_missing=False):
+                return _FakeApp()
+
+        class Image:
+            @staticmethod
+            def from_id(image_id):
+                captured["image_id"] = image_id
+                return object()
+
+        class Sandbox:
+            @staticmethod
+            def create(*args, **kwargs):
+                captured["args"] = args
+                return _FakeSandboxObj()
+
+    monkeypatch.setitem(sys.modules, "modal", _FakeModal)
+
+    sandbox = ModalSandbox(config=SandboxConfig(timeout=10.0), image_id="im-artifact")
+    sandbox.start()
+
+    assert captured["image_id"] == "im-artifact"
+    assert captured["args"] == ("sleep", "infinity")
+
+    sandbox.stop()
+
+
 class _FakeExecSandbox:
     """Records what `_start_driver` asks `sandbox.exec` for, nothing more."""
 
