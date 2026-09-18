@@ -32,17 +32,20 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .errors import SCAN_BLOCKED, EnvironmentsError
+from .errors import POLICY_DENIED, SCAN_BLOCKED, EnvironmentsError
 
 __all__ = [
     "DEFAULT_POLICY",
     "SEVERITIES",
+    "EnvironmentsPolicy",
     "Finding",
     "PolicyDecision",
     "ScanPolicy",
     "decide",
+    "environments_policy_from_rules",
     "findings_of",
     "refuse_if_blocked",
+    "refuse_unlicensed",
 ]
 
 #: The severities a scanner reports, weakest first. Anything it reports that is
@@ -300,3 +303,132 @@ def refuse_if_blocked(decision: PolicyDecision, *, reference: str = "") -> None:
             "blocking": [finding.id for finding in decision.blocking],
         },
     )
+
+
+@dataclass(frozen=True)
+class EnvironmentsPolicy:
+    """An organization's own narrowing of what a build may do (E3-06).
+
+    Every allowlist is ``None`` until an organization writes one, meaning
+    that dimension is unrestricted beyond the platform's own defaults — the
+    approved bases, the public registries a spec's own validation already
+    checks, and nothing at all for indexes, packages or licences. Setting a
+    list, even an empty one, is a real policy: an organization that writes
+    ``allowed_licenses=()`` has denied every licence, and this does not
+    second-guess a policy that strict — the refusal it produces names
+    exactly why.
+
+    This narrows; it never widens. A base, index, registry, package or
+    licence the platform already refuses stays refused whatever an
+    organization allows — the same rule `refuse_widening` already keeps for
+    the gateway's own policy layers (`iam/datalayer_iam/services/
+    mcp_policies.py`), applied here to a different set of rules.
+    """
+
+    allowed_bases: tuple[str, ...] | None = None
+    allowed_indexes: tuple[str, ...] | None = None
+    allowed_registries: tuple[str, ...] | None = None
+    allowed_packages: tuple[str, ...] | None = None
+    allowed_licenses: tuple[str, ...] | None = None
+    scan: ScanPolicy = DEFAULT_POLICY
+    #: The policy document's own version, carried into E1-08's decision
+    #: record so a build made under one policy is not misread once an
+    #: organization changes it — the version answers "which policy" without
+    #: needing IAM asked again.
+    version: int | None = None
+
+    def allows(self, dimension: str, value: str) -> bool:
+        """Whether `value` clears this policy's allowlist for `dimension`.
+
+        `True` when the dimension is unrestricted (`None`) or the value is on
+        the list; the comparison is exact, not a prefix or a host match — an
+        index or a registry is compared the way `image_registry_allowed`
+        already compares one, and a base or a package by its own name.
+        """
+        allowed = getattr(self, f"allowed_{dimension}")
+        return allowed is None or value in allowed
+
+
+#: No organization has written a policy: every dimension unrestricted, the
+#: platform's own default scan threshold. The reading a caller with no
+#: policy document gets, and what every check below is a no-op against.
+UNRESTRICTED_POLICY = EnvironmentsPolicy()
+
+#: What `environments_policy_from_rules` reads a list-shaped field as. Kept
+#: beside `ScanPolicy`'s own fields so the two are validated the same way.
+_LIST_FIELDS: tuple[str, ...] = (
+    "allowedBases",
+    "allowedIndexes",
+    "allowedRegistries",
+    "allowedPackages",
+    "allowedLicenses",
+)
+
+
+def environments_policy_from_rules(
+    rules: Mapping[str, Any] | None, *, version: int | None = None
+) -> EnvironmentsPolicy:
+    """The `environments` section of an organization's MCP policy document,
+    as the shape this module checks against (E3-06).
+
+    `rules` is the raw object IAM stores under the policy's own
+    ``environments`` key — camelCase, the same convention every other rule in
+    `iam/datalayer_iam/services/mcp_policies.py` already uses. Absent, or not
+    an object, answers :data:`UNRESTRICTED_POLICY`: an organization that has
+    not written this section has narrowed nothing, the same reading every
+    other rule in that module gives an unset one.
+
+    Never raises. A caller holding an organization's policy already trusts
+    IAM to have validated it at the write (`mcp_policies.validate_rules`);
+    asking twice, differently, would let the two readings disagree about
+    what a stored policy means.
+    """
+    if not isinstance(rules, Mapping):
+        return UNRESTRICTED_POLICY
+    lists: dict[str, tuple[str, ...] | None] = {}
+    for camel in _LIST_FIELDS:
+        value = rules.get(camel)
+        snake = "".join(
+            f"_{c.lower()}" if c.isupper() else c for c in camel
+        )  # allowedBases -> allowed_bases
+        lists[snake] = (
+            tuple(str(item) for item in value) if isinstance(value, (list, tuple)) else None
+        )
+    scan_rules = rules.get("scan") if isinstance(rules.get("scan"), Mapping) else {}
+    blocks_at = str(scan_rules.get("blocksAt") or DEFAULT_POLICY.blocks_at).upper()
+    scan = ScanPolicy(
+        blocks_at=blocks_at if blocks_at in SEVERITIES else DEFAULT_POLICY.blocks_at,
+        only_fixable=bool(scan_rules.get("onlyFixable", DEFAULT_POLICY.only_fixable)),
+        allowed=tuple(str(item) for item in (scan_rules.get("allowed") or ()))
+        or DEFAULT_POLICY.allowed,
+    )
+    return EnvironmentsPolicy(scan=scan, version=version, **lists)
+
+
+def refuse_unlicensed(
+    pairs: Sequence[tuple[str, str]], policy: EnvironmentsPolicy = UNRESTRICTED_POLICY
+) -> None:
+    """Raise `DL_ENV_POLICY_DENIED` on the first licence this policy does not
+    allow, naming the package that carries it (E3-06).
+
+    `pairs` is `attest.licenses_by_package`'s own output: `(package,
+    licence)`, in the SBOM's own order, so the same artifact always names the
+    same first offender. A no-op when `policy.allowed_licenses` is unset —
+    every artifact today, until an organization writes one.
+    """
+    if policy.allowed_licenses is None:
+        return
+    for package, licence in pairs:
+        if not policy.allows("licenses", licence):
+            raise EnvironmentsError(
+                POLICY_DENIED,
+                f"`{licence}` ({package or 'an unnamed package'}) is not an allowed "
+                f"licence (the allowed ones are {', '.join(policy.allowed_licenses) or '(none)'})",
+                detail={
+                    "field": "licenses",
+                    "package": package,
+                    "license": licence,
+                    "allowed": list(policy.allowed_licenses),
+                    **({"policyVersion": policy.version} if policy.version is not None else {}),
+                },
+            )

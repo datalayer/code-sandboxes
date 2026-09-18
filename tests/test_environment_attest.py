@@ -23,11 +23,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from code_sandboxes.environments.attest import Attestor, attest_artifact, licenses_of, signature_tag
+from code_sandboxes.environments.attest import (
+    Attestor,
+    attest_artifact,
+    licenses_by_package,
+    licenses_of,
+    signature_tag,
+)
 from code_sandboxes.environments.builders import ArtifactReference
 from code_sandboxes.environments.errors import PROVIDER_ERROR, EnvironmentsError
 from code_sandboxes.environments.policy import (
     DEFAULT_POLICY,
+    EnvironmentsPolicy,
     Finding,
     ScanPolicy,
     decide,
@@ -613,6 +620,48 @@ class TestAttestingAnArtifact:
         assert "CVE-2026-1234" in raised.value.message
         assert cosign.argv == [], "a blocked artifact must not be signed"
 
+    def test_a_denied_licence_is_never_signed(self) -> None:
+        """The order is the point, the same as a blocked scan: a signature is
+        Datalayer's word, and this is the second word that goes into it."""
+        cosign = Cosign()
+        sbom = {"packages": [{"name": "gpl-lib", "licenseConcluded": "GPL-3.0"}]}
+        policy = EnvironmentsPolicy(allowed_licenses=("MIT", "Apache-2.0"))
+        with pytest.raises(EnvironmentsError) as raised:
+            attest_artifact(
+                artifact=self.an_artifact(),
+                attestor=an_attestor(run=cosign),
+                sbom=sbom,
+                environments_policy=policy,
+            )
+        assert raised.value.code.code == "DL_ENV_POLICY_DENIED"
+        assert "GPL-3.0" in raised.value.message and "gpl-lib" in raised.value.message
+        assert cosign.argv == [], "a denied licence must not be signed"
+
+    def test_an_allowed_licence_is_signed_as_usual(self) -> None:
+        cosign = Cosign()
+        sbom = {"packages": [{"name": "requests", "licenseConcluded": "Apache-2.0"}]}
+        policy = EnvironmentsPolicy(allowed_licenses=("MIT", "Apache-2.0"))
+        answer = attest_artifact(
+            artifact=self.an_artifact(),
+            attestor=an_attestor(run=cosign),
+            sbom=sbom,
+            environments_policy=policy,
+        )
+        assert answer["licenses"] == ["Apache-2.0"]
+        assert cosign.argv, "an allowed licence is signed"
+
+    def test_with_no_organization_policy_nothing_about_licences_is_refused(self) -> None:
+        """The default: no organization has written this section, so a build
+        with any licence at all is unrestricted, the same as every artifact
+        before this box existed."""
+        cosign = Cosign()
+        sbom = {"packages": [{"name": "gpl-lib", "licenseConcluded": "GPL-3.0"}]}
+        answer = attest_artifact(
+            artifact=self.an_artifact(), attestor=an_attestor(run=cosign), sbom=sbom
+        )
+        assert answer["licenses"] == ["GPL-3.0"]
+        assert cosign.argv, "unrestricted by default"
+
     def test_a_reference_that_is_not_a_digest_cannot_be_attested(self) -> None:
         """A `datalayer` artifact must be a digest in this platform's registry.
 
@@ -788,3 +837,38 @@ class TestWhatIsAttestedAndWhatIsNot:
             attest_artifact(artifact=self._artifact("datalayer", "not-a-digest"))
         assert raised.value.code is PROVIDER_ERROR
         assert "cannot be attested" in str(raised.value)
+
+
+class TestLicencesByPackage:
+    """`licenses_by_package`: the attribution `licenses_of` itself throws away
+    (E3-06 needs to name which package carries a denied licence)."""
+
+    def test_it_pairs_each_spdx_package_with_its_licence(self) -> None:
+        document = {
+            "packages": [
+                {"name": "gdal", "licenseConcluded": "MIT"},
+                {"name": "numpy", "licenseConcluded": "BSD-3-Clause"},
+            ]
+        }
+        assert licenses_by_package(document) == [
+            ("gdal", "MIT"),
+            ("numpy", "BSD-3-Clause"),
+        ]
+
+    def test_it_pairs_each_cyclonedx_component_with_its_licence(self) -> None:
+        document = {
+            "components": [
+                {"name": "requests", "licenses": [{"license": {"id": "Apache-2.0"}}]},
+            ]
+        }
+        assert licenses_by_package(document) == [("requests", "Apache-2.0")]
+
+    def test_an_unnamed_package_still_carries_its_licence(self) -> None:
+        """`licenses_of` must not lose a licence just because this test does not name one."""
+        document = {"packages": [{"licenseConcluded": "MIT"}]}
+        assert licenses_by_package(document) == [("", "MIT")]
+        assert licenses_of(document) == ["MIT"]
+
+    def test_a_document_it_does_not_understand_names_nothing(self) -> None:
+        for document in (None, {}, {"packages": None}, {"components": [1, 2]}, "spdx"):
+            assert licenses_by_package(document) == []
