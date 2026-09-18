@@ -912,6 +912,50 @@ class TestReadingTheRegistry:
         assert len(daytona.daytona_calls) == 1
 
 
+class TestCancellingABuild:
+    """E2-18: the build step lets a cancelled build's thread finish unheard, so
+    a snapshot Daytona goes on building would be recorded by nobody. Found by
+    E2-14's drill on 2026-09-18: `dl-backfill-drill-v2-…` kept building after
+    its build was cancelled."""
+
+    NAME = "dl-geospatial-analysis-v3-bld-1"
+
+    def test_a_snapshot_being_made_is_deleted_by_id(self) -> None:
+        service = FakeSnapshotService(
+            get_results={
+                self.NAME: FakeSnapshot(id="snp-9", name=self.NAME),
+                "snp-9": FakeSnapshot(id="snp-9", name=self.NAME),
+            }
+        )
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        builder.cancel(a_request())
+        assert [call.args for call in service.get_calls] == [(self.NAME,)]
+        assert [call.args for call in service.delete_calls] == [("snp-9",)]
+
+    def test_one_made_after_the_cancel_is_deleted_by_the_build(self) -> None:
+        """Not made yet when the cancel came: the build deletes it the moment
+        Daytona hands it back, and does not answer with it."""
+        made = FakeSnapshot(id="snp-late", name=self.NAME)
+        service = FakeSnapshotService(create_result=made, get_results={"snp-late": made})
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        builder.cancel(a_request())
+        assert service.delete_calls == []
+        with pytest.raises(EnvironmentsError) as raised:
+            builder.build(a_request())
+        assert raised.value.code.code == BUILD_FAILED.code
+        assert "cancelled" in raised.value.message
+        assert [call.args for call in service.delete_calls] == [("snp-late",)]
+
+    def test_another_build_of_the_same_builder_is_not_touched(self) -> None:
+        builder = a_builder()
+        builder.cancel(a_request(build_uid="bld-other"))
+        assert builder.build(a_request()).provider_artifact_id
+
+
 class TestDeletingASnapshot:
     """E2-18: retention and a failed build both need a snapshot to go."""
 
