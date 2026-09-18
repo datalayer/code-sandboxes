@@ -277,7 +277,14 @@ class TestTheDockerfileItGenerates:
         follows, so the kernel stack (E1-04) is present the same."""
         request = a_request(lock_text=CONDA_LOCK, spec=CONDA_SPEC)
         dockerfile = a_builder().dockerfile(request)
-        assert "micromamba install --yes --name base --file /opt/datalayer/lock.txt" in dockerfile
+        # Into the base's own interpreter, by name: left to itself micromamba
+        # made a new `base` under the content home, where `python` never looks
+        # (found on the first real conda build, 2026-09-18).
+        assert (
+            "micromamba install --yes --root-prefix /opt/conda --prefix /opt/conda "
+            "--file /opt/datalayer/lock.txt"
+        ) in dockerfile
+        assert "--name base" not in dockerfile
         # micromamba is copied in from its pinned image before it is invoked.
         bootstrap = dockerfile.index("COPY --from=mambaorg/micromamba")
         micromamba = dockerfile.index("micromamba install")

@@ -503,6 +503,10 @@ class TestBuildingASnapshot:
         pip = next(i for i, call in enumerate(runs) if "ipykernel==7.3.0" in call.args[0])
         assert bootstrap < micromamba < pip
         assert not any("uv pip sync" in call.args[0] for call in runs)
+        # The interpreter a sandbox runs, not a new `base` under the content
+        # home (2026-09-18): the same command the Datalayer builder emits.
+        assert "--root-prefix /opt/conda --prefix /opt/conda" in runs[micromamba].args[0]
+        assert "--name base" not in runs[micromamba].args[0]
 
     def test_user_root_brackets_the_install_steps(self) -> None:
         """Daytona honours the base's `USER`, unlike E2B (E0-04): no synthetic
