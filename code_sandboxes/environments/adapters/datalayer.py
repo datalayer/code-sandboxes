@@ -76,6 +76,8 @@ from ..resolve import (
     WHEELHOUSE_PATH,
     apt_pins_in,
     apt_snapshot_in,
+    buildkit_proxy,
+    buildkit_proxy_options,
     locked_versions,
 )
 from ..resolve_conda import (
@@ -214,6 +216,11 @@ class Builder:
         importing this module needs no credentials.
     run
         How a subprocess is run, so a test can watch the argv without a daemon.
+    proxy
+        The build pool's egress proxy, as ``buildkitd`` reaches it (E1-06):
+        every step of the build goes through it. ``DATALAYER_BUILDKIT_PROXY``
+        by default; empty is a ``buildkitd`` whose steps reach the network
+        directly.
     """
 
     variant = "datalayer"
@@ -233,6 +240,7 @@ class Builder:
         run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
         max_build_seconds: int = DEFAULT_MAX_BUILD_SECONDS,
         resolve_secret: Callable[..., str] = resolve_build_secret,
+        proxy: str | None = None,
     ) -> None:
         self._log = log or (lambda _line: None)
         self._credential = credential
@@ -241,6 +249,8 @@ class Builder:
         self._tlscert = tlscert or os.environ.get("DATALAYER_BUILDKIT_TLSCERT", "").strip()
         self._tlskey = tlskey or os.environ.get("DATALAYER_BUILDKIT_TLSKEY", "").strip()
         self._tlscacert = tlscacert or os.environ.get("DATALAYER_BUILDKIT_TLSCACERT", "").strip()
+        #: The build pool's egress proxy (E1-06), or `DATALAYER_BUILDKIT_PROXY`.
+        self._proxy = buildkit_proxy(proxy)
         self._region = region or os.environ.get("AWS_REGION", "us-east-1")
         self._ecr = ecr
         self._run = run or subprocess.run
@@ -530,6 +540,7 @@ class Builder:
                     "--metadata-file",
                     str(metadata),
                     *self._cache_options(request),
+                    *buildkit_proxy_options(self._proxy),
                     *secret_args,
                 ]
                 self._log(f"Building {reference} from {request.resolved_base}")
