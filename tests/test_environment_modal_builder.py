@@ -68,25 +68,29 @@ CONDA_SPEC = {
 
 class Credential:
     """The build's credential in exactly the shape durable's `_mint_credential`
-    returns for a managed variant (D-8, D-17, D-18, E2-01).
+    returns for Modal (D-8, D-17, D-18, E2-01).
 
-    `username`/`password` are the ECR login pair minted from the base-reader
-    session — what E2B and Daytona take — and `aws_session` is the session
-    itself, which is what Modal takes. This double used to put IAM keys in
-    `username`/`password`, a shape the worker never produces, so these tests
-    passed while every real Modal build failed its base pull with "The
-    security token included in the request is invalid" (2026-09-18)."""
+    `aws_session` is a *real* IAM user's key — `modal_base_reader`'s own,
+    read-only on the bases — never an assumed session's: Modal's own
+    `from_aws_ecr` never reads `AWS_SESSION_TOKEN` anywhere in its SDK, so a
+    session handed to it the way E2B and Daytona happily take one is exactly
+    "The security token included in the request is invalid" (found live,
+    2026-09-18, after this double's own first version put IAM keys in
+    `username`/`password` instead and hid the same defect a first time).
+    `username`/`password` are unrelated here — the ECR login pair minted
+    from that same static key, which only E2B/Daytona and the resolver's own
+    pull read; the Modal adapter never touches them.
+    """
 
     provider_secrets: ClassVar[dict[str, str]] = {
         "MODAL_TOKEN_ID": "owners-modal-token-id",
         "MODAL_TOKEN_SECRET": "owners-modal-token-secret",
     }
     username: ClassVar[str] = "AWS"
-    password: ClassVar[str] = "ecr-login-token-from-the-session"
+    password: ClassVar[str] = "ecr-login-token-from-the-static-key"
     aws_session: ClassVar[dict[str, str]] = {
-        "AWS_ACCESS_KEY_ID": "ASIA-base-reader-session",
-        "AWS_SECRET_ACCESS_KEY": "base-reader-session-secret",
-        "AWS_SESSION_TOKEN": "base-reader-session-token",
+        "AWS_ACCESS_KEY_ID": "AKIA-modal-base-reader",
+        "AWS_SECRET_ACCESS_KEY": "modal-base-reader-secret",
     }
 
 
@@ -492,9 +496,10 @@ class TestBuildingAnImage:
         assert secret.env_dict == {
             "AWS_ACCESS_KEY_ID": Credential.aws_session["AWS_ACCESS_KEY_ID"],
             "AWS_SECRET_ACCESS_KEY": Credential.aws_session["AWS_SECRET_ACCESS_KEY"],
-            "AWS_SESSION_TOKEN": Credential.aws_session["AWS_SESSION_TOKEN"],
             "AWS_REGION": "us-east-1",
         }
+        # No session token: this is a real key, not one it could carry.
+        assert "AWS_SESSION_TOKEN" not in secret.env_dict
         assert Credential.password not in secret.env_dict.values()
 
     def test_no_secret_with_no_pull_credential(self) -> None:
