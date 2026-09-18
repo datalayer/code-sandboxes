@@ -23,7 +23,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-from code_sandboxes.environments.adapters.modal import Builder
+from code_sandboxes.environments.adapters.modal import MODAL_GPUS, Builder, modal_gpu
 from code_sandboxes.environments.builders import ArtifactReference, BuildRequest
 from code_sandboxes.environments.errors import (
     ARTIFACT_MISSING,
@@ -748,16 +748,84 @@ class TestTheEcrSecretIsCleanedUp:
         assert deleted.kwargs["secret_id"] == secret.object_id
 
 
-class TestWhatModalCannotBuildYet:
-    def test_a_gpu_size_class_is_refused_at_build_time_naming_e2_17(self) -> None:
+class TestAGpuVersion:
+    """E2-17: on Modal a GPU is a launch option, not part of the image."""
+
+    GPU: ClassVar[dict[str, Any]] = {
+        "base": {"ref": "datalayer/python-cuda", "channel": "2026.09"},
+        "resources": {
+            "sizeClass": "gpu-small",
+            "accelerator": {"type": "l4", "count": 2, "cuda": "12.8"},
+        },
+    }
+
+    def test_it_builds_the_image_any_version_builds(self) -> None:
         modal = FakeModalModule()
-        with pytest.raises(EnvironmentsError) as raised:
-            a_builder(modal=modal).build(a_request(size_class="gpu-large"))
-        assert raised.value.code.code == CAPABILITY_UNSUPPORTED.code
-        assert raised.value.detail["missing"] == "E2-17"
-        # Refused before any provider is touched.
-        assert modal.Secret.from_dict_calls == []
-        assert modal.Image.from_aws_ecr_calls == []
+        artifact = a_builder(modal=modal).build(a_request(spec=self.GPU, size_class="gpu-small"))
+        assert artifact.provider_artifact_id.startswith("im-")
+        assert modal.Image.from_aws_ecr_calls, "built from the CUDA base like any image"
+
+    def test_a_gpu_modal_does_not_offer_is_refused_before_any_build(self) -> None:
+        spec = {
+            **self.GPU,
+            "resources": {"sizeClass": "gpu-small", "accelerator": {"type": "RTX-4090"}},
+        }
+        report = a_builder().validate(a_request(spec=spec).environment)
+        assert report.supported is False
+        [finding] = [item for item in report.findings if "RTX-4090" in item.message]
+        assert finding.field == "spec.resources.accelerator.type"
+        assert all(name in finding.message for name in MODAL_GPUS)
+
+    def test_a_name_is_modal_s_gpu_argument(self) -> None:
+        assert [
+            modal_gpu("t4"),
+            modal_gpu("a100_80gb"),
+            modal_gpu("H100", 2),
+            modal_gpu("RTX-4090"),
+        ] == [
+            "T4",
+            "A100-80GB",
+            "H100:2",
+            None,
+        ]
+
+    def test_the_smoke_test_runs_on_the_gpu_and_adds_check_eleven(self, monkeypatch) -> None:
+        from code_sandboxes.environments.builders import CheckResult, ValidationResult
+
+        made: dict = {}
+        asked: dict = {}
+
+        class FakeSandbox:
+            def __init__(self, **kwargs):
+                made.update(kwargs)
+
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+        monkeypatch.setattr("code_sandboxes.modal_sandbox.ModalSandbox", FakeSandbox)
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_core_tier",
+            lambda sandbox, **kwargs: ValidationResult(contract_version="sandbox-contract/v1"),
+        )
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_accelerator_check",
+            lambda sandbox, **kwargs: asked.update(kwargs)
+            or CheckResult(id="conformance:11", name="gpu", passed=True, gating=True),
+        )
+        environment = a_request(spec=self.GPU, size_class="gpu-small").environment
+        artifact = ArtifactReference(
+            variant="modal",
+            immutable_reference="im-1",
+            provider_artifact_id="im-1",
+            contract_version="sandbox-contract/v1",
+        )
+        answer = a_builder().smoke_test(artifact, environment=environment, lock_text=LOCK)
+        assert made["config"].gpu == "L4:2"
+        assert asked == {"cuda": "12.8", "count": 2}
+        assert [check.id for check in answer.checks] == ["conformance:11"]
 
 
 class TestABuildSecret:

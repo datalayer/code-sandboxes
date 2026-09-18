@@ -4,12 +4,11 @@ name: Environments Live Matrix
 # providers, nightly (PLAN_ENV.md E2-11): a real, hash-verified lock, a real
 # build, a real launch, and the formal core tier — tests/test_environment_live_matrix.py.
 #
-# E2B and Modal carry their own already-documented, unticked gaps there
-# (E2-03's uid/gid mismatch; modal_sandbox.py's missing setpriv) and are
-# `xfail(strict=False)` in that file, so an ordinary failure there is
-# expected and does not fail this workflow. Daytona carries no such marker:
-# a failure there is a real regression, and this workflow opens (or
-# comments on) an issue naming it.
+# E2B carries its own documented, unticked gap there (E2-03: its services run
+# as root) and is `xfail(strict=False)` in that file, so an ordinary failure
+# there is expected and does not fail this workflow. Daytona and Modal carry
+# no such marker: a failure there is a real regression, and this workflow
+# opens (or comments on) an issue naming it.
 #
 # Needs one repository secret, DATALAYER_API_KEY. The providers' keys are
 # Datalayer secrets of the account it belongs to, read at run time: E2B_API_KEY,

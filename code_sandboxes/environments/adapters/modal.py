@@ -96,13 +96,11 @@ end and the container exited before that first real exec ever reached it.
 The entrypoint now execs `sleep infinity` when it is given no arguments,
 and `"$@"` when it is — correct either way a caller invokes it.
 
-**A GPU size class is left buildable at `validate()`,** matching an existing
-test (`test_a_gpu_spec_is_buildable_on_modal_and_daytona`), and refused at
-`build()` instead, naming E2-17 — the same reasoning as Daytona's: the CUDA
-base is not published yet, so this cannot be reached in practice, and this
-builder does not know the launch-time `gpu=` argument to hand a size class
-either (D-20 leaves that to a later item; a GPU is Modal's own launch
-option, not an image property, per section 11.4 item 10).
+**A GPU is a launch option on Modal, not part of the image** (section 11.4
+item 10, E2-17). A GPU version builds the same image any version does, on the
+CUDA base; the spec's `accelerator` names one of Modal's GPUs, checked at
+`validate`, and the smoke test launches the image on it (`gpu="T4"`,
+`"H100:2"`) and adds check 11 to the core tier.
 
 **A build secret is attached to the `postInstall` steps that name it (E3-05).**
 `run_commands` takes a per-step `secrets=` collection, a mechanism E2B and
@@ -149,13 +147,41 @@ from ..files import files_step
 from ..redact import redact
 from ..resolve import WHEELHOUSE_IMAGE_PATH, apt_pins_in
 from ..resolve_conda import conda_lock_pip_requirements, is_conda_lock
-from ..spec import GPU_SIZE_CLASSES, BuildSecret, Environment, command_names_secret
+from ..spec import BuildSecret, Environment, command_names_secret
 from .managed import ManagedBuilder
 
-__all__ = ["UNIMPLEMENTED_INSTRUCTIONS", "Builder"]
+__all__ = ["MODAL_GPUS", "UNIMPLEMENTED_INSTRUCTIONS", "Builder", "modal_gpu"]
 
 #: What Modal's own Dockerfile builder does not implement (§6).
 UNIMPLEMENTED_INSTRUCTIONS = ("ONBUILD", "STOPSIGNAL", "VOLUME")
+
+#: The GPUs a Modal sandbox takes by name (E2-17), as its `gpu=` spells them.
+MODAL_GPUS: tuple[str, ...] = (
+    "T4",
+    "L4",
+    "A10G",
+    "L40S",
+    "A100",
+    "A100-40GB",
+    "A100-80GB",
+    "H100",
+    "H200",
+    "B200",
+)
+
+
+def modal_gpu(accelerator_type: str, count: int = 1) -> str | None:
+    """Modal's `gpu=` for an accelerator, or `None` when Modal has no such GPU.
+
+    `t4` and `a100_80gb` name what Modal calls `T4` and `A100-80GB`, and a
+    count above one is Modal's `"H100:2"`. An `RTX-4090` is Daytona's
+    vocabulary, not Modal's.
+    """
+    name = accelerator_type.strip().upper().replace("_", "-")
+    if name not in MODAL_GPUS:
+        return None
+    return f"{name}:{count}" if count > 1 else name
+
 
 #: `uv`, pinned the same way every other builder's bootstrap is (E1-04/E3-04).
 _UV_VERSION = "0.12.11"
@@ -393,6 +419,18 @@ class Builder(ManagedBuilder):
                         field=f"spec.buildSecrets[{index}].mountAs",
                     )
                 )
+        accelerator = environment.spec.resources.accelerator
+        if accelerator != "none" and modal_gpu(accelerator.type) is None:
+            findings.append(
+                CapabilityFinding(
+                    code="DL_ENV_CAPABILITY_UNSUPPORTED",
+                    message=(
+                        f"Modal has no GPU called `{accelerator.type}`; it offers "
+                        + ", ".join(MODAL_GPUS)
+                    ),
+                    field="spec.resources.accelerator.type",
+                )
+            )
         return findings
 
     # -- Building -------------------------------------------------------------
@@ -406,18 +444,6 @@ class Builder(ManagedBuilder):
         launch, not here, for the same reason.
         """
         spec = request.environment.spec
-        if request.size_class in GPU_SIZE_CLASSES:
-            # `validate` leaves a GPU class buildable (`gpu = True`, D-20):
-            # the CUDA base E2-17 has not published yet, so this cannot be
-            # reached in practice — refused plainly here rather than
-            # guessing at the launch-time `gpu=` argument this class needs
-            # (section 11.4 item 10 is a launch concern, not a build one).
-            raise EnvironmentsError(
-                CAPABILITY_UNSUPPORTED,
-                f"Modal runs `{request.size_class}` on its own GPUs, but the CUDA base this "
-                "needs is E2-17's, not built yet",
-                detail={"variant": self.variant, "missing": "E2-17"},
-            )
         # Resolved before Modal is touched: a secret IAM will not give stops
         # the build with nothing to clean up in the owner's workspace.
         declared, values = self._resolved_secrets(request)
@@ -717,11 +743,13 @@ class Builder(ManagedBuilder):
             )
         from ...modal_sandbox import ModalSandbox
         from ...models import SandboxConfig
-        from ..conformance import expected_packages, run_core_tier
+        from ..conformance import expected_packages, run_accelerator_check, run_core_tier
 
         sdk = self._modal_sdk()
+        accelerator = environment.spec.resources.accelerator
+        gpu = None if accelerator == "none" else modal_gpu(accelerator.type, accelerator.count)
         sandbox = ModalSandbox(
-            config=SandboxConfig(name=f"smoke-{artifact.provider_artifact_id}"),
+            config=SandboxConfig(name=f"smoke-{artifact.provider_artifact_id}", gpu=gpu),
             app_name=f"dl-{environment.metadata.name}",
             image_id=artifact.provider_artifact_id,
             client=self._client(sdk),
@@ -729,13 +757,21 @@ class Builder(ManagedBuilder):
         self._log(f"Launching {artifact.provider_artifact_id} to smoke-test it")
         try:
             sandbox.start()
-            return run_core_tier(
+            result = run_core_tier(
                 sandbox,
                 python_version=environment.spec.language.version,
                 expected_packages=expected_packages(environment, lock_text or ""),
                 secret_values=tuple(secret_values),
                 restart=lambda: self._restart(sandbox),
             )
+            if gpu is not None:
+                # The core tier passes on a machine with no GPU: a GPU version
+                # is the version its spec describes only when its GPUs are
+                # visible and its CUDA is the spec's (check 11, E2-17).
+                result.checks.append(
+                    run_accelerator_check(sandbox, cuda=accelerator.cuda, count=accelerator.count)
+                )
+            return result
         except EnvironmentsError:
             raise
         except Exception as error:
