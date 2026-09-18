@@ -163,9 +163,7 @@ def test_a_plain_build_context_passes() -> None:
         ),
     ],
 )
-def test_a_forbidden_context_member_is_refused(
-    entry: BuildContextEntry, message: str
-) -> None:
+def test_a_forbidden_context_member_is_refused(entry: BuildContextEntry, message: str) -> None:
     findings = validate_build_context([entry])
     assert any(finding.message == message for finding in findings), findings
     with pytest.raises(EnvironmentsError) as refused:
