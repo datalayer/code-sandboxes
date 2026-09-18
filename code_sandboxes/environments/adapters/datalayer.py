@@ -277,7 +277,10 @@ class Builder:
         """Whether this variant can build this spec, before anything is queued."""
         findings: list[CapabilityFinding] = []
         source = environment.spec.build.source
-        if source not in ("packages", "dependencyFile", "image"):
+        # The capability set is the one list of what this builder builds: a
+        # second copy here refused `dockerfile` on r1 after the capability
+        # set had learned it (E3-03, 2026-09-18).
+        if source not in self.capabilities().build_sources:
             findings.append(
                 CapabilityFinding(
                     code=CAPABILITY_UNSUPPORTED.code,
