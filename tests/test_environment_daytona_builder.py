@@ -114,6 +114,11 @@ class FakeImage:
     def base(cls, ref: str) -> FakeImage:
         return cls([Call("base", (ref,))])
 
+    @classmethod
+    def from_dockerfile(cls, path: str) -> FakeImage:
+        """The text is read now: the builder's scratch file is gone by the time a test looks."""
+        return cls([Call("from_dockerfile", (path,), {"content": Path(path).read_text()})])
+
     def env(self, env_vars: dict[str, str]) -> FakeImage:
         self.calls.append(Call("env", (env_vars,)))
         return self

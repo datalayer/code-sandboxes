@@ -102,7 +102,7 @@ from ..builders import (
     CapabilityFinding,
     ValidationResult,
 )
-from ..contract import SANDBOX_CONTRACT_V1
+from ..contract import SANDBOX_CONTRACT_V1, pin_dockerfile_base
 from ..errors import (
     ARTIFACT_MISSING,
     BUILD_FAILED,
@@ -146,6 +146,19 @@ _CPU_RESOURCES: dict[str, dict[str, int]] = {
     "medium": {"cpu": 4, "memory": 8, "disk": 20},
     "large": {"cpu": 8, "memory": 16, "disk": 40},
 }
+
+
+def _pip_lock_command(*, authored: bool) -> str:
+    """Install the pip lock: `sync` to it, or `install` it over an authored Dockerfile.
+
+    `sync` would remove what the Dockerfile installed and the lock does not
+    name (E3-03, `DOCKERFILE_COVERAGE`).
+    """
+    verb, target = ("install", "-r ") if authored else ("sync", "")
+    return (
+        f"uv pip {verb} --system --require-hashes "
+        f"--find-links {WHEELHOUSE_IMAGE_PATH} {target}{_LOCK_PATH}"
+    )
 
 
 def _daytona_sdk() -> Any:
@@ -339,7 +352,8 @@ class Builder(ManagedBuilder):
                 lock_file = Path(scratch) / "lock.txt"
                 lock_file.write_text(request.lock_text, encoding="utf-8")
 
-                image = sdk.Image.base(request.resolved_base)
+                authored = spec.build.dockerfile if spec.build.source == "dockerfile" else None
+                image = self._starting_image(sdk, request, authored, Path(scratch))
                 # `env` before anything installs, the same order the
                 # Datalayer and E2B builders keep: a package that compiles
                 # against a library found through an env var behaves
@@ -394,10 +408,7 @@ class Builder(ManagedBuilder):
                     # Datalayer and E2B builders give: a user install lands
                     # under the content directory's own home, which the
                     # runtime mounts over.
-                    image = image.run_commands(
-                        "uv pip sync --system --require-hashes "
-                        f"--find-links {WHEELHOUSE_IMAGE_PATH} {_LOCK_PATH}"
-                    )
+                    image = image.run_commands(_pip_lock_command(authored=authored is not None))
                 image = image.dockerfile_commands([f"USER 1000:100\nWORKDIR {_CONTENT_DIR}"])
                 for command in files_step(request.environment, variant=self.variant):
                     image = image.run_commands(command)
@@ -476,6 +487,23 @@ class Builder(ManagedBuilder):
             provider_account=provider_account(self.variant, self._provider_secrets()) or None,
             contract_version=spec.contract or SANDBOX_CONTRACT_V1.version,
         )
+
+    @staticmethod
+    def _starting_image(sdk: Any, request: BuildRequest, authored: Any, scratch: Path) -> Any:
+        """The image the chain starts from: the base, or the author's Dockerfile on it.
+
+        A Dockerfile source (E3-03) starts from the author's own Dockerfile,
+        its base pinned to the digest the resolver chose — which is also what
+        the build's registry entry lets Daytona pull. The contract's steps are
+        chained after it either way.
+        """
+        if authored is None:
+            return sdk.Image.base(request.resolved_base)
+        dockerfile = scratch / "Dockerfile"
+        dockerfile.write_text(
+            pin_dockerfile_base(authored.content, request.resolved_base), encoding="utf-8"
+        )
+        return sdk.Image.from_dockerfile(str(dockerfile))
 
     def _resources(self, sdk: Any, size_class: str) -> Any:
         """The CPU resources a size class bakes into the snapshot (§11.3 item 4)."""

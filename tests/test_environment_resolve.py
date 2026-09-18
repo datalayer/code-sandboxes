@@ -440,17 +440,6 @@ class TestResolvingAVersion:
             resolve_environment(spec=a_spec(), variants=["datalayer"], runner=runner, bases=BASES)
         assert raised.value.code.code == "DL_ENV_RESOLVE_CONFLICT"
 
-    def test_a_form_that_is_not_packages_is_refused_by_name(self) -> None:
-        with pytest.raises(EnvironmentsError) as raised:
-            resolve_environment(
-                spec=a_spec(build={"source": "dockerfile"}),
-                variants=["datalayer"],
-                runner=RecordedRunner(A_LOCK),
-                bases=BASES,
-            )
-        assert raised.value.code.code == "DL_ENV_CAPABILITY_UNSUPPORTED"
-        assert raised.value.detail["source"] == "dockerfile"
-
     def test_conda_waits_for_its_own_solver(self) -> None:
         spec = a_spec(
             packages={"python": {"manager": "conda", "dependencies": ["geopandas=1.1.1"]}}
