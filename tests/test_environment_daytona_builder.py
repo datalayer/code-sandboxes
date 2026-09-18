@@ -208,9 +208,12 @@ class FakeSnapshotService:
         create_error: Exception | None = None,
         get_results: dict[str, FakeSnapshot] | None = None,
         get_errors: dict[str, Exception] | None = None,
+        delete_errors: dict[str, Exception] | None = None,
     ) -> None:
         self.create_calls: list[Call] = []
         self.get_calls: list[Call] = []
+        self.delete_calls: list[Call] = []
+        self._delete_errors = delete_errors or {}
         self._create_result = create_result
         self._create_error = create_error
         self._get_results = get_results or {}
@@ -235,6 +238,15 @@ class FakeSnapshotService:
         if name_or_id in self._get_results:
             return self._get_results[name_or_id]
         raise FakeDaytonaNotFoundError(f"no such snapshot {name_or_id}")
+
+    def delete(self, snapshot: Any) -> None:
+        """As the SDK's: an id or a name, and a missing one is not found."""
+        self.delete_calls.append(Call("delete", (snapshot,)))
+        if snapshot in self._delete_errors:
+            raise self._delete_errors[snapshot]
+        if snapshot not in self._get_results:
+            raise FakeDaytonaNotFoundError(f"no such snapshot {snapshot}")
+        del self._get_results[snapshot]
 
 
 class FakeDaytonaClient:
@@ -833,6 +845,55 @@ class TestReadingTheRegistry:
         builder.build(a_request())
         builder.exists(an_artifact(provider_artifact_id="snp-999"))
         assert len(daytona.daytona_calls) == 1
+
+
+class TestDeletingASnapshot:
+    """E2-18: retention and a failed build both need a snapshot to go."""
+
+    def test_exists_is_false_after_delete(self) -> None:
+        service = FakeSnapshotService(get_results={"snp-123": FakeSnapshot(id="snp-123")})
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        artifact = an_artifact(provider_artifact_id="snp-123")
+        assert builder.exists(artifact) is True
+        builder.delete(artifact)
+        assert builder.exists(artifact) is False
+
+    def test_it_deletes_by_id_never_by_the_name(self) -> None:
+        """A name is reused once its snapshot is deleted (E0-04), so deleting
+        by name could remove a later build's snapshot that inherited it."""
+        service = FakeSnapshotService(get_results={"snp-123": FakeSnapshot(id="snp-123")})
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        builder.delete(an_artifact(provider_artifact_id="snp-123", mutable_alias="dl-geo-v3"))
+        assert [call.args for call in service.delete_calls] == [("snp-123",)]
+
+    def test_deleting_what_is_already_gone_is_a_success(self) -> None:
+        """The collector deletes first and marks second (E1-17): a sweep
+        that died in between deletes again, and must not be refused for it."""
+        service = FakeSnapshotService(get_results={"snp-123": FakeSnapshot(id="snp-123")})
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        artifact = an_artifact(provider_artifact_id="snp-123")
+        builder.delete(artifact)
+        builder.delete(artifact)
+        assert len(service.delete_calls) == 2
+
+    def test_any_other_failure_is_a_provider_error_and_not_a_success(self) -> None:
+        service = FakeSnapshotService(
+            get_results={"snp-123": FakeSnapshot(id="snp-123")},
+            delete_errors={"snp-123": RuntimeError("the snapshot is in use")},
+        )
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            builder.delete(an_artifact(provider_artifact_id="snp-123"))
+        assert raised.value.code.code == PROVIDER_ERROR.code
+        assert "in use" in raised.value.message
 
 
 class TestSmokeTestingASnapshot:

@@ -293,6 +293,27 @@ class TestWhatIsSaidBeforeAnythingIsQueued:
         assert "a `pyproject` dependency file is not built for E2B yet" in messages(report)
         assert "spec.build.dependencyFile.sourceFormat" in fields(report)
 
+    @pytest.mark.parametrize(
+        "dependency_file",
+        [
+            {"sourceFormat": "requirements", "content": "geopandas==1.1.1\n"},
+            {
+                "sourceFormat": "pyproject",
+                "content": "[project]\nname='x'\nversion='0'\n",
+                "lockContent": "version = 1\n",
+            },
+        ],
+        ids=["requirements", "pyproject"],
+    )
+    def test_daytona_builds_a_pip_dependency_file(self, dependency_file: dict) -> None:
+        """Both resolve to the pip lock a `packages` list does (E3-01), and
+        Daytona's build installs that lock whatever wrote it. Refusing them
+        kept E3-08's first two examples and half of E3-09 off Daytona."""
+        report = get_builder("daytona").validate(
+            environment(build={"source": "dependencyFile", "dependencyFile": dependency_file})
+        )
+        assert report.supported is True, messages(report)
+
     def test_e2b_and_daytona_refuse_a_build_secret_e0_04_found_no_mechanism_for(self) -> None:
         """E0-04's spike found only a registry login for the private base on
         either provider, never a per-step arbitrary named secret: a spec
@@ -382,12 +403,11 @@ class TestTheHalfThatIsNotBuiltYet:
         """`build`, `inspect`, `exists` and now `smoke_test` are E2-04's —
         the last of them because this box's own `Done when` asks for "a
         sandbox launched from its id passes the core tier", and until it was
-        built no Daytona build could reach `succeeded`. `resolve` and `delete`
-        are still not built — see test_environment_daytona_builder.py."""
+        built no Daytona build could reach `succeeded`. `delete` is E2-18's.
+        `resolve` is still not built — see test_environment_daytona_builder.py."""
         builder = get_builder("daytona")
         calls = {
             "resolve": lambda: builder.resolve("geo@1"),
-            "delete": lambda: builder.delete(None),  # type: ignore[arg-type]
         }
         for operation, call in calls.items():
             with pytest.raises(EnvironmentsError) as raised:
