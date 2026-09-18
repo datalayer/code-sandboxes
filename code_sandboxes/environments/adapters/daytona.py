@@ -178,15 +178,18 @@ class Builder(ManagedBuilder):
     variant = "daytona"
     item = "E2-04"
     title = "Daytona"
-    #: A `packages` list and, for conda (E3-02), an `environment.yml`
-    #: dependency file installed with `micromamba`.
+    #: A `packages` list, or a dependency file: a conda `environment.yml`
+    #: installed with `micromamba` (E3-02), and a `requirements.txt` or a
+    #: `pyproject.toml` with its lock (E3-01), both of which resolve to the
+    #: very pip lock a `packages` list does — `build` tells a conda lock from
+    #: a pip one and nothing finer, so nothing here is format-specific.
     build_sources = ("packages", "dependencyFile", "dockerfile")
     #: None beyond the contract's own (E3-03): `Image.from_dockerfile` keeps
     #: the Dockerfile text as it is and Daytona builds it on a real Docker
     #: builder, so the grammar it accepts is Docker's. Checked in the SDK on
     #: 2026-09-17.
     forbidden_instructions = ()
-    dependency_formats = ("conda",)
+    dependency_formats = ("requirements", "pyproject", "conda")
     #: Daytona runs GPUs, on its own hardware and the owner's account (E2-17).
     #: This builder does not build one yet: see `_own_findings`.
     gpu = True
@@ -567,6 +570,29 @@ class Builder(ManagedBuilder):
         except Exception as error:
             raise self._provider_error("ask whether the snapshot exists", error) from error
         return True
+
+    def delete(self, artifact: ArtifactReference) -> None:
+        """Remove the snapshot, by id; one already gone is removed (E2-18).
+
+        Deleting what is gone is a success because the collector deletes
+        first and marks second (E1-17): a sweep that died between the two
+        deletes again tomorrow, and must not be refused for having worked.
+
+        **By id, never by name.** The SDK takes either, and a name is reused
+        once its snapshot is deleted (E0-04) — deleting by name could remove
+        a later build's snapshot that inherited it.
+        """
+        sdk = self._daytona_sdk()
+        client = self._client(sdk)
+        snapshot = artifact.provider_artifact_id or artifact.immutable_reference
+        try:
+            client.snapshot.delete(snapshot)
+        except sdk.DaytonaNotFoundError:
+            self._log(f"The Daytona snapshot {snapshot} was already gone")
+            return
+        except Exception as error:
+            raise self._provider_error("delete the snapshot", error) from error
+        self._log(f"Deleted the Daytona snapshot {snapshot}")
 
     def smoke_test(
         self,
