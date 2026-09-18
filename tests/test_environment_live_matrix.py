@@ -145,13 +145,24 @@ class _DaytonaCredential:
 
 
 class _ModalCredential:
+    """The shape durable's `_mint_credential` gives a managed build: Modal
+    reads `aws_session`, the base-reader session (D-18). This used to put
+    the AWS keys in `username`/`password`, a shape the worker never
+    produces — so this test passed while the worker's Modal builds failed
+    their base pull. The keys here are whatever AWS credential the person
+    running the live test holds; a session token is passed on when there is
+    one."""
+
     def __init__(self) -> None:
         self.provider_secrets = {
             "MODAL_TOKEN_ID": os.environ.get("MODAL_TOKEN_ID", ""),
             "MODAL_TOKEN_SECRET": os.environ.get("MODAL_TOKEN_SECRET", ""),
         }
-        self.username = os.environ.get("AWS_ACCESS_KEY_ID", "")
-        self.password = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+        self.aws_session = {
+            name: os.environ[name]
+            for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
+            if os.environ.get(name)
+        }
 
 
 def _build_request(variant: str, resolved_base: str, lock_text: str) -> BuildRequest:

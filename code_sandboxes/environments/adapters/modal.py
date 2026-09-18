@@ -536,23 +536,31 @@ class Builder(ManagedBuilder):
         return declared, values
 
     def _ecr_secret(self, sdk: Any, client: Any) -> Any | None:
-        """A Modal Secret carrying this build's own base-reader credential (D-17, D-18).
+        """A Modal Secret carrying this build's base-reader session (D-17, D-18).
 
-        `None` when the credential carries no registry login: the base is
-        then whatever the ambient workspace can already reach, the same
-        fallback `_client` takes with no owner token.
+        `from_aws_ecr` wants the IAM session itself — keys, token and region —
+        not the docker-login `AWS`/token pair Daytona and E2B take, which is
+        what the credential's `username`/`password` hold. So it reads
+        `aws_session`. Reading the login pair as IAM keys is what this did
+        until 2026-09-18: the worker minted `AWS`/<ECR token>, this wrote it
+        as `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, and AWS answered "The
+        security token included in the request is invalid" on the base pull,
+        so no Modal build through the worker could ever succeed.
+
+        `None` when the credential carries no session: the base is then
+        whatever the ambient workspace can already reach, the same fallback
+        `_client` takes with no owner token.
         """
-        username = str(getattr(self._credential, "username", "") or "")
-        password = str(getattr(self._credential, "password", "") or "")
-        if not (username and password):
+        session = dict(getattr(self._credential, "aws_session", None) or {})
+        if not (session.get("AWS_ACCESS_KEY_ID") and session.get("AWS_SECRET_ACCESS_KEY")):
             return None
-        # `from_aws_ecr` wants IAM-shaped credentials, not the docker-login
-        # `AWS`/token pair Daytona and E2B take (found live, 2026-09-13):
-        # the same D-17 session, read differently.
         secret = sdk.Secret.from_dict(
             {
-                "AWS_ACCESS_KEY_ID": username,
-                "AWS_SECRET_ACCESS_KEY": password,
+                **{
+                    name: str(session[name])
+                    for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
+                    if session.get(name)
+                },
                 "AWS_REGION": self._region,
             }
         )

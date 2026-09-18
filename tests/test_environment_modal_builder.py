@@ -67,14 +67,27 @@ CONDA_SPEC = {
 
 
 class Credential:
-    """The build's owner secrets, as the workflow mints them (D-8, D-17, E2-01)."""
+    """The build's credential in exactly the shape durable's `_mint_credential`
+    returns for a managed variant (D-8, D-17, D-18, E2-01).
+
+    `username`/`password` are the ECR login pair minted from the base-reader
+    session — what E2B and Daytona take — and `aws_session` is the session
+    itself, which is what Modal takes. This double used to put IAM keys in
+    `username`/`password`, a shape the worker never produces, so these tests
+    passed while every real Modal build failed its base pull with "The
+    security token included in the request is invalid" (2026-09-18)."""
 
     provider_secrets: ClassVar[dict[str, str]] = {
         "MODAL_TOKEN_ID": "owners-modal-token-id",
         "MODAL_TOKEN_SECRET": "owners-modal-token-secret",
     }
-    username: ClassVar[str] = "AKIA-owners-access-key"
-    password: ClassVar[str] = "owners-secret-key"
+    username: ClassVar[str] = "AWS"
+    password: ClassVar[str] = "ecr-login-token-from-the-session"
+    aws_session: ClassVar[dict[str, str]] = {
+        "AWS_ACCESS_KEY_ID": "ASIA-base-reader-session",
+        "AWS_SECRET_ACCESS_KEY": "base-reader-session-secret",
+        "AWS_SESSION_TOKEN": "base-reader-session-token",
+    }
 
 
 class NoRegistryCredential:
@@ -465,13 +478,24 @@ class TestBuildingAnImage:
         [call] = modal.Image.from_aws_ecr_calls
         assert call.args[0] == BASE
 
-    def test_the_ecr_secret_carries_the_credential(self) -> None:
+    def test_the_ecr_secret_carries_the_base_reader_session(self) -> None:
+        """Modal takes the session itself — keys, token, region (D-18).
+
+        Not the ECR login pair: `from_aws_ecr` calls AWS with what the secret
+        holds, and `AWS`/<token> as IAM keys is "The security token included
+        in the request is invalid" on the base pull. This test asserted that
+        exact mapping until 2026-09-18.
+        """
         modal = FakeModalModule()
         a_builder(modal=modal).build(a_request())
         [secret] = modal.Secret.from_dict_calls
-        assert secret.env_dict["AWS_ACCESS_KEY_ID"] == Credential.username
-        assert secret.env_dict["AWS_SECRET_ACCESS_KEY"] == Credential.password
-        assert secret.env_dict["AWS_REGION"] == "us-east-1"
+        assert secret.env_dict == {
+            "AWS_ACCESS_KEY_ID": Credential.aws_session["AWS_ACCESS_KEY_ID"],
+            "AWS_SECRET_ACCESS_KEY": Credential.aws_session["AWS_SECRET_ACCESS_KEY"],
+            "AWS_SESSION_TOKEN": Credential.aws_session["AWS_SESSION_TOKEN"],
+            "AWS_REGION": "us-east-1",
+        }
+        assert Credential.password not in secret.env_dict.values()
 
     def test_no_secret_with_no_pull_credential(self) -> None:
         modal = FakeModalModule()
