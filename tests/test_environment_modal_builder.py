@@ -1000,3 +1000,84 @@ class TestTheIntermediateLayers:
                 an_artifact(provider_artifact_id="im-built", immutable_reference="im-built")
             )
         assert raised.value.code is PROVIDER_ERROR
+
+
+class TestSmokeTestingAnImage:
+    """E2-05's own `Done when`: "the live test launches by image id and
+    passes the core tier". It refused through `ManagedBuilder`, and the
+    build workflow calls this step — so no Modal build could reach
+    `succeeded`, the state Daytona was in until 2026-09-17."""
+
+    def _environment(self):
+        return parse_environment(a_request().environment.model_dump(by_alias=True))
+
+    def _artifact(self) -> ArtifactReference:
+        return ArtifactReference(
+            variant="modal",
+            immutable_reference="im-1",
+            provider_artifact_id="im-1",
+            contract_version="sandbox-contract/v1",
+        )
+
+    def test_it_launches_by_image_id_as_the_owner_and_runs_the_core_tier(self, monkeypatch) -> None:
+        """By id, since a published name is mutable by design; and with the
+        owner's own client, so the sandbox runs in the workspace the image
+        is in (D-8) — not whatever token the worker happens to hold."""
+        made: dict = {}
+        ran: dict = {}
+        modal = FakeModalModule()
+
+        class FakeSandbox:
+            def __init__(self, **kwargs):
+                made.update(kwargs)
+
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+        monkeypatch.setattr("code_sandboxes.modal_sandbox.ModalSandbox", FakeSandbox)
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_core_tier",
+            lambda sandbox, **kwargs: ran.update(kwargs) or "the-result",
+        )
+        answer = a_builder(modal=modal).smoke_test(
+            self._artifact(), environment=self._environment(), lock_text=LOCK
+        )
+        assert answer == "the-result"
+        assert made["image_id"] == "im-1"
+        assert made["client"] is modal.client
+        assert modal.Client.from_credentials_calls, "the owner's token, not the ambient one"
+        assert made["app_name"] == "dl-geospatial-analysis"
+        assert ran["python_version"] == "3.13" and "restart" in ran
+
+    def test_the_sandbox_is_stopped_even_when_the_tier_raises(self, monkeypatch) -> None:
+        """A smoke test that leaves a sandbox running bills the owner for a check."""
+        events: list[str] = []
+
+        class FakeSandbox:
+            def __init__(self, **_kwargs):
+                pass
+
+            def start(self):
+                events.append("start")
+
+            def stop(self):
+                events.append("stop")
+
+        monkeypatch.setattr("code_sandboxes.modal_sandbox.ModalSandbox", FakeSandbox)
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_core_tier",
+            lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("the tier blew up")),
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder().smoke_test(self._artifact(), environment=self._environment())
+        assert raised.value.code is PROVIDER_ERROR
+        assert events == ["start", "stop"]
+
+    def test_without_a_spec_it_says_what_it_needs(self) -> None:
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder().smoke_test(self._artifact())
+        assert raised.value.code is CAPABILITY_UNSUPPORTED
+        assert "needs the version's spec" in str(raised.value)

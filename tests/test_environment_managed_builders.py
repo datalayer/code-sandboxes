@@ -349,13 +349,13 @@ class TestTheHalfThatIsNotBuiltYet:
     `ManagedBuilder` methods on all three."""
 
     def test_modal_still_refuses_what_e2_05_did_not_build(self) -> None:
-        """`build`/`inspect`/`exists` are E2-05's, and `delete` is now too — it
-        collects the intermediate layers a build recorded (E2-05, E2-09).
-        `smoke_test` and `resolve` are still not built — see
+        """`build`/`inspect`/`exists` are E2-05's, `delete` is too — it
+        collects the intermediate layers a build recorded (E2-05, E2-09) —
+        and so is `smoke_test`, since without it no Modal build could reach
+        `succeeded`. `resolve` is still not built — see
         test_environment_modal_builder.py for what is."""
         builder = get_builder("modal")
         calls = {
-            "smoke_test": lambda: builder.smoke_test(None),  # type: ignore[arg-type]
             "resolve": lambda: builder.resolve("geo@1"),
         }
         for operation, call in calls.items():
