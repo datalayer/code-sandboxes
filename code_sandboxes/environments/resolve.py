@@ -83,6 +83,7 @@ if TYPE_CHECKING:
 __all__ = [
     "APT_PIN_PREFIX",
     "APT_SNAPSHOT_PREFIX",
+    "BUILDKIT_PROXY_ENV",
     "CONSTRAINTS_PATH",
     "COVERAGE_PREFIX",
     "DOCKERFILE_COVERAGE",
@@ -98,6 +99,8 @@ __all__ = [
     "apt_pins",
     "apt_pins_in",
     "apt_snapshot_in",
+    "buildkit_proxy",
+    "buildkit_proxy_options",
     "lock_document",
     "locked_versions",
     "merge_requirements",
@@ -144,6 +147,46 @@ DOCKERFILE_COVERAGE = (
 #: version can leave the live mirror (D-9).
 APT_SNAPSHOT_PREFIX = "# datalayer-apt-snapshot: "
 _SNAPSHOT_ID = re.compile(r"^\d{8}T\d{6}Z$")
+
+#: Where a build's own steps reach the network through, when the build pool
+#: gives them nowhere else to go (E1-06): an HTTP proxy that allows only the
+#: package indexes, the snapshot mirrors and the registries. The address is
+#: the one `buildkitd` itself sees, since a step runs in its network.
+BUILDKIT_PROXY_ENV = "DATALAYER_BUILDKIT_PROXY"
+_PROXY_URL = re.compile(r"^http://[A-Za-z0-9.\-]+:\d{1,5}$")
+
+
+def buildkit_proxy(proxy: str | None = None) -> str:
+    """The proxy a build's steps go through: ``proxy``, or the environment's.
+
+    Empty is no proxy, which is what a `buildkitd` with open egress needs
+    (`plane local`'s own). Anything that is not ``http://host:port`` is
+    refused rather than handed to every package manager of every build.
+    """
+    value = (os.environ.get(BUILDKIT_PROXY_ENV, "") if proxy is None else proxy).strip()
+    if value and not _PROXY_URL.match(value):
+        raise ValueError(f"{BUILDKIT_PROXY_ENV} must be http://host:port, not {value!r}")
+    return value
+
+
+def buildkit_proxy_options(proxy: str) -> list[str]:
+    """The ``buildctl`` options that send a build's steps through ``proxy``.
+
+    The Dockerfile frontend predefines these build args: a ``RUN`` step sees
+    them without an ``ARG``, they never reach the image's config or history,
+    and they do not change a cache key. Both spellings, since ``apt`` and
+    ``curl`` read only the lower-case one for plain HTTP and ``uv``, ``pip``
+    and ``micromamba`` read either.
+    """
+    if not proxy:
+        return []
+    options: list[str] = []
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        options += ["--opt", f"build-arg:{name}={proxy}"]
+    for name in ("NO_PROXY", "no_proxy"):
+        options += ["--opt", f"build-arg:{name}=127.0.0.1,localhost"]
+    return options
+
 
 #: How a protected pin is recorded in the lock.
 PROTECTED_PIN_PREFIX = "# datalayer-protected: "
@@ -623,8 +666,11 @@ class BuildkitResolveRunner:
         tlscacert: str | None = None,
         apt_snapshot: str = "",
         timeout: float = 900.0,
+        proxy: str | None = None,
     ) -> None:
         self._buildctl = (shutil.which("buildctl") or "") if buildctl is None else buildctl
+        #: The build pool's egress proxy (E1-06), or `DATALAYER_BUILDKIT_PROXY`.
+        self._proxy = buildkit_proxy(proxy)
         #: The build pool's `buildkitd` takes mTLS connections only
         #: (PLAN_ENV.md E1-06); a plain-socket one, such as `plane local`'s
         #: own ephemeral daemon, needs none of these three. All or nothing,
@@ -761,6 +807,7 @@ class BuildkitResolveRunner:
                 f"dockerfile={root}",
                 "--output",
                 f"type=local,dest={out}",
+                *buildkit_proxy_options(self._proxy),
             ]
             say(f"Solving the lock in {request.base_reference}")
             try:

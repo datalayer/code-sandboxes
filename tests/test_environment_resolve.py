@@ -1315,6 +1315,34 @@ class TestTheBuildkitRunner:
             )
         assert not any(arg.startswith("--tls") for arg in seen["argv"])
 
+    def test_the_solve_goes_through_the_pools_proxy(self, monkeypatch) -> None:
+        """The solve reaches the index the way a build does, through the
+        build pool's proxy (E1-06)."""
+        import subprocess as subprocess_module
+
+        from code_sandboxes.environments import resolve as resolve_module
+        from code_sandboxes.environments.resolve import BuildkitResolveRunner
+
+        seen: dict[str, list[str]] = {}
+
+        def fake_run(command, **kwargs):
+            seen["argv"] = list(command)
+            return subprocess_module.CompletedProcess(command, 1, "", "boom")
+
+        monkeypatch.setattr(resolve_module.subprocess, "run", fake_run)
+        with pytest.raises(EnvironmentsError):
+            BuildkitResolveRunner(buildctl="/usr/bin/true", proxy="http://127.0.0.1:3128").solve(
+                ResolveRequest(
+                    python_version="3.13",
+                    requirements=("ipykernel==7.3.0",),
+                    constraints=(),
+                    indexes=(),
+                    base_reference="environments/base/python-cpu@sha256:" + "11" * 32,
+                )
+            )
+        assert "build-arg:HTTPS_PROXY=http://127.0.0.1:3128" in seen["argv"]
+        assert "build-arg:https_proxy=http://127.0.0.1:3128" in seen["argv"]
+
     def test_it_refuses_a_base_that_is_not_pinned_by_digest(self) -> None:
         from code_sandboxes.environments.resolve import BuildkitResolveRunner
 

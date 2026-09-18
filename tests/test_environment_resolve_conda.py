@@ -370,6 +370,30 @@ class TestTheRunners:
             )
         assert caught.value.code.code == "DL_ENV_CAPABILITY_UNSUPPORTED"
 
+    def test_the_buildkit_runner_goes_through_the_pools_proxy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The conda solve reaches its channels the way a build does, through
+        # the build pool's proxy (E1-06).
+        seen: dict[str, list[str]] = {}
+
+        def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            seen["argv"] = list(argv)
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="boom")
+
+        monkeypatch.setenv("DATALAYER_BUILDKIT_PROXY", "http://127.0.0.1:3128")
+        monkeypatch.setattr("code_sandboxes.environments.resolve_conda.subprocess.run", fake_run)
+        runner = BuildkitCondaResolveRunner(buildctl="/usr/bin/buildctl")
+        with pytest.raises(EnvironmentsError):
+            runner.solve(
+                CondaResolveRequest(
+                    environment_yml=A_YAML,
+                    python_version="3.13",
+                    base_reference="base@sha256:" + "11" * 32,
+                )
+            )
+        assert "build-arg:https_proxy=http://127.0.0.1:3128" in seen["argv"]
+
     def test_the_buildkit_runner_refuses_an_unpinned_base(self) -> None:
         runner = BuildkitCondaResolveRunner(buildctl="/usr/bin/buildctl")
         with pytest.raises(EnvironmentsError) as caught:

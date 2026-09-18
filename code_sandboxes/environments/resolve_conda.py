@@ -68,6 +68,8 @@ from .resolve import (
     WHEELHOUSE_PATH,
     MergedRequirements,
     ProtectedPin,
+    buildkit_proxy,
+    buildkit_proxy_options,
     merge_requirements,
 )
 
@@ -684,8 +686,11 @@ class BuildkitCondaResolveRunner:
         tlskey: str | None = None,
         tlscacert: str | None = None,
         timeout: float = 1200.0,
+        proxy: str | None = None,
     ) -> None:
         self._buildctl = (shutil.which("buildctl") or "") if buildctl is None else buildctl
+        #: The build pool's egress proxy (E1-06), or `DATALAYER_BUILDKIT_PROXY`.
+        self._proxy = buildkit_proxy(proxy)
         self._tlscert = tlscert or ""
         self._tlskey = tlskey or ""
         self._tlscacert = tlscacert or ""
@@ -778,6 +783,7 @@ class BuildkitCondaResolveRunner:
                 f"dockerfile={root}",
                 "--output",
                 f"type=local,dest={out}",
+                *buildkit_proxy_options(self._proxy),
             ]
             say(f"Solving the conda lock in {request.base_reference}")
             try:

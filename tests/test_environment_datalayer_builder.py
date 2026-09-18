@@ -726,6 +726,27 @@ class TestBuildingAndPushing:
         a_builder(run=buildctl, tlscert="/certs/client/tls.crt").build(a_request())
         assert not any(arg.startswith("--tls") for arg in buildctl.argv)
 
+    def test_the_steps_go_through_the_pools_proxy(self, monkeypatch) -> None:
+        """The build pool lets a step reach the network only through its
+        proxy (E1-06), so every step is handed it, in both spellings."""
+        monkeypatch.setenv("DATALAYER_BUILDKIT_PROXY", "http://127.0.0.1:3128")
+        buildctl = Buildctl()
+        a_builder(run=buildctl).build(a_request())
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+            assert f"build-arg:{name}=http://127.0.0.1:3128" in buildctl.argv
+        assert "build-arg:NO_PROXY=127.0.0.1,localhost" in buildctl.argv
+
+    def test_no_proxy_when_none_is_set(self, monkeypatch) -> None:
+        """A `buildkitd` whose steps reach the network directly needs none."""
+        monkeypatch.delenv("DATALAYER_BUILDKIT_PROXY", raising=False)
+        buildctl = Buildctl()
+        a_builder(run=buildctl).build(a_request())
+        assert not any("proxy" in arg.lower() for arg in buildctl.argv)
+
+    def test_a_proxy_that_is_not_http_host_port_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="DATALAYER_BUILDKIT_PROXY"):
+            a_builder(proxy="socks5://127.0.0.1:1080")
+
     def test_the_docker_config_does_not_outlive_the_build(self) -> None:
         """A registry password base64'd into a file the worker keeps forever
         is a credential leak on disk, whichever way the build ends (found on
