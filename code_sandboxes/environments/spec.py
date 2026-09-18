@@ -49,6 +49,7 @@ from .image_import import (
     parse_image_reference,
 )
 from .lifecycle import VersionState
+from .policy import UNRESTRICTED_POLICY, EnvironmentsPolicy
 
 __all__ = [
     "API_VERSION",
@@ -465,6 +466,24 @@ def _requirement_problem(text: str) -> str | None:
     return None
 
 
+def _requirement_name(text: str) -> str:
+    """The package name a dependency line asks for, or `""` when it cannot be read.
+
+    `_requirement_problem` already refused a line this cannot parse; a
+    package-policy check that ran on the same line anyway would raise the
+    same problem a second time under a different finding, so this answers
+    empty rather than raising and lets the caller skip it.
+    """
+    try:
+        from packaging.requirements import InvalidRequirement, Requirement
+    except ImportError:  # pragma: no cover - packaging ships with pip and jupyter
+        return ""
+    try:
+        return Requirement(text).name
+    except InvalidRequirement:
+        return ""
+
+
 def _index_findings(field: str, url: str) -> list[SpecFinding]:
     if _URL_CREDENTIALS.match(url):
         return [
@@ -594,7 +613,14 @@ def _conda_environment_findings(content: str) -> list[SpecFinding]:
     return []
 
 
-def _image_findings(image: ImageSourceSpec | None) -> list[SpecFinding]:
+def _image_findings(
+    image: ImageSourceSpec | None, *, registries: tuple[str, ...] = DEFAULT_ALLOWED_REGISTRIES
+) -> list[SpecFinding]:
+    """`registries` is the platform bootstrap, widened with an organization's
+    own private ones when its policy names any (E3-06) — never narrowed to
+    just the organization's list, since the public bootstrap stays reachable
+    whatever an organization's own policy adds, the same reading
+    `refuse_unless_allowed`'s own docstring already gives this list."""
     field = "spec.build.image"
     if image is None:
         return [SpecFinding(field, "is required when `spec.build.source` is `image`")]
@@ -604,12 +630,12 @@ def _image_findings(image: ImageSourceSpec | None) -> list[SpecFinding]:
         parsed = parse_image_reference(image.reference)
     except EnvironmentsError as error:
         return [SpecFinding(f"{field}.reference", error.message)]
-    if not image_registry_allowed(parsed) and not image.credential_secret_id:
+    if not image_registry_allowed(parsed, registries) and not image.credential_secret_id:
         return [
             SpecFinding(
                 f"{field}.reference",
                 f"`{parsed.registry}` is not an allowed registry; allowed: "
-                + ", ".join(DEFAULT_ALLOWED_REGISTRIES)
+                + ", ".join(registries)
                 + ", or reference a credential for a private one",
                 POLICY_DENIED,
             )
@@ -617,8 +643,76 @@ def _image_findings(image: ImageSourceSpec | None) -> list[SpecFinding]:
     return []
 
 
+def _organization_findings(
+    environment: Environment, policy: EnvironmentsPolicy
+) -> list[SpecFinding]:
+    """What an organization's own policy denies, beyond the platform's own
+    rules above (E3-06). A no-op field by field for a dimension the
+    organization has not narrowed — :data:`UNRESTRICTED_POLICY` produces no
+    findings here at all, which is every spec's reading until an
+    organization writes one.
+
+    Bases and packages are checked against the organization's own list
+    alone: an organization can only ever *forbid* an approved base (the
+    platform decides which bases exist at all) and there is no platform
+    allowlist of packages to widen. Indexes and licences are the same, and
+    licences are checked at attestation instead, once the SBOM names which
+    package actually carries one (`policy.refuse_unlicensed`) — a spec names
+    no licences of its own to check here. Registries are the one dimension
+    `_image_findings` widens rather than narrows; see its own docstring.
+    """
+    findings: list[SpecFinding] = []
+    spec = environment.spec
+    if (
+        spec.build.source not in ("image", "dockerfile")
+        and policy.allowed_bases is not None
+        and not policy.allows("bases", spec.base.ref)
+    ):
+        findings.append(
+            SpecFinding(
+                "spec.base.ref",
+                f"`{spec.base.ref}` is not an allowed base under this organization's "
+                "policy (the approved bases it allows: "
+                + (", ".join(policy.allowed_bases) or "(none)")
+                + ")",
+                POLICY_DENIED,
+            )
+        )
+    if policy.allowed_indexes is not None:
+        for index, url in enumerate(spec.packages.python.indexes):
+            if not policy.allows("indexes", url):
+                findings.append(
+                    SpecFinding(
+                        f"spec.packages.python.indexes[{index}]",
+                        f"`{url}` is not an allowed index under this organization's policy "
+                        "(the indexes it allows: "
+                        + (", ".join(policy.allowed_indexes) or "(none)")
+                        + ")",
+                        POLICY_DENIED,
+                    )
+                )
+    if policy.allowed_packages is not None:
+        for group_index, requirement in enumerate(spec.packages.python.dependencies):
+            name = _requirement_name(requirement)
+            if name and not policy.allows("packages", name):
+                findings.append(
+                    SpecFinding(
+                        f"spec.packages.python.dependencies[{group_index}]",
+                        f"`{name}` is not an allowed package under this organization's "
+                        "policy (the packages it allows: "
+                        + (", ".join(policy.allowed_packages) or "(none)")
+                        + ")",
+                        POLICY_DENIED,
+                    )
+                )
+    return findings
+
+
 def spec_findings(
-    environment: Environment, *, bases: Mapping[str, ApprovedBase] = APPROVED_BASES
+    environment: Environment,
+    *,
+    bases: Mapping[str, ApprovedBase] = APPROVED_BASES,
+    policy: EnvironmentsPolicy = UNRESTRICTED_POLICY,
 ) -> list[SpecFinding]:
     """Every rule of the specification the environment breaks."""
     findings: list[SpecFinding] = []
@@ -685,7 +779,12 @@ def spec_findings(
     elif spec.build.source == "dockerfile":
         findings.extend(_dockerfile_findings(spec.build.dockerfile))
     elif spec.build.source == "image":
-        findings.extend(_image_findings(spec.build.image))
+        registries = (
+            DEFAULT_ALLOWED_REGISTRIES + policy.allowed_registries
+            if policy.allowed_registries
+            else DEFAULT_ALLOWED_REGISTRIES
+        )
+        findings.extend(_image_findings(spec.build.image, registries=registries))
 
     python = spec.packages.python
     if python.manager not in SUPPORTED_PACKAGE_MANAGERS:
@@ -884,6 +983,7 @@ def spec_findings(
                     f"spec.compatibility.regions[{index}]", f"`{region}` is not a region name"
                 )
             )
+    findings.extend(_organization_findings(environment, policy))
     return findings
 
 
@@ -930,6 +1030,7 @@ def validate_environment(
     document: Mapping[str, Any] | str | Environment,
     *,
     bases: Mapping[str, ApprovedBase] = APPROVED_BASES,
+    policy: EnvironmentsPolicy = UNRESTRICTED_POLICY,
 ) -> Environment:
     """The Environment, or the error its findings amount to.
 
@@ -937,11 +1038,18 @@ def validate_environment(
     field always outranks the rest, whatever else the spec also asks for.
     Failing that, the first finding's own code is what is raised: valid but
     unbuildable yet is ``DL_ENV_CAPABILITY_UNSUPPORTED``, an image off the
-    allowlist is ``DL_ENV_POLICY_DENIED`` (E3-04), and so on for whatever a
-    future rule adds. Either way every finding is listed.
+    allowlist is ``DL_ENV_POLICY_DENIED`` (E3-04), an index or a base or a
+    package an organization's own policy denies is the same code (E3-06),
+    and so on for whatever a future rule adds. Either way every finding is
+    listed.
+
+    `policy` is the caller's own organization's environments policy, or
+    :data:`UNRESTRICTED_POLICY` for a personal owner, or an organization
+    that has not written this section — the reading every other MCP policy
+    rule gives an unset one.
     """
     environment = parse_environment(document)
-    findings = spec_findings(environment, bases=bases)
+    findings = spec_findings(environment, bases=bases, policy=policy)
     if findings:
         invalid = [finding for finding in findings if finding.code is SPEC_INVALID]
         first = invalid[0] if invalid else findings[0]
