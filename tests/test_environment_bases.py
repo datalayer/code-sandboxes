@@ -32,7 +32,7 @@ def test_the_2026_09_channel_of_python_cuda_resolves_the_digest_its_release_push
     carrying the CUDA 12.8 toolkit a spec's `accelerator.cuda` may ask for."""
     base = APPROVED_BASES["datalayer/python-cuda"]
     assert resolve_base(base.ref, "2026.09", variant) == (
-        "sha256:a6374a2d4ff07c8a8fe0a71ee605964f93319894cc4152c4e2a1af6258ac9e6a"
+        "sha256:dc8f0015b4f7dbca92a88d2d6a4a96714b76f9a1af9dddd86835812493e40f08"
     )
     assert (base.accelerator, base.cuda) == (True, "12.8")
 
