@@ -1026,6 +1026,16 @@ class TestTheIntermediateLayers:
         # The built image is the artifact, not an intermediate.
         assert _intermediates_of(built) == ("im-base", "im-middle")
 
+    def test_the_builds_ecr_secret_is_not_an_intermediate(self) -> None:
+        """It sits in `deps()` beside the layers, with an `st-` id `ImageDelete`
+        refuses as "not a valid Image ID" (found live, 2026-09-18)."""
+        from code_sandboxes.environments.adapters.modal import _intermediates_of
+
+        secret = _Layer(object_id="st-ecr", deps=lambda: ())
+        base = _Layer(object_id="im-base", deps=lambda: (secret,))
+        built = _Layer(object_id="im-built", deps=lambda: (base,))
+        assert _intermediates_of(built) == ("im-base",)
+
     def test_a_layer_with_no_id_is_not_recorded(self) -> None:
         """Only a hydrated layer has an id worth writing down."""
         from code_sandboxes.environments.adapters.modal import _intermediates_of
