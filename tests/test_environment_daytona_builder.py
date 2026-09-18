@@ -950,6 +950,25 @@ class TestCancellingABuild:
         assert "cancelled" in raised.value.message
         assert [call.args for call in service.delete_calls] == [("snp-late",)]
 
+    def test_a_snapshot_daytona_refused_is_deleted_by_the_build(self) -> None:
+        """Daytona keeps a failed snapshot, in `error`, under the build's name:
+        one over its 20 GB limit was left there (E2-17, 2026-09-18)."""
+        failed = FakeSnapshot(id="snp-err", name=self.NAME, state="error")
+        service = FakeSnapshotService(
+            create_error=RuntimeError(
+                "Snapshot size (28.66GB) exceeds maximum allowed size of 20GB"
+            ),
+            get_results={self.NAME: failed, "snp-err": failed},
+        )
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            builder.build(a_request())
+        assert raised.value.code.code == BUILD_FAILED.code
+        assert "20GB" in raised.value.message
+        assert [call.args for call in service.delete_calls] == [("snp-err",)]
+
     def test_another_build_of_the_same_builder_is_not_touched(self) -> None:
         builder = a_builder()
         builder.cancel(a_request(build_uid="bld-other"))
