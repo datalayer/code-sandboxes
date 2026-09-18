@@ -650,13 +650,17 @@ class JupyterServerSandbox(Sandbox):
                 "Failed to restart Jupyter kernel: the server answered %s", response.status_code
             )
             return False
-        # The websocket the client holds is to the kernel that has just been
-        # replaced; reconnecting is what makes the next execution land in the
-        # new interpreter rather than on a channel nobody is reading.
-        with contextlib.suppress(Exception):
-            self._client.stop()
-        with contextlib.suppress(Exception):
-            self._client.start()
+        # **The websocket is kept, never reconnected.** jupyter-server binds a
+        # kernel's websocket to the kernel id, not to its process, and moves
+        # it onto the restarted kernel itself — which is how JupyterLab's own
+        # restart works. Reconnecting here broke every restart instead:
+        # `jupyter_kernel_client` caches its shell and IOPub channels bound to
+        # the socket they were built with, so after `stop()` and `start()` the
+        # client held a new socket while its channels still wrote to the
+        # closed one. The next execution answered `ok` with no output — found
+        # on r1, 2026-09-18, as checks 7, 8 and 9 all failing together, and
+        # reproduced against the approved base itself, with the deployed
+        # client. Swallowing both calls' errors is what hid it.
         return True
 
     @marks_execution
