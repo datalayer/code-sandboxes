@@ -295,7 +295,10 @@ def _intermediates_of(built: Any) -> tuple[str, ...]:
             if hasattr(dependency, "deps"):
                 walk(dependency)
         object_id = getattr(image, "object_id", None)
-        if object_id and image is not built:
+        # Only images: the build's ECR secret is in `deps()` too, and has an
+        # `st-` id `ImageDelete` refuses ("not a valid Image ID", found live
+        # on 2026-09-18). It is deleted by the build itself, as a secret.
+        if object_id and image is not built and str(object_id).startswith("im-"):
             found.append(str(object_id))
 
     try:
