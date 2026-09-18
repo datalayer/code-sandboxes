@@ -143,10 +143,13 @@ APPROVED_BASES: dict[str, ApprovedBase] = {
             },
             snapshots={"2026.09": "20260916T120000Z"},
         ),
-        # E2-17: jupyter-python-cuda:0.3.1 (jupyter-python 0.2.2 and the CUDA
-        # 12.8 toolkit, pinned) plus the same layer, released 2026-09-18 to
-        # environments/base/python-cuda as `2026.09-bceb272088e4`. The doctor
-        # passes all fifteen checks and `nvcc` answers 12.8 without a GPU.
+        # E2-17: jupyter-python-cuda:0.3.2 (jupyter-python 0.2.2 and CUDA 12.8's
+        # compiler and runtime headers, pinned) plus the same layer, released
+        # 2026-09-18 to environments/base/python-cuda as `2026.09-a3baa7b80931`.
+        # 6.9 GB: the first release carried the whole toolkit (15.7 GB), and a
+        # PyTorch environment on it made a snapshot Daytona refused, over its
+        # 20 GB limit. The doctor passes all fifteen checks and `nvcc` answers
+        # 12.8 without a GPU.
         ApprovedBase(
             ref="datalayer/python-cuda",
             python_versions=("3.13",),
@@ -155,7 +158,7 @@ APPROVED_BASES: dict[str, ApprovedBase] = {
             channels={
                 "2026.09": dict.fromkeys(
                     ("datalayer", "e2b", "daytona", "modal"),
-                    "sha256:a6374a2d4ff07c8a8fe0a71ee605964f93319894cc4152c4e2a1af6258ac9e6a",
+                    "sha256:dc8f0015b4f7dbca92a88d2d6a4a96714b76f9a1af9dddd86835812493e40f08",
                 )
             },
             # After its CUDA layer's own `apt-get update`, which ran that day.
