@@ -591,6 +591,19 @@ class TestARequirementsFile:
         assert from_packages["content"] == from_file["content"]
         assert from_packages["digest"] == from_file["digest"]
 
+    def test_check_five_is_handed_what_the_file_names(self) -> None:
+        """Read from `packages.python`, which a file source leaves empty, it
+        was handed nothing and check 5 passed for having nothing to check
+        (found live on 2026-09-18, E3-08)."""
+        from code_sandboxes.environments.conformance import expected_packages
+        from code_sandboxes.environments.spec import validate_environment
+
+        environment = validate_environment(
+            a_dependency_file_spec(content="geopandas==1.1.1  # inline\n-r other.txt\nsix>=1\n")
+        )
+        lock = "geopandas==1.1.1\nsix==1.16.0\nshapely==2.1.2\n"
+        assert expected_packages(environment, lock) == {"geopandas": "1.1.1", "six": "1.16.0"}
+
 
 # -- A pyproject.toml and its uv.lock (E3-01) ----------------------------------
 
@@ -606,9 +619,11 @@ class FakeUv:
     def __init__(self, *answers: tuple[int, str, str]) -> None:
         self.answers = list(answers)
         self.calls: list[list[str]] = []
+        self.environments: list[dict[str, str]] = []
 
-    def __call__(self, argv, **_kwargs):
+    def __call__(self, argv, **kwargs):
         self.calls.append(list(argv))
+        self.environments.append(dict(kwargs.get("env") or {}))
         code, out, err = self.answers[min(len(self.calls), len(self.answers)) - 1]
         return subprocess.CompletedProcess(list(argv), code, out, err)
 
@@ -642,6 +657,13 @@ EXPORTED = (
     "jupyter-server-nbmodel==0.2.8 \\\n    --hash=sha256:" + "ee" * 32 + "\n"
     "jupyter-kernels==1.2.23 \\\n    --hash=sha256:" + "a7" * 32 + "\n"
     "datalayer==1.7.4 \\\n    --hash=sha256:" + "ff" * 32 + "\n"
+)
+
+
+#: Where a `pyproject` author locks Datalayer's `jupyter-server` fork from.
+FORK_WHEEL_URL = (
+    "https://github.com/datalayer-externals/jupyter-server/releases/download/"
+    "v2.21.0-datalayer.1/jupyter_server-2.21.0%2Bdatalayer.1-py3-none-any.whl"
 )
 
 
@@ -790,6 +812,70 @@ class TestAPyprojectFile:
                 pyproject_run=hangs,
             )
         assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
+
+    def test_check_five_is_handed_the_projects_own_dependencies(self) -> None:
+        """`[project].dependencies`, not every package the export pins: most of
+        a lock is transitive, and check 5 imports what it is handed."""
+        from code_sandboxes.environments.conformance import expected_packages
+        from code_sandboxes.environments.spec import validate_environment
+
+        environment = validate_environment(a_pyproject_spec())
+        assert expected_packages(environment, EXPORTED) == {"six": "1.16.0"}
+
+    def test_the_fork_brought_by_url_is_a_locked_protected_pin(self) -> None:
+        """No index serves `2.21.0+datalayer.1`, and `uv` hashes a wheel only
+        when it fetched it by URL: so a real author's export names the fork
+        `jupyter-server @ https://…whl`, with no `==` (E3-08). Its version is
+        in the wheel's name, and that is what the pin is checked against."""
+        by_url = EXPORTED.replace(
+            "jupyter-server==2.21.0+datalayer.1 \\\n",
+            f"jupyter-server @ {FORK_WHEEL_URL} \\\n",
+        )
+        uv = FakeUv((0, "", "Resolved 7 packages in 1ms\n"), (0, by_url, ""))
+        answer = resolve_environment(
+            spec=a_pyproject_spec(),
+            variants=["datalayer"],
+            bases=BASES,
+            uv="/usr/bin/uv",
+            pyproject_run=uv,
+        )
+        assert answer["content"] == by_url
+        assert locked_versions(by_url)["jupyter-server"] == "2.21.0+datalayer.1"
+
+    def test_uv_keeps_its_cache_in_the_scratch_directory_and_downloads_no_python(self) -> None:
+        """The durable worker's user has no home: `uv`'s default cache could not
+        be made, nor the interpreter it would download (E3-08)."""
+        uv = FakeUv((0, "", "Resolved 7 packages in 1ms\n"), (0, EXPORTED, ""))
+        resolve_environment(
+            spec=a_pyproject_spec(),
+            variants=["datalayer"],
+            bases=BASES,
+            uv="/usr/bin/uv",
+            pyproject_run=uv,
+        )
+        assert len(uv.environments) == 2
+        for environment in uv.environments:
+            assert environment["UV_PYTHON_DOWNLOADS"] == "never"
+            assert environment["UV_CACHE_DIR"].endswith("/.uv-cache")
+            assert "/dl-pyproject-" in environment["UV_CACHE_DIR"]
+            assert environment["PATH"]
+
+    def test_a_url_that_is_not_that_distributions_wheel_pins_nothing(self) -> None:
+        assert (
+            locked_versions(
+                "jupyter-server @ https://example.org/jupyter_server-2.21.0.tar.gz\n"
+                f"ipykernel @ {FORK_WHEEL_URL}\n"
+                "six @ https://example.org/not-a-wheel-name.whl\n"
+            )
+            == {}
+        )
+
+    def test_a_pyproject_check_five_cannot_read_hands_it_nothing(self) -> None:
+        from code_sandboxes.environments.conformance import expected_packages
+        from code_sandboxes.environments.spec import validate_environment
+
+        environment = validate_environment(a_pyproject_spec(content="[project\n"))
+        assert expected_packages(environment, EXPORTED) == {}
 
 
 # -- An imported image (E3-04) -------------------------------------------------

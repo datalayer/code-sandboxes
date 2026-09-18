@@ -39,6 +39,7 @@ Where the solve runs is the :class:`ResolveRunner`'s business:
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shlex
 import shutil
@@ -860,7 +861,36 @@ def locked_versions(lock_text: str) -> dict[str, str]:
         ]
         if len(pinned) == 1:
             versions[canonicalize_name(requirement.name)] = pinned[0]
+        elif requirement.url:
+            wheel = _wheel_version(requirement.name, requirement.url)
+            if wheel:
+                versions[canonicalize_name(requirement.name)] = wheel
     return versions
+
+
+def _wheel_version(name: str, url: str) -> str | None:
+    """The version of a direct reference to a wheel, read from its file name.
+
+    How a `pyproject` lock brings Datalayer's `jupyter-server` fork, which no
+    index serves (E3-08): `uv` records a hash only for a wheel it fetched by
+    URL, so the export pins it as `jupyter-server @ https://…whl`, with no
+    `==` for the version. The wheel's name carries one, and nothing else here
+    does. A reference that is not a wheel of the same distribution pins none.
+    """
+    from urllib.parse import unquote, urlsplit
+
+    from packaging.utils import InvalidWheelFilename, canonicalize_name, parse_wheel_filename
+
+    filename = unquote(urlsplit(url).path.rsplit("/", 1)[-1])
+    if not filename.endswith(".whl"):
+        return None
+    try:
+        wheel_name, version, _build, _tags = parse_wheel_filename(filename)
+    except InvalidWheelFilename:
+        return None
+    if wheel_name != canonicalize_name(name):
+        return None
+    return str(version)
 
 
 def apt_pins_in(lock_text: str) -> dict[str, str]:
@@ -1058,10 +1088,12 @@ def _verified_pyproject_lock(
         root = Path(directory)
         (root / "pyproject.toml").write_text(dependency_file.content, encoding="utf-8")
         (root / "uv.lock").write_text(dependency_file.lock_content, encoding="utf-8")
+        environment = _uv_environment(root)
         try:
             checked = invoke(
                 [resolved_uv, "lock", "--dry-run"],
                 cwd=root,
+                env=environment,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -1109,6 +1141,7 @@ def _verified_pyproject_lock(
         exported = invoke(
             [resolved_uv, "export", "--locked", "--format", "requirements.txt"],
             cwd=root,
+            env=environment,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -1135,6 +1168,23 @@ def _verified_pyproject_lock(
         "content": text,
         "python_version": python_version,
         "package_count": len(packages),
+    }
+
+
+def _uv_environment(root: Path) -> dict[str, str]:
+    """What `uv` checks a lock with: its cache in the scratch directory, and no downloads.
+
+    The durable worker runs as a user with no home, so `uv`'s default cache
+    under `~/.cache` could not be made, and neither could the interpreter it
+    downloads when none satisfies `requires-python` (found on 2026-09-18, E3-08).
+    The interpreter comes from the worker's image instead, where the base
+    channel's own Python is installed: a check that fetched one per resolve would
+    be a check that depends on the network in a way nothing records.
+    """
+    return {
+        **os.environ,
+        "UV_CACHE_DIR": str(root / ".uv-cache"),
+        "UV_PYTHON_DOWNLOADS": "never",
     }
 
 
