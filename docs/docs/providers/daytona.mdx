@@ -230,14 +230,32 @@ sandbox.files.read_bytes("/tmp/data.parquet")
 ## Environments
 
 An [Environment](/docs/environments) built for Daytona is a **snapshot** —
-built from the approved Datalayer base, `uv pip sync --require-hashes`
-against the resolved lock, your files and `postInstall` commands, and an
-explicit `tini -- sleep infinity` entrypoint (Daytona's own default,
-otherwise, is a bare `sleep infinity`, with no init to reap orphans). The
-base already carries `uv`, the doctor and the sandbox contract's user and
-locale, so none of that is reinstalled — only the lock is genuinely
-per-build. The snapshot's own `id` is the artifact; a build also names it,
-for operability, but a launch never uses the name.
+built from the approved Datalayer base, the resolved lock, your files and
+`postInstall` commands, and an explicit `tini -- sleep infinity` entrypoint
+(Daytona's own default, otherwise, is a bare `sleep infinity`, with no init
+to reap orphans). The base already carries `uv`, the doctor and the sandbox
+contract's user and locale, so none of that is reinstalled — only the lock is
+genuinely per-build. The snapshot's own `id` is the artifact; a build also
+names it, for operability, but a launch never uses the name.
+
+How the lock is installed depends on where the environment came from:
+
+| Source | Installed with |
+|---|---|
+| A package list, a `requirements.txt`, a `pyproject.toml` and its `uv.lock` | `uv pip sync --require-hashes`: the snapshot holds exactly the lock |
+| A conda `environment.yml` | `micromamba install` of the explicit lock into the base's own interpreter, then the pip layer the solve recorded |
+| A Dockerfile | Daytona's `Image.from_dockerfile`, its approved `FROM` pinned to the resolved digest, then `uv pip install --require-hashes` of the lock — `install`, not `sync`, so what the Dockerfile installed stays |
+
+**Deleted by id, and never stranded.** Retention deletes a snapshot nothing
+keeps any more, by its `id` — a name is reused once its snapshot is gone —
+and a snapshot already gone counts as deleted. A build that fails *after*
+Daytona built its snapshot, at the core tier or at the record, deletes that
+snapshot before it reports the failure, so nothing is left in your account
+that no version names.
+
+`make env-build-daytona`, in the `environments` folder of the
+[examples repository](https://github.com/datalayer/examples), builds a
+version for Daytona from the command line.
 
 **Bring your own account:** a build runs with the environment owner's own
 Daytona organization, not this package's ambient credentials — either
