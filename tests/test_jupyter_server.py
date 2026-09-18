@@ -559,6 +559,34 @@ class TestRestartingTheKernelRatherThanTheConnection:
         finally:
             sandbox.stop()
 
+    def test_the_connection_is_kept_across_the_restart(self, monkeypatch):
+        """jupyter-server moves a kernel's websocket onto the restarted kernel.
+
+        Reconnecting broke it: `jupyter_kernel_client`'s channels stay bound
+        to the socket they were built with, so after a `stop()` and `start()`
+        every execution answered `ok` with no output (r1, 2026-09-18).
+        """
+        sandbox = _started_sandbox(monkeypatch, kernel_id="kernel-1")
+        lifecycle: list[str] = []
+        client = sandbox._client
+        monkeypatch.setattr(client, "stop", lambda *a, **k: lifecycle.append("stop"))
+        monkeypatch.setattr(client, "start", lambda *a, **k: lifecycle.append("start"))
+
+        class _Response:
+            ok = True
+            status_code = 200
+
+        monkeypatch.setattr(
+            "code_sandboxes.jupyter_server_sandbox.requests.post",
+            lambda *args, **kwargs: _Response(),
+        )
+        try:
+            assert sandbox.restart_kernel() is True
+            assert lifecycle == []
+            assert sandbox._client is client
+        finally:
+            sandbox.stop()
+
     def test_a_server_that_refuses_the_restart_is_reported_not_raised(self, monkeypatch):
         sandbox = _started_sandbox(monkeypatch, kernel_id="kernel-1")
 
