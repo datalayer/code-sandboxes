@@ -487,12 +487,48 @@ def expected_packages(environment: Any, lock_text: str) -> dict[str, str]:
         return conda_expected_packages(dependency_file.content, lock_text or "")
     pinned = locked_versions(lock_text) if lock_text else {}
     names: list[str] = []
-    for text in environment.spec.packages.python.dependencies:
+    for text in _declared_dependencies(environment):
         try:
             names.append(canonicalize_name(Requirement(text).name))
         except InvalidRequirement:
             continue
     return {name: pinned[name] for name in names if name in pinned}
+
+
+def _declared_dependencies(environment: Any) -> list[str]:
+    """The requirements a person declared, wherever the source keeps them.
+
+    A `dependencyFile` source names its packages in the file and leaves
+    `packages.python` empty, which is what the resolver reads too (E3-01).
+    Read from `packages.python` alone, check 5 was handed nothing for a
+    `requirements.txt` and passed for it, found live on 2026-09-18 (E3-08).
+    """
+    from .spec import parse_requirements_txt
+
+    build = environment.spec.build
+    dependency_file = build.dependency_file
+    if build.source == "dependencyFile" and dependency_file is not None:
+        if dependency_file.source_format == "requirements":
+            return parse_requirements_txt(dependency_file.content)
+        if dependency_file.source_format == "pyproject":
+            return _pyproject_dependencies(dependency_file.content)
+    return list(environment.spec.packages.python.dependencies)
+
+
+def _pyproject_dependencies(text: str) -> list[str]:
+    """`[project].dependencies` of a `pyproject.toml`, or none when it cannot be read."""
+    try:
+        import tomllib as toml
+    except ImportError:  # Python 3.10
+        try:
+            import tomli as toml  # type: ignore[no-redef]
+        except ImportError:
+            return []
+    try:
+        project = toml.loads(text).get("project") or {}
+    except toml.TOMLDecodeError:
+        return []
+    return [str(item) for item in project.get("dependencies") or []]
 
 
 def run_core_tier(
