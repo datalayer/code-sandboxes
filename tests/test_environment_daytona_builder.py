@@ -17,13 +17,14 @@ build's own base pull needs, made and torn down around it.
 
 from __future__ import annotations
 
+import enum
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
 
-from code_sandboxes.environments.adapters.daytona import Builder
+from code_sandboxes.environments.adapters.daytona import DAYTONA_GPUS, Builder, daytona_gpu
 from code_sandboxes.environments.builders import ArtifactReference, BuildRequest
 from code_sandboxes.environments.errors import (
     ARTIFACT_MISSING,
@@ -162,6 +163,10 @@ class FakeResources:
         self.gpu_type = gpu_type
 
 
+#: The SDK's `GpuType`, by value, as the builder asks for one.
+FakeGpuType = enum.Enum("GpuType", {name.replace("-", "_"): name for name in DAYTONA_GPUS})
+
+
 class FakeCreateSnapshotParams:
     def __init__(
         self,
@@ -283,6 +288,7 @@ class FakeDaytonaModule:
         self.DaytonaNotFoundError = FakeDaytonaNotFoundError
         self.Image = FakeImage
         self.Resources = FakeResources
+        self.GpuType = FakeGpuType
         self.CreateSnapshotParams = FakeCreateSnapshotParams
         self.DaytonaConfig = FakeDaytonaConfig
         self.Daytona = _DaytonaFactory(self)
@@ -721,18 +727,68 @@ class TestTheBuildsOwnRegistryEntry:
         assert any("Could not delete the Daytona registry entry" in line for line in logged)
 
 
-class TestWhatDaytonaCannotBuildYet:
-    def test_a_gpu_size_class_is_refused_at_build_time_naming_e2_17(self) -> None:
-        daytona = FakeDaytonaModule()
-        registry = FakeRegistrySdk()
-        with pytest.raises(EnvironmentsError) as raised:
-            a_builder(daytona=daytona, registry=registry).build(a_request(size_class="gpu-large"))
-        assert raised.value.code.code == CAPABILITY_UNSUPPORTED.code
-        assert raised.value.detail["missing"] == "E2-17"
-        # Refused before any provider is touched: no registry, no snapshot.
-        assert registry.client.create_calls == []
-        assert daytona.client.snapshot.create_calls == []
+class TestAGpuSnapshot:
+    """E2-17: the spec's GPU is baked into the snapshot with its other resources."""
 
+    GPU: ClassVar[dict[str, Any]] = {
+        "sizeClass": "gpu-large",
+        "accelerator": {"type": "h100", "count": 2, "cuda": "12.8"},
+    }
+
+    def gpu_request(self, **resources: Any) -> BuildRequest:
+        return a_request(
+            spec={
+                "base": {"ref": "datalayer/python-cuda", "channel": "2026.09"},
+                "resources": {**self.GPU, **resources},
+            },
+            size_class="gpu-large",
+        )
+
+    def test_the_gpu_type_and_count_are_the_specs(self) -> None:
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(self.gpu_request())
+        resources = daytona.client.snapshot.create_calls[0].args[0].resources
+        assert (resources.gpu, resources.gpu_type) == (2, FakeGpuType("H100"))
+        # D-4 gives a GPU class no CPU or memory: Daytona sizes the machine
+        # for the GPU, and the disk holds the CUDA base.
+        assert (resources.cpu, resources.memory, resources.disk) == (None, None, 50)
+
+    def test_the_hints_size_the_rest_of_the_machine(self) -> None:
+        daytona = FakeDaytonaModule()
+        request = self.gpu_request(hints={"cpu": 8, "memoryGi": 64, "diskGi": 120})
+        a_builder(daytona=daytona).build(request)
+        resources = daytona.client.snapshot.create_calls[0].args[0].resources
+        assert (resources.cpu, resources.memory, resources.disk, resources.gpu) == (8, 64, 120, 2)
+
+    def test_a_gpu_daytona_does_not_offer_is_refused_before_any_build(self) -> None:
+        request = a_request(
+            spec={
+                "base": {"ref": "datalayer/python-cuda", "channel": "2026.09"},
+                "resources": {"sizeClass": "gpu-large", "accelerator": {"type": "A100-80GB"}},
+            }
+        )
+        report = a_builder().validate(request.environment)
+        assert report.supported is False
+        [finding] = [item for item in report.findings if "A100-80GB" in item.message]
+        assert finding.field == "spec.resources.accelerator.type"
+        assert all(name in finding.message for name in DAYTONA_GPUS)
+
+    def test_a_name_is_read_the_way_people_write_it(self) -> None:
+        assert [daytona_gpu(name) for name in ("h100", "RTX_4090", " rtx-pro-6000 ", "T4")] == [
+            "H100",
+            "RTX-4090",
+            "RTX-PRO-6000",
+            None,
+        ]
+
+    def test_the_names_are_the_sdks(self) -> None:
+        """Spelled out because `validate` runs where the SDK may not be; held to it here."""
+        sdk = pytest.importorskip("daytona")
+        offered = {g.value for g in sdk.GpuType if not g.value.lower().startswith("unknown")}
+        assert set(DAYTONA_GPUS) == offered
+
+
+class TestWhatDaytonaCannotBuildYet:
     def test_a_build_secret_is_refused_before_anything_is_queued(self) -> None:
         """Daytona has no per-step secret mechanism E0-04 could find (found
         in review: this chain consumed no build secret at all, and nothing
@@ -957,6 +1013,47 @@ class TestSmokeTestingASnapshot:
         # A smoke test that leaves a sandbox running bills the owner for a check.
         assert made["delete_on_stop"] is True
         assert "restart" in ran and ran["python_version"]
+
+    def test_a_gpu_version_also_passes_check_eleven(self, monkeypatch) -> None:
+        """E2-17: the core tier alone passes on a machine with no GPU, so a GPU
+        version's smoke test adds check 11, gating, with the spec's CUDA and count."""
+        from code_sandboxes.environments.builders import CheckResult, ValidationResult
+
+        asked: dict = {}
+
+        class FakeSandbox:
+            def __init__(self, **_kwargs):
+                pass
+
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+        monkeypatch.setattr(
+            "code_sandboxes.daytona_sandbox.DaytonaSandbox", FakeSandbox, raising=False
+        )
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_core_tier",
+            lambda sandbox, **kwargs: ValidationResult(contract_version="sandbox-contract/v1"),
+        )
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_accelerator_check",
+            lambda sandbox, **kwargs: asked.update(kwargs)
+            or CheckResult(id="conformance:11", name="gpu", passed=False, gating=True),
+        )
+        request = TestAGpuSnapshot().gpu_request()
+        answer = a_builder().smoke_test(
+            an_artifact(
+                variant="daytona", immutable_reference="snap-gpu", provider_artifact_id="snap-gpu"
+            ),
+            environment=request.environment,
+            lock_text="",
+        )
+        assert asked == {"cuda": "12.8", "count": 2}
+        assert [check.id for check in answer.checks] == ["conformance:11"]
+        assert answer.passed is False
 
     def test_the_sandbox_is_deleted_even_when_the_tier_raises(self, monkeypatch) -> None:
         events: list[str] = []

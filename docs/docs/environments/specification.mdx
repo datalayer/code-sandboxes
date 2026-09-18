@@ -37,7 +37,7 @@ A document is refused with `DL_ENV_SPEC_INVALID` when a field is wrong, and with
 | `commands.postInstall` | none | At most 32 non-empty commands, run after the packages are installed. |
 | `buildSecrets` | none | `id` is a Datalayer secret id, `dlsec_...`; `mountAs` is `env` or `file`; `name` is the variable or file name. Ids and names are unique. Secrets are injected into the build step that needs them and never written into the artifact. |
 | `resources.sizeClass` | `small` | `small`, `medium`, `large`, `gpu-small` or `gpu-large`. A GPU class needs an accelerator and a CUDA base; an accelerator needs a GPU class. Datalayer runs no GPU nodes yet, so a GPU class is built for Modal and Daytona, which bring their own GPUs; E2B has none. |
-| `resources.accelerator` | `none` | `none`, or `type`, `count` and `cuda`. |
+| `resources.accelerator` | `none` | `none`, or `type`, `count` and `cuda`. `type` is the provider's own name for the GPU (Daytona: `H100`, `H200`, `RTX-PRO-6000`, `RTX-4090`, `RTX-5090`), and a GPU a variant does not offer is refused for it at `validate`. `cuda` is the base's toolkit: `datalayer/python-cuda:2026.09` carries 12.8, and another version is refused. |
 | `resources.hints` | none | `cpu`, `memoryGi`, `diskGi`: positive numbers, within the size class. |
 | `compatibility.variants.required` | `[datalayer]` | At least one of `datalayer`, `e2b`, `daytona`, `modal`. |
 | `compatibility.variants.optional` | none | The same variants, none of them also required. |

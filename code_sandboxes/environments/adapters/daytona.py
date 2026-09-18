@@ -69,18 +69,13 @@ would make an artifact refuse to build for a reason that says nothing about
 what it does once actually launched. A real answer needs a launched
 sandbox, which is a smoke test's job (E1-14), not this builder's.
 
-**GPU classes are not built here.** `gpu = True` on this builder is a true
-capability (Daytona's own hardware runs one, D-20), and `validate` leaves a
-GPU size class buildable rather than refusing it — the constraint table of
-section 6 has nothing against it, and an existing test
-(`test_a_gpu_spec_is_buildable_on_modal_and_daytona`) already pins that
-answer. What actually stops a GPU build today is upstream: the CUDA base
-channel is E2-17's to publish, and `bases.py` has no digest to resolve
-`python-cuda` to yet, so a `BuildRequest` for one cannot be constructed in
-practice. `build()` itself still guards it explicitly, refusing plainly
-rather than baking an unsourced guess at a GPU type and count into a
-snapshot, in case that ever changes before the real numbers do (section 11.3
-item 7).
+**A GPU is baked into the snapshot** (E2-17, D-20), from the spec's own
+`resources.accelerator`: its `type` is one of Daytona's GPUs, checked at
+`validate` so a GPU Daytona does not offer is refused before any build, and
+its `count` is the number of them. CPU and memory come from the spec's hints,
+or Daytona's own default for that GPU; the disk from the hints, or enough for
+the CUDA base. A sandbox of a GPU snapshot is ephemeral, which Daytona
+requires of every GPU sandbox (`DaytonaSandbox` reads the snapshot's `gpu`).
 
 @module code_sandboxes.environments.adapters.daytona
 """
@@ -118,10 +113,10 @@ from ..resolve_conda import (
     micromamba_bootstrap_command,
     micromamba_install_command,
 )
-from ..spec import GPU_SIZE_CLASSES, Environment
+from ..spec import GPU_SIZE_CLASSES, Environment, EnvironmentSpec
 from .managed import ManagedBuilder
 
-__all__ = ["Builder"]
+__all__ = ["DAYTONA_GPUS", "Builder", "daytona_gpu"]
 
 #: Tags Daytona refuses for a snapshot's source image: each moves.
 MOVING_TAGS = ("latest", "lts", "stable")
@@ -146,6 +141,26 @@ _CPU_RESOURCES: dict[str, dict[str, int]] = {
     "medium": {"cpu": 4, "memory": 8, "disk": 20},
     "large": {"cpu": 8, "memory": 16, "disk": 40},
 }
+
+
+#: The GPUs Daytona offers, as its SDK's `GpuType` names them (E2-17). Spelled
+#: out rather than read from the SDK, because `validate` runs where the SDK may
+#: not be installed; a test holds the two together.
+DAYTONA_GPUS: tuple[str, ...] = ("H100", "H200", "RTX-PRO-6000", "RTX-4090", "RTX-5090")
+
+#: A GPU snapshot's disk when the spec gives no hint: the CUDA base alone is
+#: about 15 GB, and Daytona's own default would not hold it with room to work.
+_GPU_DISK_GI = 50
+
+
+def daytona_gpu(accelerator_type: str) -> str | None:
+    """Daytona's name for an accelerator type, or `None` when Daytona has no such GPU.
+
+    `h100`, `H100` and `rtx_4090` name what Daytona calls `H100` and
+    `RTX-4090`; a `T4` or an `A100-80GB` is Modal's vocabulary, not Daytona's.
+    """
+    name = accelerator_type.strip().upper().replace("_", "-")
+    return name if name in DAYTONA_GPUS else None
 
 
 def _pip_lock_command(*, authored: bool) -> str:
@@ -204,8 +219,8 @@ class Builder(ManagedBuilder):
     #: 2026-09-17.
     forbidden_instructions = ()
     dependency_formats = ("requirements", "pyproject", "conda")
-    #: Daytona runs GPUs, on its own hardware and the owner's account (E2-17).
-    #: This builder does not build one yet: see `_own_findings`.
+    #: Daytona runs GPUs, on its own hardware and the owner's account (E2-17),
+    #: baked into the snapshot with the rest of its resources.
     gpu = True
     #: E0-04's spike found only a registry login for the private base, never
     #: a per-step arbitrary named secret (E3-05): `buildSecrets` is refused.
@@ -300,15 +315,7 @@ class Builder(ManagedBuilder):
                     field="spec.compatibility.regions",
                 )
             )
-        # A GPU class is left buildable here on purpose (`gpu = True`,
-        # D-20): the CUDA base E2-17 has not published yet, so a GPU
-        # `BuildRequest` cannot reach `build()` in practice — `bases.py`'s
-        # own resolver has no digest to resolve `python-cuda` to, and
-        # refuses first. `build()` itself still guards it explicitly (see
-        # its own docstring), so a spec that somehow got a `resolved_base`
-        # anyway is refused plainly rather than baking an unsourced guess
-        # at a GPU type and count into a snapshot.
-        #
+        findings.extend(self._accelerator_findings(environment.spec))
         # `spec.buildSecrets` needs no check of its own here: `supports_build_secrets
         # = False` above (E3-05, merged since this branch started) makes
         # `ManagedBuilder._own_findings` refuse it before this method is
@@ -330,18 +337,6 @@ class Builder(ManagedBuilder):
         (E0-04).
         """
         spec = request.environment.spec
-        if request.size_class in GPU_SIZE_CLASSES:
-            # `validate` leaves a GPU class buildable (`gpu = True`, D-20):
-            # `bases.py` has no CUDA digest to resolve yet, so this cannot
-            # be reached in practice — refused plainly here rather than
-            # baking an unsourced guess at a GPU type and count into a
-            # snapshot (E2-17 is what will give this real numbers).
-            raise EnvironmentsError(
-                CAPABILITY_UNSUPPORTED,
-                f"Daytona runs `{request.size_class}` on its own GPUs, but the CUDA base "
-                "and the GPU resource shape this needs are E2-17's, not built yet",
-                detail={"variant": self.variant, "missing": "E2-17"},
-            )
         sdk = self._daytona_sdk()
         client = self._client(sdk)
         name = f"dl-{request.environment.metadata.name}-v{request.version}-{request.build_uid}"
@@ -437,7 +432,7 @@ class Builder(ManagedBuilder):
                     logged.append(line)
                     self._log(line)
 
-                resources = self._resources(sdk, request.size_class)
+                resources = self._resources(sdk, request.size_class, spec)
                 # A snapshot is region-scoped, and the region that scopes it is
                 # Daytona's, not this platform's. `validate` already refuses
                 # more than one, so the first is the only one.
@@ -505,10 +500,40 @@ class Builder(ManagedBuilder):
         )
         return sdk.Image.from_dockerfile(str(dockerfile))
 
-    def _resources(self, sdk: Any, size_class: str) -> Any:
-        """The CPU resources a size class bakes into the snapshot (§11.3 item 4)."""
-        shape = _CPU_RESOURCES.get(size_class, _CPU_RESOURCES["small"])
-        return sdk.Resources(cpu=shape["cpu"], memory=shape["memory"], disk=shape["disk"])
+    @staticmethod
+    def _accelerator_findings(spec: EnvironmentSpec) -> list[CapabilityFinding]:
+        """A GPU Daytona does not offer, refused before any build (E2-17)."""
+        accelerator = spec.resources.accelerator
+        if accelerator == "none" or daytona_gpu(accelerator.type):
+            return []
+        return [
+            CapabilityFinding(
+                code="DL_ENV_CAPABILITY_UNSUPPORTED",
+                message=(
+                    f"Daytona has no GPU called `{accelerator.type}`; it offers "
+                    + ", ".join(DAYTONA_GPUS)
+                ),
+                field="spec.resources.accelerator.type",
+            )
+        ]
+
+    def _resources(self, sdk: Any, size_class: str, spec: EnvironmentSpec) -> Any:
+        """What the snapshot bakes in: a class's CPU, or the spec's GPU (§11.3 item 4, E2-17)."""
+        accelerator = spec.resources.accelerator
+        if size_class not in GPU_SIZE_CLASSES or accelerator == "none":
+            shape = _CPU_RESOURCES.get(size_class, _CPU_RESOURCES["small"])
+            return sdk.Resources(cpu=shape["cpu"], memory=shape["memory"], disk=shape["disk"])
+        # D-4 gives the GPU classes no CPU or memory of their own (E4-11 has
+        # them, for Datalayer's nodes): the GPU is what the class is for, and
+        # Daytona sizes the rest of the machine for it unless the spec hints.
+        hints = spec.resources.hints
+        return sdk.Resources(
+            cpu=round(hints.cpu) if hints.cpu else None,
+            memory=round(hints.memory_gi) if hints.memory_gi else None,
+            disk=round(hints.disk_gi) if hints.disk_gi else _GPU_DISK_GI,
+            gpu=accelerator.count,
+            gpu_type=sdk.GpuType(daytona_gpu(accelerator.type)),
+        )
 
     def _register_base_pull(self, client: Any, resolved_base: str) -> str | None:
         """A private registry entry for this build's base pull (D-17, D-18).
@@ -657,20 +682,29 @@ class Builder(ManagedBuilder):
                 "lock pinned, and an artifact carries neither",
                 detail={"variant": self.variant},
             )
-        from ..conformance import expected_packages, run_core_tier
+        from ..conformance import expected_packages, run_accelerator_check, run_core_tier
 
         snapshot = artifact.provider_artifact_id or artifact.immutable_reference
         sandbox = self._smoke_test_sandbox(snapshot)
         self._log(f"Launching {snapshot} to smoke-test it")
         try:
             sandbox.start()
-            return run_core_tier(
+            result = run_core_tier(
                 sandbox,
                 python_version=environment.spec.language.version,
                 expected_packages=expected_packages(environment, lock_text or ""),
                 secret_values=tuple(secret_values),
                 restart=lambda: self._restart(sandbox),
             )
+            accelerator = environment.spec.resources.accelerator
+            if accelerator != "none":
+                # A GPU version is only the version its spec describes when
+                # its GPUs are visible and its CUDA is the spec's (check 11,
+                # E2-17): the core tier alone passes on a machine with none.
+                result.checks.append(
+                    run_accelerator_check(sandbox, cuda=accelerator.cuda, count=accelerator.count)
+                )
+            return result
         except EnvironmentsError:
             raise
         except Exception as error:
