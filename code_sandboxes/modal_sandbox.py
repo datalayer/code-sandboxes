@@ -441,7 +441,16 @@ class ModalSandbox(Sandbox):
                 for mount_path, volume_id in self._volume_mounts.requested.items()
             }
 
-        self._sandbox = modal.Sandbox.create(**create_kwargs)
+        # An Environments artifact's main process only holds the container:
+        # everything this class runs in it is an exec, Jupyter included
+        # (`prepare_jupyter_server`). Named here rather than left to the
+        # image, since an artifact built before code-sandboxes 1.9.36 carries
+        # its base's `start-jupyter.sh` as its CMD, which Modal runs under the
+        # entrypoint; that server exits within a minute and ends the sandbox
+        # (found live on 2026-09-18: a smoke test's restarted sandbox died
+        # between checks 8 and 9).
+        command = ("sleep", "infinity") if self._image_id else ()
+        self._sandbox = modal.Sandbox.create(*command, **create_kwargs)
         self._volume_mounts.created()
         self._start_driver()
 

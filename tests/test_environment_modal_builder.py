@@ -166,6 +166,10 @@ class FakeImage:
         self.calls.append(Call("entrypoint", (commands,)))
         return self
 
+    def cmd(self, command: list[str]) -> FakeImage:
+        self.calls.append(Call("cmd", (command,)))
+        return self
+
     def build(self, app: Any) -> FakeImage:
         self.calls.append(Call("build", (app,)))
         # Simulates Modal's own `enable_output()` printing straight to
@@ -601,14 +605,24 @@ class TestBuildingAnImage:
         [image] = modal.Image.created
         assert not any("doctor" in call.args[0] for call in calls_named(image, "run_commands"))
 
-    def test_the_chain_ends_with_workdir_then_entrypoint(self) -> None:
+    def test_the_chain_ends_with_workdir_entrypoint_and_cmd(self) -> None:
         modal = FakeModalModule()
         a_builder(modal=modal).build(a_request())
         [image] = modal.Image.created
-        # `build` is appended by `FakeImage.build` itself; the two before it
-        # are the chain's own last words.
+        # `build` is appended by `FakeImage.build` itself; the three before
+        # it are the chain's own last words.
         names = [call.name for call in image.calls]
-        assert names[-3:] == ["workdir", "entrypoint", "build"]
+        assert names[-4:] == ["workdir", "entrypoint", "cmd", "build"]
+
+    def test_the_bases_jupyter_cmd_is_replaced_by_sleep(self) -> None:
+        """Modal keeps the base's `start-jupyter.sh` under a new ENTRYPOINT,
+        and a Jupyter server as the main process exits and ends the sandbox
+        (found live on 2026-09-18). The artifact says what holds it."""
+        modal = FakeModalModule()
+        a_builder(modal=modal).build(a_request())
+        [image] = modal.Image.created
+        [cmd_call] = calls_named(image, "cmd")
+        assert cmd_call.args[0] == ["sleep", "infinity"]
 
     def test_the_entrypoint_execs_its_arguments(self) -> None:
         """A bare script path, nothing for `entrypoint()`'s own Dockerfile

@@ -96,6 +96,15 @@ end and the container exited before that first real exec ever reached it.
 The entrypoint now execs `sleep infinity` when it is given no arguments,
 and `"$@"` when it is — correct either way a caller invokes it.
 
+**And a sandbox with no command is not given no arguments** (found live on
+2026-09-18): Modal keeps the base's own CMD, `start-jupyter.sh`, under the
+new ENTRYPOINT where Docker would reset it, so the main process was a
+Jupyter server, which exits within a minute and ends the sandbox. A smoke
+test's restarted sandbox, started warm, died between checks 8 and 9. The
+artifact now sets its CMD to `sleep infinity`, and `ModalSandbox` names the
+same command when it launches an artifact, which also covers the ones built
+before.
+
 **A GPU is a launch option on Modal, not part of the image** (section 11.4
 item 10, E2-17). A GPU version builds the same image any version does, on the
 CUDA base; the spec's `accelerator` names one of Modal's GPUs, checked at
@@ -206,6 +215,8 @@ _ENTRYPOINT_PATH = "/opt/datalayer/bin/entrypoint.sh"
 #: is given keeps it alive for that; `exec "$@"` still wins when something
 #: is, for a caller that does supply a command directly.
 _ENTRYPOINT_SCRIPT = '#!/bin/sh\nif [ "$#" -eq 0 ]; then exec sleep infinity; fi\nexec "$@"\n'
+#: The artifact's CMD: what a sandbox started with no command of its own runs.
+_KEEP_ALIVE_COMMAND = ("sleep", "infinity")
 
 
 def _modal_sdk() -> Any:
@@ -498,7 +509,19 @@ class Builder(ManagedBuilder):
                 for command in files_step(request.environment, variant=self.variant):
                     image = image.run_commands(command)
                 image = _post_install(image, spec.commands.post_install, declared, step_secrets)
-                image = image.workdir(_CONTENT_DIR).entrypoint([_ENTRYPOINT_PATH])
+                # The base's own CMD is `start-jupyter.sh`, and Modal keeps
+                # it under a new ENTRYPOINT where Docker would reset it: a
+                # sandbox started with no command ran a Jupyter server as its
+                # main process, which exits within a minute and takes the
+                # sandbox with it (found live on 2026-09-18, the restarted
+                # sandbox of a smoke test dying mid-tier). What holds the
+                # container is `sleep`; Jupyter is started by exec, when
+                # asked (`ModalSandbox.prepare_jupyter_server`).
+                image = (
+                    image.workdir(_CONTENT_DIR)
+                    .entrypoint([_ENTRYPOINT_PATH])
+                    .cmd(list(_KEEP_ALIVE_COMMAND))
+                )
 
                 logged: list[str] = []
                 buffer = io.StringIO()
