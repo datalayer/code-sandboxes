@@ -83,6 +83,8 @@ __all__ = [
     "APT_PIN_PREFIX",
     "APT_SNAPSHOT_PREFIX",
     "CONSTRAINTS_PATH",
+    "COVERAGE_PREFIX",
+    "DOCKERFILE_COVERAGE",
     "LOCK_FORMAT",
     "PROTECTED_PIN_PREFIX",
     "BuildkitResolveRunner",
@@ -129,6 +131,13 @@ WHEELHOUSE_PATH = Path(__file__).parent / "constraints" / "wheelhouse"
 #: How an apt pin is written in the lock. A comment, so every reader of a
 #: ``pip`` requirements file — the CLI's diff included — ignores it.
 APT_PIN_PREFIX = "# datalayer-apt: "
+#: What a lock says it does not cover, as a header line.
+COVERAGE_PREFIX = "# datalayer-coverage: "
+#: A `dockerfile` source's lock (E3-03): what the resolver saw, and no more.
+DOCKERFILE_COVERAGE = (
+    "the declared packages and Datalayer's protected pins only; what the Dockerfile's own "
+    "instructions install is not locked, so a rebuild may install different versions of it"
+)
 #: The Ubuntu snapshot the apt pins were taken from, as the lock records it.
 #: The builder installs the pins from the same snapshot, since a pinned
 #: version can leave the live mirror (D-9).
@@ -889,6 +898,7 @@ def lock_document(
     python_version: str,
     base_reference: str,
     merged: MergedRequirements,
+    coverage: str | None = None,
 ) -> dict[str, Any]:
     """The stored lock: its text, its digest, and what a reader needs from it.
 
@@ -912,6 +922,10 @@ def lock_document(
         f"# python: {python_version}",
         f"# base: {base_reference}",
     ]
+    if coverage:
+        # What this lock does not cover, in the lock itself: it travels with
+        # the version, and a reader of the lock is who needs to know (E3-03).
+        header.append(f"{COVERAGE_PREFIX}{coverage}")
     for pin in outcome.apt_pins.items():
         header.append(f"{APT_PIN_PREFIX}{pin[0]}={pin[1]}")
     if outcome.apt_pins and outcome.apt_source:
@@ -938,6 +952,9 @@ def resolve_bases(
     variants: Sequence[str],
     bases: dict[str, ApprovedBase] = APPROVED_BASES,
     registry: str | None = None,
+    *,
+    ref: str | None = None,
+    channel: str | None = None,
 ) -> dict[str, str]:
     """Each variant's base, pinned by digest (D-9, §4).
 
@@ -947,15 +964,15 @@ def resolve_bases(
     Hub. Bare ``<repository>@sha256:…`` otherwise, which is what every test
     and fixture that never passes a credential still gets.
     """
-    base = bases.get(environment.spec.base.ref)
-    repository = base.repository if base is not None else environment.spec.base.ref
+    ref = ref or environment.spec.base.ref
+    channel = channel or environment.spec.base.channel
+    base = bases.get(ref)
+    repository = base.repository if base is not None else ref
     if registry:
         repository = f"{registry}/{repository}"
     resolved: dict[str, str] = {}
     for variant in variants:
-        digest = resolve_base(
-            environment.spec.base.ref, environment.spec.base.channel, variant, bases
-        )
+        digest = resolve_base(ref, channel, variant, bases)
         resolved[variant] = f"{repository}@{digest}"
     return resolved
 
@@ -1238,13 +1255,15 @@ def resolve_environment(
     environment = parse_environment(spec)
     python = environment.spec.packages.python
     source = environment.spec.build.source
-    if source not in ("packages", "dependencyFile", "image"):
-        raise EnvironmentsError(
-            CAPABILITY_UNSUPPORTED,
-            f"`{source}` is not resolved yet: only `packages`, `dependencyFile` and `image` "
-            "are, in this phase",
-            detail={"field": "spec.build.source", "source": source},
-        )
+    # A Dockerfile names its own base in `FROM` (E3-03): that is what is
+    # pinned and solved in, never `spec.base`, which the schema still asks for.
+    dockerfile = environment.spec.build.dockerfile if source == "dockerfile" else None
+    base_ref, base_channel = environment.spec.base.ref, environment.spec.base.channel
+    if dockerfile is not None:
+        from .contract import dockerfile_base
+
+        named = dockerfile_base(dockerfile.content, bases)
+        base_ref, base_channel = named.ref, named.channel
     if python.manager == "conda":
         raise EnvironmentsError(
             CAPABILITY_UNSUPPORTED,
@@ -1262,7 +1281,14 @@ def resolve_environment(
             resolve_secret=resolve_secret,
         )
         if source == "image"
-        else resolve_bases(environment, wanted, bases, registry=_registry_of(credential))
+        else resolve_bases(
+            environment,
+            wanted,
+            bases,
+            registry=_registry_of(credential),
+            ref=base_ref,
+            channel=base_channel,
+        )
     )
     dependency_file = environment.spec.build.dependency_file
     if source == "dependencyFile" and dependency_file is not None:
@@ -1312,11 +1338,7 @@ def resolve_environment(
         registry_auth=_registry_auth(credential),
         bootstrap_uv=(source == "image"),
         # An imported image is not an approved base, and names no channel.
-        apt_snapshot=(
-            ""
-            if source == "image"
-            else channel_snapshot(environment.spec.base.ref, environment.spec.base.channel, bases)
-        ),
+        apt_snapshot=("" if source == "image" else channel_snapshot(base_ref, base_channel, bases)),
     )
     outcome = (runner or BuildkitResolveRunner()).solve(request, say)
     document = lock_document(
@@ -1324,6 +1346,7 @@ def resolve_environment(
         python_version=environment.spec.language.version,
         base_reference=solving_in,
         merged=merged,
+        coverage=DOCKERFILE_COVERAGE if dockerfile is not None else None,
     )
     say(
         f"Locked {document['package_count']} packages"

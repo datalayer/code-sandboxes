@@ -475,7 +475,7 @@ class TestWhatItSaysItCannotBuild:
     def test_this_variant_has_no_gpu_yet(self) -> None:
         capabilities = a_builder().capabilities()
         assert capabilities.supports_gpu is False
-        assert capabilities.build_sources == ("packages", "dependencyFile", "image")
+        assert capabilities.build_sources == ("packages", "dependencyFile", "image", "dockerfile")
         assert capabilities.package_managers == ("uv", "pip")
 
 

@@ -535,11 +535,23 @@ def _dockerfile_findings(dockerfile: DockerfileSpec | None) -> list[SpecFinding]
         return [SpecFinding(field, "is required when `spec.build.source` is `dockerfile`")]
     if not dockerfile.content.strip():
         return [SpecFinding(f"{field}.content", "is empty; it is the Dockerfile text")]
-    from .contract import validate_dockerfile
+    from .contract import dockerfile_findings_for_build, validate_dockerfile
 
+    # The contract's refusals, then what building it needs on top (E3-03):
+    # one approved base named by its channel, and no build context yet. The
+    # second set is not the contract's — a variant could honour both — so it
+    # is its own list, and a line the contract already refused is not named
+    # twice.
+    findings = validate_dockerfile(dockerfile.content)
+    refused = {finding.line for finding in findings}
+    findings += [
+        finding
+        for finding in dockerfile_findings_for_build(dockerfile.content)
+        if finding.line not in refused
+    ]
     return [
         SpecFinding(f"{field}.content", f"line {finding.line}: {finding.message}")
-        for finding in validate_dockerfile(dockerfile.content)
+        for finding in sorted(findings, key=lambda finding: finding.line)
     ]
 
 
