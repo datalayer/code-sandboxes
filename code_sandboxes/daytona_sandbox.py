@@ -510,6 +510,24 @@ class DaytonaSandbox(Sandbox):
         given = {key: value for key, value in settings.items() if value}
         return daytona.DaytonaConfig(**given) if given else None
 
+    def _snapshot_carries_a_gpu(self) -> bool:
+        """Whether the snapshot this sandbox starts from was built with a GPU (E2-17).
+
+        A GPU is baked into a snapshot with its other resources, so a sandbox
+        of one asks for a GPU without saying so, and Daytona refuses it unless
+        it is ephemeral, the same as one asked for with `gpu=`. The snapshot
+        record says: a GPU environment's artifact, launched by its id, reads
+        `gpu` there. One that cannot be read is taken to have none, and
+        Daytona's own refusal then says why.
+        """
+        if self._snapshot is None or self._daytona is None:
+            return False
+        try:
+            snapshot = self._daytona.snapshot.get(self._snapshot)
+        except Exception:
+            return False
+        return bool(getattr(snapshot, "gpu", 0))
+
     def _create_params(self, daytona: Any) -> Any:  # noqa: C901
         """What to ask Daytona for, from the configuration of this sandbox.
 
@@ -534,7 +552,7 @@ class DaytonaSandbox(Sandbox):
             ]
 
         resources = self._resources(daytona)
-        if _asks_for_a_gpu(resources):
+        if _asks_for_a_gpu(resources) or self._snapshot_carries_a_gpu():
             # Daytona will not create a GPU sandbox that outlives its stop:
             # "GPU sandboxes must be ephemeral; set autoDeleteInterval to 0".
             # It is a property of asking for a GPU at all, not of asking for

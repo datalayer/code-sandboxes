@@ -59,6 +59,9 @@ class ApprovedBase(BaseModel):
     python_versions: tuple[str, ...]
     #: Whether the base carries CUDA, which a GPU size class requires.
     accelerator: bool = False
+    #: The CUDA toolkit the base pins, ``major.minor`` (E2-17): what a spec's
+    #: ``accelerator.cuda`` may ask for, and what check 11 reads back.
+    cuda: str | None = None
     #: Channel, then variant, to the digest resolution pins. A channel with no
     #: variant is approved and not yet published.
     channels: dict[str, dict[str, str]] = Field(default_factory=dict)
@@ -140,12 +143,23 @@ APPROVED_BASES: dict[str, ApprovedBase] = {
             },
             snapshots={"2026.09": "20260916T120000Z"},
         ),
-        # E2-17: jupyter-python-cuda plus the same layer.
+        # E2-17: jupyter-python-cuda:0.3.1 (jupyter-python 0.2.2 and the CUDA
+        # 12.8 toolkit, pinned) plus the same layer, released 2026-09-18 to
+        # environments/base/python-cuda as `2026.09-bceb272088e4`. The doctor
+        # passes all fifteen checks and `nvcc` answers 12.8 without a GPU.
         ApprovedBase(
             ref="datalayer/python-cuda",
             python_versions=("3.13",),
             accelerator=True,
-            channels={"2026.09": {}},
+            cuda="12.8",
+            channels={
+                "2026.09": dict.fromkeys(
+                    ("datalayer", "e2b", "daytona", "modal"),
+                    "sha256:a6374a2d4ff07c8a8fe0a71ee605964f93319894cc4152c4e2a1af6258ac9e6a",
+                )
+            },
+            # After its CUDA layer's own `apt-get update`, which ran that day.
+            snapshots={"2026.09": "20260918T150000Z"},
         ),
     )
 }

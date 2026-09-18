@@ -497,6 +497,12 @@ def _index_findings(field: str, url: str) -> list[SpecFinding]:
     return []
 
 
+def _same_cuda(asked: str, carried: str) -> bool:
+    """Whether a spec's CUDA names the base's: `12` and `12.8` both name 12.8."""
+    asked_parts = asked.strip().split(".")
+    return carried.strip().split(".")[: len(asked_parts)] == asked_parts
+
+
 def parse_requirements_txt(text: str) -> list[str]:
     """The requirement lines of a `requirements.txt`, comments and blanks dropped.
 
@@ -958,6 +964,18 @@ def spec_findings(
         findings.append(
             SpecFinding(
                 "spec.base.ref", f"`{base.ref}` has no CUDA; a GPU size class needs a CUDA base"
+            )
+        )
+    # The CUDA a spec asks for is the base's toolkit, which a channel pins
+    # (E2-17): a version that asks for another would build and then fail
+    # check 11 in every sandbox it starts.
+    cuda = resources.accelerator.cuda if wants_gpu else None
+    if cuda and base is not None and base.cuda and not _same_cuda(cuda, base.cuda):
+        findings.append(
+            SpecFinding(
+                "spec.resources.accelerator.cuda",
+                f"`{base.ref}` carries CUDA {base.cuda}, not {cuda}; ask for {base.cuda} "
+                "or leave `cuda` out",
             )
         )
 

@@ -292,6 +292,18 @@ def test_a_gpu_class_needs_a_cuda_base() -> None:
     assert _codes(data) == {}
 
 
+def test_a_gpu_asks_for_the_cuda_its_base_carries() -> None:
+    """The CUDA channel pins its toolkit (E2-17): a spec asking for another
+    would build and then fail check 11 in every sandbox it started."""
+    data = mutated("spec.resources.sizeClass", "gpu-small")
+    data["spec"]["base"]["ref"] = "datalayer/python-cuda"
+    for cuda in ("12.8", "12", None):
+        data["spec"]["resources"]["accelerator"] = {"type": "H100", "cuda": cuda}
+        assert _codes(data) == {}, cuda
+    data["spec"]["resources"]["accelerator"] = {"type": "H100", "cuda": "12.4"}
+    assert _codes(data) == {"spec.resources.accelerator.cuda": INVALID}
+
+
 def test_all_baked_files_together_are_capped() -> None:
     data = document()
     data["spec"]["files"] = [

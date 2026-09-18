@@ -172,8 +172,9 @@ class TestWhatIsSaidBeforeAnythingIsQueued:
         assert "spec.resources.accelerator" in fields(report)
 
     def test_a_gpu_spec_is_buildable_on_modal_and_daytona(self) -> None:
-        spec = {"sizeClass": "gpu-large", "accelerator": {"type": "A100", "cuda": "12.4"}}
-        for variant in ("modal", "daytona"):
+        """Each in its own GPU's name (E2-17): an A100 is Modal's, an H100 Daytona's."""
+        for variant, gpu in (("modal", "A100"), ("daytona", "H100")):
+            spec = {"sizeClass": "gpu-large", "accelerator": {"type": gpu, "cuda": "12.8"}}
             report = get_builder(variant).validate(environment(resources=spec))
             assert report.supported is True, f"{variant}: {messages(report)}"
 

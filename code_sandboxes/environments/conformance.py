@@ -37,6 +37,7 @@ __all__ = [
     "cross_variant_packages",
     "drifted_from",
     "package_versions_of",
+    "run_accelerator_check",
     "run_conformance",
     "run_core_tier",
     "run_extended_tier",
@@ -596,36 +597,93 @@ def _egress(
     )
 
 
-def _gpu(sandbox: Sandbox, requested: bool, cuda: str | None, timeout: float | None) -> CheckResult:
+def _gpu(
+    sandbox: Sandbox,
+    requested: bool,
+    cuda: str | None,
+    timeout: float | None,
+    count: int = 1,
+) -> CheckResult:
+    """Check 11: the GPUs asked for are visible, and CUDA is the spec's.
+
+    Two CUDA versions are read, and they answer different questions. The
+    image's own toolkit (`nvcc`, or the base's `CUDA_VERSION`) is what the
+    spec's `accelerator.cuda` names and the base channel pins. `nvidia-smi`'s
+    "CUDA Version" is the newest CUDA the host's *driver* runs, which the
+    image does not choose: comparing the spec with it failed a correct image
+    on any newer driver (found on 2026-09-18, E2-17). The driver only has to
+    be new enough for the toolkit.
+    """
     if not requested:
         return _result(11, True, gating=False, detail="no accelerator was requested")
     body = (
-        "import re as _dl_re, subprocess as _dl_sp\n"
-        "_dl_out = {'returncode': None, 'gpus': [], 'cuda': None}\n"
+        "import os as _dl_os, re as _dl_re, shutil as _dl_sh, subprocess as _dl_sp\n"
+        "_dl_out = {'returncode': None, 'gpus': [], 'driver': None, 'cuda': None}\n"
         "try:\n"
         "    _dl_run = _dl_sp.run(['nvidia-smi'], capture_output=True, text=True, timeout=30)\n"
         "    _dl_out['returncode'] = _dl_run.returncode\n"
         "    _dl_match = _dl_re.search(r'CUDA Version:\\s*([0-9.]+)', _dl_run.stdout)\n"
-        "    _dl_out['cuda'] = _dl_match.group(1) if _dl_match else None\n"
+        "    _dl_out['driver'] = _dl_match.group(1) if _dl_match else None\n"
         "    _dl_names = _dl_sp.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'], "
         "capture_output=True, text=True, timeout=30)\n"
         "    _dl_out['gpus'] = [_dl_l.strip() for _dl_l in _dl_names.stdout.splitlines() "
         "if _dl_l.strip()]\n"
         "except (OSError, _dl_sp.SubprocessError) as _dl_error:\n"
         "    _dl_out['error'] = str(_dl_error)\n"
+        "try:\n"
+        "    _dl_nvcc = _dl_sh.which('nvcc') or '/usr/local/cuda/bin/nvcc'\n"
+        "    _dl_run = _dl_sp.run([_dl_nvcc, '--version'], capture_output=True, text=True, "
+        "timeout=30)\n"
+        "    _dl_match = _dl_re.search(r'release ([0-9.]+),', _dl_run.stdout)\n"
+        "    _dl_out['cuda'] = _dl_match.group(1) if _dl_match else None\n"
+        "except (OSError, _dl_sp.SubprocessError):\n"
+        "    pass\n"
+        "_dl_out['cuda'] = _dl_out['cuda'] or _dl_os.environ.get('CUDA_VERSION') or None\n"
     )
     answer = probe(sandbox, _code(11, body, "_dl_out"), timeout=timeout)
     problems = []
-    if answer.get("returncode") != 0 or not answer.get("gpus"):
+    gpus = answer.get("gpus") or []
+    if answer.get("returncode") != 0 or not gpus:
         problems.append("no GPU is visible")
-    if cuda and not str(answer.get("cuda") or "").startswith(cuda):
-        problems.append(f"CUDA is {answer.get('cuda')}, not {cuda}")
+    elif len(gpus) < count:
+        problems.append(f"{len(gpus)} GPU(s) visible, not the {count} asked for")
+    toolkit = str(answer.get("cuda") or "")
+    if cuda and not _version_is(toolkit, cuda):
+        problems.append(f"CUDA is {toolkit or None}, not {cuda}")
+    driver = str(answer.get("driver") or "")
+    if toolkit and driver and _version_tuple(driver) < _version_tuple(toolkit):
+        problems.append(f"the driver runs CUDA up to {driver}, older than the image's {toolkit}")
     # A GPU version gates on this (E2-17): a version that asked for an
     # accelerator and cannot see it, or sees the wrong CUDA, is not the
     # version its spec describes. A version that asked for none never
     # reaches here (the trivial pass above), so the extended tier still
     # gates nothing for a CPU version.
     return _result(11, not problems, gating=True, detail="; ".join(problems) or None, actual=answer)
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", version))
+
+
+def _version_is(version: str, asked: str) -> bool:
+    """Whether `version` is what `asked` names: `12` and `12.8` both name 12.8.3."""
+    wanted = _version_tuple(asked)
+    return bool(wanted) and _version_tuple(version)[: len(wanted)] == wanted
+
+
+def run_accelerator_check(
+    sandbox: Sandbox,
+    *,
+    cuda: str | None = None,
+    count: int = 1,
+    timeout: float | None = 120.0,
+) -> CheckResult:
+    """Appendix B check 11 alone, gating, for a version that asked for an accelerator (E2-17).
+
+    What a builder's smoke test adds to the core tier for a GPU version: the
+    rest of the extended tier records, and this one decides.
+    """
+    return _guard(11, True, lambda: _gpu(sandbox, True, cuda, timeout, count))
 
 
 def _throughput(
@@ -694,6 +752,7 @@ def run_extended_tier(
     contract: SandboxContract = SANDBOX_CONTRACT_V1,
     accelerator_requested: bool = False,
     cuda_version: str | None = None,
+    accelerator_count: int = 1,
     egress_allowed: Sequence[str] = (),
     egress_blocked: Sequence[str] = (),
     cold_start_seconds: float | None = None,
@@ -711,7 +770,7 @@ def run_extended_tier(
         _guard(
             11,
             accelerator_requested,
-            lambda: _gpu(sandbox, accelerator_requested, cuda_version, timeout),
+            lambda: _gpu(sandbox, accelerator_requested, cuda_version, timeout, accelerator_count),
         ),
         _guard(12, False, lambda: _throughput(sandbox, contract, minimum_mib_per_second, timeout)),
         _guard(13, False, lambda: _cold_start(cold_start_seconds, cold_start_budget)),

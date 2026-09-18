@@ -270,6 +270,16 @@ for, and the `target` a build's snapshot lands in is the one a launch
 starts from — a version that changes size class or region rebuilds a
 second, distinct artifact rather than resizing the first.
 
+**A GPU is part of the snapshot too.** A GPU class (`gpu-small`,
+`gpu-large`) on the CUDA base bakes the spec's `accelerator` into it: its
+`type`, one of Daytona's GPUs, and its `count`. CPU and memory come from
+`resources.hints`, or Daytona's own size for that GPU, and the disk holds the
+CUDA base. Every sandbox of a GPU snapshot is ephemeral, as Daytona requires:
+`DaytonaSandbox` reads the snapshot's `gpu` and asks for it. The build's
+smoke test adds check 11 to the core tier: the GPUs asked for are visible,
+CUDA is the base's, and the host's driver is new enough for it. GPU compute
+is billed by Daytona to the owner's organization, which needs GPU credits.
+
 Of the four variants, Daytona is the one whose build-time doctor check and
 live launch agree in full: the doctor is *not* run at build time (a
 build-time `RUN` step's PID 1 is Daytona's own build agent, not the
