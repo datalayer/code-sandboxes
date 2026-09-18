@@ -124,7 +124,7 @@ import contextlib
 import io
 import os
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -135,6 +135,7 @@ from ..builders import (
     ArtifactReference,
     BuildRequest,
     CapabilityFinding,
+    ValidationResult,
 )
 from ..contract import SANDBOX_CONTRACT_V1
 from ..errors import (
@@ -664,6 +665,84 @@ class Builder(ManagedBuilder):
         except Exception as error:
             raise self._provider_error("ask whether the image exists", error) from error
         return True
+
+    def smoke_test(
+        self,
+        artifact: ArtifactReference,
+        *,
+        environment: Any = None,
+        lock_text: str | None = None,
+        secret_values: Sequence[str] = (),
+    ) -> ValidationResult:
+        """Launch the image and run Appendix B's core tier in it (E2-05).
+
+        This box's own `Done when` asks for exactly this — "the live test
+        launches by image id and passes the core tier" — and it refused
+        through `ManagedBuilder`, so **no Modal build could reach
+        `succeeded`**: the image was built in the owner's workspace and the
+        build recorded failed at this step, the same state Daytona was in
+        until 2026-09-17.
+
+        **Launched by image id, never by name**: a published name is mutable
+        by design (§6), so only the id says which artifact ran. Launched
+        through `ModalSandbox` — the same class a person's launch uses —
+        rather than a hand-rolled `Sandbox.create`, because a hand-rolled
+        launch is exactly what hid, on 2026-09-13, that every image this
+        builder made died the instant it was launched for real.
+
+        **As the owner** (D-8): the sandbox is created with the same client
+        the build used, so it runs in the workspace the image is in.
+
+        **Restarted by replacing the sandbox.** Modal has no in-place
+        restart, so check 7's restart stops this sandbox and starts another
+        from the same image, which is the stronger form of the question.
+
+        The sandbox is terminated whether the tier passed or not.
+        """
+        if environment is None:
+            raise EnvironmentsError(
+                CAPABILITY_UNSUPPORTED,
+                "A Modal smoke test needs the version's spec: the core tier "
+                "asks for the Python version it declared and the packages its "
+                "lock pinned, and an artifact carries neither",
+                detail={"variant": self.variant},
+            )
+        from ...modal_sandbox import ModalSandbox
+        from ...models import SandboxConfig
+        from ..conformance import expected_packages, run_core_tier
+
+        sdk = self._modal_sdk()
+        sandbox = ModalSandbox(
+            config=SandboxConfig(name=f"smoke-{artifact.provider_artifact_id}"),
+            app_name=f"dl-{environment.metadata.name}",
+            image_id=artifact.provider_artifact_id,
+            client=self._client(sdk),
+        )
+        self._log(f"Launching {artifact.provider_artifact_id} to smoke-test it")
+        try:
+            sandbox.start()
+            return run_core_tier(
+                sandbox,
+                python_version=environment.spec.language.version,
+                expected_packages=expected_packages(environment, lock_text or ""),
+                secret_values=tuple(secret_values),
+                restart=lambda: self._restart(sandbox),
+            )
+        except EnvironmentsError:
+            raise
+        except Exception as error:
+            raise self._provider_error("smoke-test the image", error) from error
+        finally:
+            try:
+                sandbox.stop()
+            except Exception as error:
+                self._log(f"The smoke-test sandbox could not be stopped: {error}")
+
+    @staticmethod
+    def _restart(sandbox: Any) -> None:
+        """Check 7's restart, as Modal can do it: a new sandbox from the same image."""
+        sandbox.stop()
+        sandbox.start()
 
     def delete(self, artifact: ArtifactReference) -> None:
         """Delete the image, and every intermediate layer this build recorded (E2-05, E2-09).

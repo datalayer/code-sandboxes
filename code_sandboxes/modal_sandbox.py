@@ -215,6 +215,12 @@ class ModalSandbox(Sandbox):
             ``debian_slim`` image is used, optionally extended with ``pip_packages``.
         pip_packages: Optional list of pip packages to install in the default image.
         python_executable: Executable used to run snippets (default ``python``).
+        client: The ``modal.Client`` to act as. The app, the image and the
+            sandbox are all looked up and created with it, so a sandbox runs
+            in the workspace that client opens. With none, the SDK's own
+            ambient credentials decide — right for a person's own machine,
+            wrong for a worker acting for an owner (D-8), which passes the
+            owner's.
     """
 
     def __init__(
@@ -227,9 +233,11 @@ class ModalSandbox(Sandbox):
         python_version: str = DEFAULT_MODAL_PYTHON_VERSION,
         python_executable: str = "python",
         features: list[str] | None = None,
+        client: Any | None = None,
         **kwargs,
     ):
         super().__init__(config)
+        self._client = client
         self._app_name = app_name
         self._image = image
         #: A Modal image id, `im-…`: what an Environment build of this variant
@@ -396,13 +404,16 @@ class ModalSandbox(Sandbox):
                 "modal is required for ModalSandbox. Install it with: pip install modal"
             ) from exc
 
-        self._app = modal.App.lookup(self._app_name, create_if_missing=True)
+        # The client, when given, on every call that names a workspace: the
+        # app, the image and the sandbox are all the owner's or none are.
+        on_client = {"client": self._client} if self._client is not None else {}
+        self._app = modal.App.lookup(self._app_name, create_if_missing=True, **on_client)
 
         image = self._image
         if image is None and self._image_id:
             # `Image.from_id` in the Python SDK; `images.fromId` is the
             # JavaScript one, which an earlier note had here (correction 42).
-            image = modal.Image.from_id(self._image_id)
+            image = modal.Image.from_id(self._image_id, **on_client)
         if image is None:
             image = modal.Image.debian_slim(python_version=self._python_version)
             if self._pip_packages:
@@ -416,6 +427,7 @@ class ModalSandbox(Sandbox):
             "app": self._app,
             "image": image,
             "timeout": int(self.config.max_lifetime),
+            **on_client,
         }
         if self.config.gpu:
             create_kwargs["gpu"] = _resolve_modal_gpu(self.config.gpu, modal)
