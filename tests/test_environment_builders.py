@@ -326,10 +326,10 @@ def test_files_and_contents_build_are_baked_together() -> None:
 
 
 def test_a_contents_build_entry_without_its_digest_will_not_parse() -> None:
-    with pytest.raises(Exception):
-        environment(
-            contents_build=[{"source": "https://data.example/x", "path": "/opt/x"}]
-        )
+    with pytest.raises(EnvironmentsError) as raised:
+        environment(contents_build=[{"source": "https://data.example/x", "path": "/opt/x"}])
+    assert raised.value.code.code == "DL_ENV_SPEC_INVALID"
+    assert "sha256" in raised.value.message
 
 
 def test_the_neutral_modules_import_no_provider_sdk() -> None:
