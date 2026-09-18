@@ -3,4 +3,4 @@
 
 """Code Sandboxes."""
 
-__version__ = "1.9.26"
+__version__ = "1.9.27"
