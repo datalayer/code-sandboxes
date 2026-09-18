@@ -468,6 +468,10 @@ class Builder(ManagedBuilder):
                         timeout=self.max_build_seconds,
                     )
                 except Exception as error:
+                    # Daytona keeps a snapshot that failed, in `error`, under
+                    # the build's own name: one over its size limit was left
+                    # there (E2-17, 2026-09-18). Nothing records it, so it goes.
+                    self._discard_named(sdk, client, name)
                     raise EnvironmentsError(
                         BUILD_FAILED,
                         f"The Daytona build failed: {error}",
@@ -682,12 +686,24 @@ class Builder(ManagedBuilder):
         self._cancelled.add(request.build_uid)
         sdk = self._daytona_sdk()
         client = self._client(sdk)
+        self._discard_named(sdk, client, _snapshot_name(request))
+
+    def _discard_named(self, sdk: Any, client: Any, name: str) -> None:
+        """Delete, by its id, the snapshot this build named, when Daytona has one.
+
+        A build's name is its own (the build uid is in it), so looking it up
+        by name cannot find another build's. Never a second reason to fail:
+        what could not be deleted is said in the log.
+        """
         try:
-            snapshot = client.snapshot.get(_snapshot_name(request))
+            snapshot = client.snapshot.get(name)
         except Exception:
             return
-        self._log(f"The build was cancelled: deleting the snapshot {snapshot.id} it was making")
-        self._delete_by_id(sdk, client, snapshot.id)
+        self._log(f"Deleting the snapshot {snapshot.id} this build made, which nothing records")
+        try:
+            self._delete_by_id(sdk, client, snapshot.id)
+        except EnvironmentsError as error:
+            self._log(f"The snapshot {snapshot.id} could not be deleted: {error.message}")
 
     def smoke_test(
         self,
