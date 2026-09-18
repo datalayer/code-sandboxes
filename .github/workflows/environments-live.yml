@@ -14,8 +14,8 @@ name: Environments Live Matrix
 # Needs, as repository secrets: E2B_API_KEY, DAYTONA_API_KEY, MODAL_TOKEN_ID,
 # MODAL_TOKEN_SECRET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY — the last two
 # scoped to read the approved base from ECR only (D-18). A secret that is
-# not set is not a workflow failure: the test each secret belongs to skips,
-# by name, and says so in the job summary.
+# not set skips the test it belongs to, by name, and the job summary lists
+# each leg's outcome; a Daytona leg that did not run fails the job.
 
 on:
   schedule:
@@ -82,6 +82,49 @@ jobs:
           DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+
+      # A leg whose secret is not set skips, and a run where every leg skipped
+      # reported success in under a second: the nightly was green every night
+      # while it tested nothing (found on 2026-09-18, "3 skipped in 0.61s").
+      # Each leg's outcome goes in the job summary, and a Daytona leg that did
+      # not run fails the job: it is the one this matrix is required to prove
+      # (PLAN_ENV.md, the Datalayer and Daytona target, E2-11).
+      - name: Say which legs ran, and refuse a Daytona leg that did not
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          try:
+              cases = list(ET.parse("live-matrix-results.xml").getroot().iter("testcase"))
+          except (OSError, ET.ParseError) as error:
+              sys.exit(f"no JUnit report to read: {error}")
+          rows, daytona = [], None
+          for case in cases:
+              leg = (case.get("classname") or "").rsplit(".", 1)[-1]
+              skipped = case.find("skipped")
+              if skipped is not None:
+                  outcome = "skipped: " + (skipped.get("message") or "").strip()
+              elif case.find("failure") is not None or case.find("error") is not None:
+                  outcome = "failed"
+              else:
+                  outcome = "passed"
+              rows.append(f"| {leg} | {outcome} |")
+              if leg == "TestDaytona":
+                  daytona = outcome
+          summary = "| Leg | Outcome |\n|---|---|\n" + "\n".join(rows) + "\n"
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+              handle.write(summary)
+          print(summary)
+          if daytona is None or daytona.startswith("skipped"):
+              sys.exit(
+                  f"The Daytona leg did not run ({daytona or 'absent'}): it is the one this "
+                  "matrix must prove, so a run without it is not a green run. Set the "
+                  "DAYTONA_API_KEY, AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY secrets."
+              )
+          PY
 
       - name: Upload the JUnit report
         if: always()
