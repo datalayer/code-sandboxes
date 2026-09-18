@@ -229,7 +229,7 @@ sandbox.files.read_bytes("/tmp/data.parquet")
 
 ## Environments
 
-An [Environment](/docs/environments) built for Daytona is a **snapshot** —
+An [Environment](/environments) built for Daytona is a **snapshot** —
 built from the approved Datalayer base, the resolved lock, your files and
 `postInstall` commands, and an explicit `tini -- sleep infinity` entrypoint
 (Daytona's own default, otherwise, is a bare `sleep infinity`, with no init
