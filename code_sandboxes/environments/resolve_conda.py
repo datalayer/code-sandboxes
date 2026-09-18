@@ -148,6 +148,30 @@ def micromamba_bootstrap_command() -> str:
     )
 
 
+#: Where an approved Datalayer base keeps its interpreter: `python` on the
+#: PATH is `/opt/conda/bin/python` (E1-05), and that is the environment a
+#: sandbox's kernel runs in.
+CONDA_PREFIX = "/opt/conda"
+
+
+def micromamba_install_command(lock_path: str, *, micromamba: str = "micromamba") -> str:
+    """The command that installs an explicit lock into the base's own interpreter.
+
+    **Into `/opt/conda`, by name.** The base sets no `MAMBA_ROOT_PREFIX`, and
+    left to itself `micromamba install --name base` makes a *new* `base` under
+    `~/.local/share/mamba` — for a Datalayer base, inside the very home the
+    runtime mounts a person's content over, and nowhere `python` looks. The
+    first real conda build (2026-09-18) installed all 81 packages there, and
+    then failed its own `postInstall` with `No module named 'osgeo'`. Both the
+    root and the target prefix are named, so nothing depends on which user the
+    step happens to run as.
+    """
+    return (
+        f"{micromamba} install --yes --root-prefix {CONDA_PREFIX} "
+        f"--prefix {CONDA_PREFIX} --file {lock_path}"
+    )
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -416,6 +440,46 @@ def pip_requirements_from_env_yaml(text: str) -> tuple[str, ...]:
     return tuple(requirements)
 
 
+#: What the solved prefix's own interpreter is asked, to list the pip layer
+#: whole. Standard library only, and it runs inside the prefix.
+#:
+#: ``micromamba env export`` names the pip packages the *file* asked for and
+#: nothing they pulled in: the first real solve (2026-09-18) exported 7 pip
+#: pins where pip had installed several dozen distributions, so every build
+#: would have resolved ``tornado``, ``pyzmq``, ``traitlets`` and the rest
+#: afresh — on each variant, on whichever day it ran — under a lock that
+#: claimed to say the whole of what a build installs. A distribution records
+#: who installed it in its own ``INSTALLER`` file, which is what tells the pip
+#: layer from the conda packages that also carry Python metadata.
+PIP_LAYER_SCRIPT = """\
+import importlib.metadata as metadata
+
+layer = {}
+for distribution in metadata.distributions():
+    installer = (distribution.read_text("INSTALLER") or "").strip().lower()
+    name = distribution.metadata["Name"]
+    if installer in ("pip", "uv") and name:
+        layer[name.lower().replace("_", "-")] = distribution.version
+for name in sorted(layer):
+    print(f"{name}=={layer[name]}")
+"""
+
+
+def pip_requirements_from_listing(text: str) -> tuple[str, ...]:
+    """The pip layer :data:`PIP_LAYER_SCRIPT` printed: ``name==version`` lines.
+
+    Anything else on a line — a warning an interpreter wrote to the same
+    stream — is dropped rather than installed.
+    """
+    requirements: list[str] = []
+    for line in text.splitlines():
+        entry = line.strip()
+        name, separator, version = entry.partition("==")
+        if separator and name and version and " " not in entry:
+            requirements.append(entry)
+    return tuple(requirements)
+
+
 class CondaResolveRunner(Protocol):
     """Where a conda solve runs."""
 
@@ -559,9 +623,16 @@ class MicromambaResolveRunner:
                 [self._micromamba, "env", "export", "--prefix", str(prefix)],
                 say,
             )
+            # Every distribution pip installed, the transitive ones included:
+            # the export above names only what the file asked for.
+            listing = self._export(
+                [str(prefix / "bin" / "python"), "-c", PIP_LAYER_SCRIPT],
+                say,
+            )
         return CondaResolveOutcome(
             lock_text=export.stdout,
-            pip_lock=pip_requirements_from_env_yaml(pip_export.stdout),
+            pip_lock=pip_requirements_from_listing(listing.stdout)
+            or pip_requirements_from_env_yaml(pip_export.stdout),
         )
 
     def _export(
@@ -659,9 +730,14 @@ class BuildkitCondaResolveRunner:
                     f"RUN {micromamba} env export --explicit "
                     "--prefix /solve/prefix > /solve/lock.txt",
                     f"RUN {micromamba} env export --prefix /solve/prefix > /solve/pip-env.yml",
+                    # The pip layer whole, from the prefix's own interpreter:
+                    # a file of this package's, never a spec field.
+                    "COPY pip_layer.py ./pip_layer.py",
+                    "RUN /solve/prefix/bin/python pip_layer.py > /solve/pip-lock.txt",
                     "FROM scratch",
                     "COPY --from=solve /solve/lock.txt /lock.txt",
                     "COPY --from=solve /solve/pip-env.yml /pip-env.yml",
+                    "COPY --from=solve /solve/pip-lock.txt /pip-lock.txt",
                 ]
             )
             + "\n"
@@ -686,6 +762,7 @@ class BuildkitCondaResolveRunner:
         with tempfile.TemporaryDirectory(prefix="dl-conda-solve-") as directory:
             root = Path(directory)
             (root / "environment.yml").write_text(request.environment_yml, encoding="utf-8")
+            (root / "pip_layer.py").write_text(PIP_LAYER_SCRIPT, encoding="utf-8")
             (root / "Dockerfile").write_text(self.dockerfile(request), encoding="utf-8")
             out = root / "out"
             command = [
@@ -724,7 +801,12 @@ class BuildkitCondaResolveRunner:
                 raise parse_conda_failure(finished.stderr or finished.stdout or "")
             lock = (out / "lock.txt").read_text(encoding="utf-8")
             pip_env = out / "pip-env.yml"
+            pip_listing = out / "pip-lock.txt"
             pip_lock = (
+                pip_requirements_from_listing(pip_listing.read_text(encoding="utf-8"))
+                if pip_listing.exists()
+                else ()
+            ) or (
                 pip_requirements_from_env_yaml(pip_env.read_text(encoding="utf-8"))
                 if pip_env.exists()
                 else ()
@@ -761,6 +843,69 @@ def explicit_lock_packages(lock_text: str) -> list[str]:
             continue
         packages.append(line)
     return packages
+
+
+#: `name-version-build.conda` (or `.tar.bz2`), as the last segment of an
+#: explicit lock's URL. A conda name may itself contain `-`, so the version and
+#: the build are the last two dash-separated fields, never the first two.
+_EXPLICIT_PACKAGE = re.compile(
+    r"/(?P<name>[^/]+)-(?P<version>[^-/]+)-(?P<build>[^-/]+)\.(?:conda|tar\.bz2)(?:#.*)?$"
+)
+
+
+def conda_lock_python_packages(lock_text: str) -> dict[str, str]:
+    """The Python distributions an explicit lock installs, by name, with their versions.
+
+    Only the ones a build string marks as Python packages — `py313h…` for a
+    compiled one, `pyh…`/`pyhd8ed…` for a noarch one. A conda lock is mostly
+    libraries with no Python metadata at all (`libgdal-core`, `proj`, `openssl`),
+    and Appendix B check 5 asks the interpreter for a distribution's version:
+    handing it `proj` would fail a check with nothing wrong to report.
+    """
+    found: dict[str, str] = {}
+    for url in explicit_lock_packages(lock_text):
+        match = _EXPLICIT_PACKAGE.search(url)
+        if match and match["build"].startswith("py"):
+            found[match["name"].lower()] = match["version"]
+    return found
+
+
+def conda_expected_packages(environment_yml: str, lock_text: str) -> dict[str, str]:
+    """What an `environment.yml` names at its top level, pinned to what its lock resolved.
+
+    Check 5's question, for a conda source (E3-02): the file's own `pip:`
+    requirements, and the conda packages it names that are Python
+    distributions. The interpreter is left out — check 3 asks about it, and
+    `python` is not a distribution the interpreter reports about itself.
+    Empty for a file that cannot be read: the spec's own validation refuses
+    one long before a build, and a smoke test is not where to say so again.
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+
+    try:
+        environment = parse_conda_environment(environment_yml)
+    except EnvironmentsError:
+        return {}
+    expected: dict[str, str] = {}
+    pythons = conda_lock_python_packages(lock_text)
+    for spec in environment.conda_dependencies:
+        name = _conda_package_name(spec)
+        if name != "python" and name in pythons:
+            expected[canonicalize_name(name)] = pythons[name]
+    pinned: dict[str, str] = {}
+    for requirement in conda_lock_pip_requirements(lock_text):
+        name, separator, version = requirement.partition("==")
+        if separator:
+            pinned[canonicalize_name(name.strip())] = version.strip()
+    for text in environment.pip_dependencies:
+        try:
+            name = canonicalize_name(Requirement(text).name)
+        except InvalidRequirement:
+            continue
+        if name in pinned:
+            expected[name] = pinned[name]
+    return expected
 
 
 def is_conda_lock(lock_text: str | None) -> bool:

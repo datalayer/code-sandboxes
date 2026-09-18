@@ -116,6 +116,7 @@ from ..resolve_conda import (
     conda_lock_pip_requirements,
     is_conda_lock,
     micromamba_bootstrap_command,
+    micromamba_install_command,
 )
 from ..spec import GPU_SIZE_CLASSES, Environment
 from .managed import ManagedBuilder
@@ -373,9 +374,7 @@ class Builder(ManagedBuilder):
                     # present the same as for a pip source. micromamba is
                     # installed first: the approved base bakes uv but not it.
                     image = image.run_commands(micromamba_bootstrap_command())
-                    image = image.run_commands(
-                        f"micromamba install --yes --name base --file {_LOCK_PATH}"
-                    )
+                    image = image.run_commands(micromamba_install_command(_LOCK_PATH))
                     pip_requirements = conda_lock_pip_requirements(request.lock_text)
                     if pip_requirements:
                         requirements = " ".join(shlex.quote(req) for req in pip_requirements)

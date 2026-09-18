@@ -477,6 +477,14 @@ def expected_packages(environment: Any, lock_text: str) -> dict[str, str]:
 
     from .resolve import locked_versions
 
+    dependency_file = environment.spec.build.dependency_file
+    if dependency_file is not None and dependency_file.source_format == "conda":
+        # A conda source names its packages in the file, not in
+        # `packages.python`, and its lock is not a pip one (E3-02). Read the
+        # other way, check 5 was handed nothing and passed for it.
+        from .resolve_conda import conda_expected_packages
+
+        return conda_expected_packages(dependency_file.content, lock_text or "")
     pinned = locked_versions(lock_text) if lock_text else {}
     names: list[str] = []
     for text in environment.spec.packages.python.dependencies:

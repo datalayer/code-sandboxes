@@ -83,6 +83,7 @@ from ..resolve_conda import (
     conda_lock_pip_requirements,
     is_conda_lock,
     micromamba_bootstrap_dockerfile_line,
+    micromamba_install_command,
 )
 from ..spec import BuildSecret, Environment, command_names_secret
 
@@ -364,8 +365,9 @@ class Builder:
                     micromamba_bootstrap_dockerfile_line(),
                     "COPY lock.txt /opt/datalayer/lock.txt",
                     "RUN --mount=type=cache,target=/opt/conda/pkgs "
-                    f"{MICROMAMBA_BINARY} install --yes --name base "
-                    "--file /opt/datalayer/lock.txt",
+                    + micromamba_install_command(
+                        "/opt/datalayer/lock.txt", micromamba=MICROMAMBA_BINARY
+                    ),
                 ]
             )
             if pip_requirements:

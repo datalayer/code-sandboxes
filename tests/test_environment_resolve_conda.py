@@ -20,16 +20,20 @@ from code_sandboxes.environments.errors import EnvironmentsError
 from code_sandboxes.environments.resolve import protected_pins
 from code_sandboxes.environments.resolve_conda import (
     CONDA_LOCK_FORMAT,
+    PIP_LAYER_SCRIPT,
     BuildkitCondaResolveRunner,
     CondaResolveOutcome,
     CondaResolveRequest,
     MicromambaResolveRunner,
+    conda_expected_packages,
     conda_lock_document,
+    conda_lock_python_packages,
     explicit_lock_packages,
     merge_conda_pip,
     parse_conda_environment,
     parse_conda_failure,
     pip_requirements_from_env_yaml,
+    pip_requirements_from_listing,
     rendered_environment,
     resolve_conda_environment,
 )
@@ -393,6 +397,95 @@ class TestTheRunners:
         assert "COPY --from=mambaorg/micromamba" in dockerfile
         assert "env export --prefix /solve/prefix > /solve/pip-env.yml" in dockerfile
         assert "COPY --from=solve /solve/pip-env.yml /pip-env.yml" in dockerfile
+        # And the pip layer whole, asked of the prefix's own interpreter: the
+        # export names what the file asked for and nothing it pulled in.
+        assert "COPY pip_layer.py ./pip_layer.py" in dockerfile
+        assert "RUN /solve/prefix/bin/python pip_layer.py > /solve/pip-lock.txt" in dockerfile
+        assert "COPY --from=solve /solve/pip-lock.txt /pip-lock.txt" in dockerfile
+
+
+class TestThePipLayerIsWhole:
+    """`micromamba env export` named 7 pip pins where pip had installed 310
+    distributions (the first real solve, 2026-09-18): everything they pulled
+    in would have been resolved afresh by each build, on each variant."""
+
+    def test_the_script_lists_what_pip_installed_and_not_what_conda_did(self, tmp_path) -> None:
+        import subprocess as process
+        import sys
+
+        site = tmp_path / "site"
+        for name, version, installer in (
+            ("Tornado", "6.5.10", "pip"),
+            ("jupyter_server", "2.21.0+datalayer.1", "uv"),
+            ("GDAL", "3.11.5", "conda"),
+            ("unknown", "1.0", ""),
+        ):
+            info = site / f"{name}-{version}.dist-info"
+            info.mkdir(parents=True)
+            (info / "METADATA").write_text(
+                f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
+            )
+            (info / "INSTALLER").write_text(installer + "\n")
+        listed = process.run(  # noqa: S603 - this interpreter, this package's script
+            [
+                sys.executable,
+                "-S",
+                "-c",
+                f"import sys; sys.path[:] = [{str(site)!r}] + sys.path\n" + PIP_LAYER_SCRIPT,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert pip_requirements_from_listing(listed) == (
+            "jupyter-server==2.21.0+datalayer.1",
+            "tornado==6.5.10",
+        )
+
+    def test_a_line_that_is_not_a_pin_is_never_installed(self) -> None:
+        listing = "a==1\nWARNING: something was said\n\nb-c==2.0\n== \n"
+        assert pip_requirements_from_listing(listing) == ("a==1", "b-c==2.0")
+
+
+class TestWhatCheckFiveExpectsOfACondaLock:
+    LOCK = (
+        "# datalayer-pip: shapely==2.1.2\n# datalayer-pip: tornado==6.5.10\n@EXPLICIT\n"
+        "https://conda.anaconda.org/conda-forge/linux-64/libgdal-core-3.11.5-h4f65170_7.conda#aa\n"
+        "https://conda.anaconda.org/conda-forge/linux-64/gdal-3.11.5-py313h1ee8c46_7.conda#bb\n"
+        "https://conda.anaconda.org/conda-forge/noarch/typing-extensions-4.15.0-pyhcf101f3_0.conda#cc\n"
+        "https://conda.anaconda.org/conda-forge/linux-64/python-3.13.15-h2b335a9_0_cp313.conda#dd\n"
+    )
+    FILE = (
+        "channels: [conda-forge]\n"
+        "dependencies:\n"
+        "  - python=3.13\n"
+        "  - gdal=3.11\n"
+        "  - libgdal-core\n"
+        "  - pip:\n"
+        "      - shapely==2.1.2\n"
+    )
+
+    def test_only_python_distributions_are_read_out_of_the_lock(self) -> None:
+        """`libgdal-core` has no Python metadata: asking the interpreter for
+        its version would fail a check with nothing wrong to report."""
+        assert conda_lock_python_packages(self.LOCK) == {
+            "gdal": "3.11.5",
+            "typing-extensions": "4.15.0",
+        }
+
+    def test_it_is_what_the_file_names_pinned_to_what_the_lock_resolved(self) -> None:
+        assert conda_expected_packages(self.FILE, self.LOCK) == {
+            "gdal": "3.11.5",
+            "shapely": "2.1.2",
+        }
+
+    def test_check_five_is_handed_them_for_a_conda_version(self) -> None:
+        """Read from `packages.python`, as a pip source is, it was handed
+        nothing, and check 5 passed for having nothing to check."""
+        from code_sandboxes.environments.conformance import expected_packages
+
+        environment = validate_environment(a_conda_spec(content=self.FILE))
+        assert expected_packages(environment, self.LOCK) == {"gdal": "3.11.5", "shapely": "2.1.2"}
 
 
 # -- The whole resolve, through the recorded runner --------------------------
