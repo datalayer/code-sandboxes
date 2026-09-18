@@ -82,6 +82,7 @@ requires of every GPU sandbox (`DaytonaSandbox` reads the snapshot's `gpu`).
 
 from __future__ import annotations
 
+import contextlib
 import shlex
 import tempfile
 import uuid
@@ -161,6 +162,11 @@ def daytona_gpu(accelerator_type: str) -> str | None:
     """
     name = accelerator_type.strip().upper().replace("_", "-")
     return name if name in DAYTONA_GPUS else None
+
+
+def _snapshot_name(request: BuildRequest) -> str:
+    """The name a build gives its snapshot, unique to the build (its uid is in it)."""
+    return f"dl-{request.environment.metadata.name}-v{request.version}-{request.build_uid}"
 
 
 def _pip_lock_command(*, authored: bool) -> str:
@@ -245,6 +251,9 @@ class Builder(ManagedBuilder):
         self._daytona_sdk = daytona_sdk or _daytona_sdk
         self._registry_sdk = registry_sdk or _daytona_registry_sdk
         self._client_instance: Any = None
+        #: The builds `cancel` was asked to stop: one whose snapshot is only
+        #: finished after the cancel deletes it itself (E2-18).
+        self._cancelled: set[str] = set()
 
     def _provider_secrets(self) -> dict[str, str]:
         """The owner's Daytona secrets the build credential carries (D-8, E2-01).
@@ -339,7 +348,7 @@ class Builder(ManagedBuilder):
         spec = request.environment.spec
         sdk = self._daytona_sdk()
         client = self._client(sdk)
-        name = f"dl-{request.environment.metadata.name}-v{request.version}-{request.build_uid}"
+        name = _snapshot_name(request)
 
         registry_id = self._register_base_pull(client, request.resolved_base)
         try:
@@ -469,6 +478,17 @@ class Builder(ManagedBuilder):
             # not control, whether the build above succeeded or not (D-18).
             self._unregister_base_pull(client, registry_id)
 
+        if request.build_uid in self._cancelled:
+            # Finished after the build was cancelled: nothing will record it,
+            # so it goes now rather than wait in the account for nobody.
+            self._log(f"The build was cancelled: deleting the snapshot {snapshot.id} it made")
+            with contextlib.suppress(EnvironmentsError):
+                self._delete_by_id(sdk, client, snapshot.id)
+            raise EnvironmentsError(
+                BUILD_FAILED,
+                "The build was cancelled, and the snapshot it made was deleted",
+                detail={"variant": self.variant, "name": name},
+            )
         return ArtifactReference(
             variant=self.variant,
             immutable_reference=snapshot.id,
@@ -635,8 +655,11 @@ class Builder(ManagedBuilder):
         a later build's snapshot that inherited it.
         """
         sdk = self._daytona_sdk()
-        client = self._client(sdk)
-        snapshot = artifact.provider_artifact_id or artifact.immutable_reference
+        self._delete_by_id(
+            sdk, self._client(sdk), artifact.provider_artifact_id or artifact.immutable_reference
+        )
+
+    def _delete_by_id(self, sdk: Any, client: Any, snapshot: str) -> None:
         try:
             client.snapshot.delete(snapshot)
         except sdk.DaytonaNotFoundError:
@@ -645,6 +668,26 @@ class Builder(ManagedBuilder):
         except Exception as error:
             raise self._provider_error("delete the snapshot", error) from error
         self._log(f"Deleted the Daytona snapshot {snapshot}")
+
+    def cancel(self, request: BuildRequest) -> None:
+        """Stop a build: delete the snapshot it is making, now or once it is made (E2-18).
+
+        The build step calls this when the build is cancelled, and then lets
+        the build's own thread finish unheard, so a snapshot Daytona goes on
+        building is recorded by nobody. It is found by the name this build
+        gave it, which is unique to the build (the build uid is in it), and
+        deleted by its id. One not made yet is deleted by `build` itself, the
+        moment Daytona hands it back.
+        """
+        self._cancelled.add(request.build_uid)
+        sdk = self._daytona_sdk()
+        client = self._client(sdk)
+        try:
+            snapshot = client.snapshot.get(_snapshot_name(request))
+        except Exception:
+            return
+        self._log(f"The build was cancelled: deleting the snapshot {snapshot.id} it was making")
+        self._delete_by_id(sdk, client, snapshot.id)
 
     def smoke_test(
         self,
