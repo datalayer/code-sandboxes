@@ -174,6 +174,13 @@ class TestTheDatalayerBuilder:
     def test_accepts_the_source(self) -> None:
         assert "dockerfile" in a_datalayer_builder().capabilities().build_sources
 
+    def test_its_own_validate_accepts_it_too(self) -> None:
+        """`validate` kept a list of its own, and refused the source on r1
+        after the capability set above had learned it."""
+        request = self.request()
+        report = a_datalayer_builder().validate(request.environment, lock_text=request.lock_text)
+        assert report.supported, [finding.message for finding in report.findings]
+
     def test_builds_from_the_authors_dockerfile_pinned_to_the_resolved_base(self) -> None:
         request = self.request()
         text = a_datalayer_builder().dockerfile(request)

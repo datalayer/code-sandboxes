@@ -429,11 +429,6 @@ class TestWhatItSaysItCannotBuild:
         assert any("modal or daytona" in finding.message for finding in report.findings)
         assert all(finding.field == "spec.resources.sizeClass" for finding in report.findings)
 
-    def test_a_form_that_is_not_built_yet_is_a_finding(self) -> None:
-        request = a_request(spec={"build": {"source": "dockerfile"}})
-        report = a_builder().validate(request.environment)
-        assert [finding.field for finding in report.findings] == ["spec.build.source"]
-
     def test_a_dependency_file_source_is_supported(self) -> None:
         """E3-01 resolves it the same way `packages` does; this builder never
         refused it on its own — until this box, its own `validate` still did."""
