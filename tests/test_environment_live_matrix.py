@@ -145,13 +145,20 @@ class _DaytonaCredential:
 
 
 class _ModalCredential:
-    """The shape durable's `_mint_credential` gives a managed build: Modal
-    reads `aws_session`, the base-reader session (D-18). This used to put
-    the AWS keys in `username`/`password`, a shape the worker never
-    produces — so this test passed while the worker's Modal builds failed
-    their base pull. The keys here are whatever AWS credential the person
-    running the live test holds; a session token is passed on when there is
-    one."""
+    """The shape durable's `_mint_credential` gives a Modal build: it reads
+    `aws_session` (D-18), never `username`/`password` — this used to put the
+    AWS keys there, a shape the worker never produces, so this test passed
+    while the worker's Modal builds failed their base pull.
+
+    In production `aws_session` is always the `modal_base_reader` IAM user's
+    own real key: Modal's own `from_aws_ecr` never reads `AWS_SESSION_TOKEN`
+    anywhere in its SDK, so an assumed session fails the same way a wrong key
+    would ("The security token included in the request is invalid", found
+    live 2026-09-18). This double carries whatever AWS credential the person
+    running the live test has ambient — a session token is passed on if one
+    is present, but a live Modal run only actually succeeds against a real,
+    static key, the same requirement production has.
+    """
 
     def __init__(self) -> None:
         self.provider_secrets = {
