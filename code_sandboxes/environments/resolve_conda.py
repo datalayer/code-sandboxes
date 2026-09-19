@@ -70,6 +70,9 @@ from .resolve import (
     ProtectedPin,
     buildkit_proxy,
     buildkit_proxy_options,
+    egress_findings,
+    egress_hosts_text,
+    egress_refused_hosts,
     merge_requirements,
 )
 
@@ -528,6 +531,18 @@ def parse_conda_failure(output: str) -> EnvironmentsError:
             PACKAGE_NOT_FOUND,
             f"`{name}` is not in any channel this environment may read",
             detail={**detail, "package": name},
+        )
+    # A channel the build pool may not reach: solving again is refused again,
+    # so it is said with the host rather than retried (E2-19).
+    refused = egress_refused_hosts(output)
+    if refused:
+        return EnvironmentsError(
+            PACKAGE_NOT_FOUND,
+            f"The build pool's egress proxy refused {egress_hosts_text(refused)}: a version "
+            "solves only against the channels the build pool allows. Use one of them, or "
+            "ask for the host to be allowed",
+            detail={**detail, "refused_hosts": refused, "findings": egress_findings(refused)},
+            retryable=False,
         )
     lowered = text.lower()
     if (

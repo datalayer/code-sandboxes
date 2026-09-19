@@ -78,6 +78,9 @@ from ..resolve import (
     apt_snapshot_in,
     buildkit_proxy,
     buildkit_proxy_options,
+    egress_findings,
+    egress_hosts_text,
+    egress_refused_hosts,
     locked_versions,
 )
 from ..resolve_conda import (
@@ -546,6 +549,24 @@ class Builder:
                 self._log(f"Building {reference} from {request.resolved_base}")
                 finished = self._invoke(command, timeout=self._max_build_seconds)
             if finished.returncode != 0:
+                refused = egress_refused_hosts(finished.stderr or "", proxy=self._proxy)
+                if refused:
+                    # The one failure a log line hid best: a host the build
+                    # pool may not reach, named as a finding (E2-19).
+                    raise EnvironmentsError(
+                        BUILD_FAILED,
+                        f"The build pool's egress proxy refused {egress_hosts_text(refused)}: "
+                        "a build reaches only the package indexes, mirrors and registries "
+                        "the build pool allows. Put what it fetches in the build, or ask "
+                        "for the host to be allowed",
+                        detail={
+                            "variant": self.variant,
+                            "reference": reference,
+                            "exit": finished.returncode,
+                            "refused_hosts": refused,
+                            "findings": egress_findings(refused),
+                        },
+                    )
                 raise EnvironmentsError(
                     BUILD_FAILED,
                     "The build failed; its log says where",

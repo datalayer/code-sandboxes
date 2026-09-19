@@ -101,6 +101,7 @@ __all__ = [
     "apt_snapshot_in",
     "buildkit_proxy",
     "buildkit_proxy_options",
+    "egress_refused_hosts",
     "lock_document",
     "locked_versions",
     "merge_requirements",
@@ -186,6 +187,74 @@ def buildkit_proxy_options(proxy: str) -> list[str]:
     for name in ("NO_PROXY", "no_proxy"):
         options += ["--opt", f"build-arg:{name}=127.0.0.1,localhost"]
     return options
+
+
+#: What each tool writes when the build pool's egress proxy refuses it a
+#: tunnel (E2-19). Read from the tools themselves, through the chart's own
+#: Squid refusing every host, on 2026-09-19: pip, uv 0.12, micromamba 2.3,
+#: git, curl 8 without `-f`, wget, and a Go client — `buildkitd`'s own pulls.
+#: Each is a refused CONNECT and nothing else: a host that answered 403 over
+#: its own TLS says so differently. `curl -f` ("The requested URL returned
+#: error: 403"), `wget -q` (nothing) and `apt` over plain HTTP ("403
+#: Forbidden [IP: proxy]") cannot be told from the host's own 403, and are
+#: left to the log.
+_EGRESS_REFUSED = re.compile(
+    r"Tunnel connection failed: 403"  # pip, requests, urllib3
+    r"|tunnel error: unsuccessful"  # uv
+    r"|CONNECT tunnel failed, response 403"  # curl, git, micromamba
+    r"|Proxy tunneling failed: Forbidden"  # wget
+    r'|"https?://[^"\s]+": Forbidden'  # Go: buildkitd, containerd
+)
+#: A host a line names: urllib3's `host='…'`, or the host of a URL.
+_NAMED_HOST = re.compile(r"host='(?P<pool>[A-Za-z0-9.\-]+)'|https?://(?P<url>[A-Za-z0-9.\-]+)")
+#: `buildctl`'s plain progress: `#12 0.874 <what the step wrote>`. Steps run
+#: side by side, so a line is read against the lines of its own step.
+_BUILDKIT_LINE = re.compile(r"^#(?P<step>\d+) (?:\d+\.\d+ )?(?P<text>.*)$")
+
+
+def egress_refused_hosts(log: str, *, proxy: str = "", limit: int = 10) -> list[str]:
+    """The hosts the build pool's egress proxy refused, as a build's log shows them (E2-19).
+
+    A refusal is found by what the tool writes (`_EGRESS_REFUSED`), and its
+    host is the one the same line names — pip's `host='files.pythonhosted.org'`,
+    git's URL — or else the last one its step named before it: uv and
+    micromamba write the URL a line or four above the refusal, wget and a
+    silent `curl` only in the `RUN` line. The proxy's own address is never a
+    host it refused. In the order they were first refused, at most ``limit``.
+    """
+    own = {"127.0.0.1", "localhost"}
+    if proxy:
+        own.add(proxy.split("://", 1)[-1].rsplit(":", 1)[0])
+    hosts: list[str] = []
+    last: dict[str, str] = {}
+    for raw in log.splitlines():
+        line = _BUILDKIT_LINE.match(raw)
+        step, text = (line.group("step"), line.group("text")) if line else ("", raw)
+        named = [
+            host.lower().rstrip(".")
+            for match in _NAMED_HOST.finditer(text)
+            for host in (match.group("pool") or match.group("url"),)
+            if host and host.lower().rstrip(".") not in own
+        ]
+        if _EGRESS_REFUSED.search(text):
+            host = named[0] if named else last.get(step, "")
+            if host and host not in hosts:
+                hosts.append(host)
+                if len(hosts) >= limit:
+                    break
+        if named:
+            last[step] = named[-1]
+    return hosts
+
+
+def egress_findings(hosts: Sequence[str]) -> list[dict[str, str]]:
+    """The refused hosts as a failure's findings: what a page lists, not the log."""
+    return [{"kind": "egress_refused", "subject": host} for host in hosts]
+
+
+def egress_hosts_text(hosts: Sequence[str]) -> str:
+    quoted = [f"`{host}`" for host in hosts]
+    return quoted[0] if len(quoted) == 1 else ", ".join(quoted[:-1]) + " and " + quoted[-1]
 
 
 #: How a protected pin is recorded in the lock.
@@ -520,6 +589,19 @@ def parse_resolver_failure(
                     "supported": pin.supported,
                 },
             )
+
+    # An index the build pool may not reach is not an outage: resolving again
+    # is refused again, so it is said with the host rather than retried.
+    refused = egress_refused_hosts(output)
+    if refused and "No solution found" not in text:
+        return EnvironmentsError(
+            PACKAGE_NOT_FOUND,
+            f"The build pool's egress proxy refused {egress_hosts_text(refused)}: a version "
+            "resolves only against the indexes the build pool allows. Use one of them, or "
+            "ask for the host to be allowed",
+            detail={**detail, "refused_hosts": refused, "findings": egress_findings(refused)},
+            retryable=False,
+        )
 
     pair = _conflicting_pair(mentions) if "No solution found" in text else None
     if pair:
