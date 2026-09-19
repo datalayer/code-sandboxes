@@ -282,6 +282,78 @@ def test_egress_and_gpu_are_judged_against_what_was_asked() -> None:
     assert "CUDA is 12.2, not 12.4" in by_id(result, 11).detail
 
 
+def test_check_eleven_gates_a_gpu_version_that_cannot_see_its_gpu() -> None:
+    """E2-17: the GPU check is the one extended check that gates, and only
+    for a version that asked for an accelerator — a GPU version whose GPU is
+    not visible is not the version its spec describes."""
+    sandbox = ScriptedSandbox({11: {"returncode": 0, "gpus": [], "cuda": None}})
+    result = run_extended_tier(sandbox, accelerator_requested=True, cuda_version="12.4")
+    gpu = by_id(result, 11)
+    assert gpu.gating
+    assert not gpu.passed and not result.passed
+    assert "no GPU is visible" in gpu.detail
+
+
+def test_check_eleven_gates_when_a_gpu_version_sees_its_gpu() -> None:
+    """The same version, its GPU and CUDA as the spec asked: the gating check
+    passes, so the extended tier passes."""
+    sandbox = ScriptedSandbox()
+    result = run_extended_tier(sandbox, accelerator_requested=True, cuda_version="12.4")
+    gpu = by_id(result, 11)
+    assert gpu.gating and gpu.passed and result.passed
+
+
+def test_check_eleven_reads_the_images_cuda_not_the_drivers() -> None:
+    """`nvidia-smi` says the newest CUDA the host's driver runs, which the image
+    does not choose: a 12.8 image on a 13.0 driver is what its spec asked for
+    (found on 2026-09-18, E2-17)."""
+    sandbox = ScriptedSandbox(
+        {11: {"returncode": 0, "gpus": ["H100"], "driver": "13.0", "cuda": "12.8"}}
+    )
+    result = run_extended_tier(sandbox, accelerator_requested=True, cuda_version="12.8")
+    assert by_id(result, 11).passed, by_id(result, 11).detail
+
+
+def test_check_eleven_refuses_a_driver_older_than_the_image() -> None:
+    sandbox = ScriptedSandbox(
+        {11: {"returncode": 0, "gpus": ["H100"], "driver": "12.4", "cuda": "12.8"}}
+    )
+    gpu = by_id(run_extended_tier(sandbox, accelerator_requested=True), 11)
+    assert not gpu.passed
+    assert "the driver runs CUDA up to 12.4, older than the image's 12.8" in gpu.detail
+
+
+def test_check_eleven_counts_the_gpus_asked_for() -> None:
+    sandbox = ScriptedSandbox({11: {"returncode": 0, "gpus": ["H100"], "cuda": "12.8"}})
+    gpu = by_id(run_extended_tier(sandbox, accelerator_requested=True, accelerator_count=2), 11)
+    assert not gpu.passed
+    assert "1 GPU(s) visible, not the 2 asked for" in gpu.detail
+
+
+def test_check_eleven_alone_is_what_a_smoke_test_adds() -> None:
+    from code_sandboxes.environments.conformance import run_accelerator_check
+
+    passed = run_accelerator_check(
+        ScriptedSandbox({11: {"returncode": 0, "gpus": ["H100", "H100"], "cuda": "12.8.93"}}),
+        cuda="12.8",
+        count=2,
+    )
+    assert passed.id == "conformance:11" and passed.gating and passed.passed
+    failed = run_accelerator_check(
+        ScriptedSandbox({11: {"returncode": 9, "gpus": []}}), cuda="12.8"
+    )
+    assert failed.gating and not failed.passed
+
+
+def test_a_cpu_version_never_gates_on_the_gpu_check() -> None:
+    """No accelerator asked for: check 11 is the trivial recorded pass, and
+    the extended tier still gates nothing."""
+    result = run_extended_tier(ScriptedSandbox())
+    gpu = by_id(result, 11)
+    assert not gpu.gating and gpu.passed
+    assert not any(item.gating for item in result.checks)
+
+
 def test_the_probes_run_for_real_in_a_local_sandbox(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -49,12 +49,14 @@ from .image_import import (
     parse_image_reference,
 )
 from .lifecycle import VersionState
+from .policy import UNRESTRICTED_POLICY, EnvironmentsPolicy
 
 __all__ = [
     "API_VERSION",
     "BUILD_SOURCES",
     "GPU_SIZE_CLASSES",
     "KIND",
+    "PUBLIC_PACKAGE_INDEX_HOSTS",
     "SIZE_CLASSES",
     "SUPPORTED_BUILD_SOURCES",
     "VARIANTS",
@@ -84,6 +86,7 @@ __all__ = [
     "VersionStatus",
     "assert_publishable",
     "command_names_secret",
+    "index_is_public",
     "parse_environment",
     "parse_requirements_txt",
     "publication_findings",
@@ -105,7 +108,7 @@ GPU_SIZE_CLASSES: tuple[str, ...] = ("gpu-small", "gpu-large")
 
 BUILD_SOURCES: tuple[str, ...] = ("packages", "dependencyFile", "dockerfile", "image")
 #: What builds today; `dockerfile` is the one source still to come.
-SUPPORTED_BUILD_SOURCES: tuple[str, ...] = ("packages", "dependencyFile", "image")
+SUPPORTED_BUILD_SOURCES: tuple[str, ...] = ("packages", "dependencyFile", "dockerfile", "image")
 SUPPORTED_PACKAGE_MANAGERS: tuple[str, ...] = ("uv", "pip")
 #: `requirements.txt` and `pyproject.toml`/`uv.lock` are archived on the
 #: version they resolved (E3-01); this bounds what a spec may carry inline,
@@ -167,6 +170,68 @@ class Platform(_Model):
     architecture: Literal["linux/amd64"] = "linux/amd64"
 
 
+#: The package indexes D-12 counts as public: a version may be published only
+#: when every index it resolves from is one of these, since a private index is
+#: reached with a credential the public does not hold. Matched on host, so the
+#: trailing `/simple` or its absence never decides it. `pypi.org` is the index;
+#: `files.pythonhosted.org` is where its wheels are served from.
+PUBLIC_PACKAGE_INDEX_HOSTS = frozenset({"pypi.org", "files.pythonhosted.org"})
+
+
+def _package_index_host(url: str) -> str:
+    """The host an index URL names, lower-cased and without its port, or `""`."""
+    from urllib.parse import urlsplit
+
+    try:
+        return (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def index_is_public(url: str) -> bool:
+    """Whether an index URL is one D-12 lets a published version resolve from."""
+    return _package_index_host(url) in PUBLIC_PACKAGE_INDEX_HOSTS
+
+
+#: The conda channels D-12 counts as public: a published conda version
+#: (E3-02's ``dependencyFile``) may resolve only from these, since a private
+#: channel is reached with a token no public reader holds — the same boundary
+#: :data:`PUBLIC_PACKAGE_INDEX_HOSTS` draws for pip indexes. The bare names
+#: anaconda.org serves openly, and the hosts a channel URL may name; any other
+#: name or host is private and blocks publication.
+PUBLIC_CONDA_CHANNELS = frozenset(
+    {
+        "conda-forge",
+        "bioconda",
+        "defaults",
+        "nodefaults",
+        "main",
+        "r",
+        "anaconda",
+        "pkgs/main",
+        "pkgs/r",
+        "msys2",
+    }
+)
+PUBLIC_CONDA_CHANNEL_HOSTS = frozenset({"conda.anaconda.org", "repo.anaconda.com", "anaconda.org"})
+
+
+def channel_is_public(channel: str) -> bool:
+    """Whether a conda channel is one D-12 lets a published version resolve from.
+
+    A channel is a URL, whose host must be a public conda host, or a bare name,
+    which is public only when it is one of the well-known open channels — an
+    unlisted name (say a private org's) is treated as private, since a bare name
+    on anaconda.org may still need a token the public does not have.
+    """
+    text = channel.strip()
+    if not text:
+        return True
+    if "://" in text:
+        return _package_index_host(text) in PUBLIC_CONDA_CHANNEL_HOSTS
+    return text.lower() in PUBLIC_CONDA_CHANNELS
+
+
 class PythonPackages(_Model):
     manager: Literal["uv", "pip", "conda"] = "uv"
     dependencies: list[str] = Field(default_factory=list)
@@ -189,6 +254,21 @@ class FileEntry(_Model):
     content_ref: str
     size_bytes: int | None = Field(default=None, ge=0)
     sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
+class ContentsBuildEntry(_Model):
+    """One immutable file the Environment bakes from an external source.
+
+    Unlike ``files`` — which a user uploads, referenced by ``contentRef`` — a
+    ``contentsBuild`` entry names an external ``source`` URL fetched at build
+    time and verified against ``sha256`` (required: the build verifies every
+    byte it bakes). Both are baked the same way, into every provider artifact.
+    """
+
+    source: str
+    path: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int | None = Field(default=None, ge=0)
 
 
 class Commands(_Model):
@@ -242,20 +322,42 @@ class Compatibility(_Model):
 
 
 class DependencyFileSpec(_Model):
-    """A `requirements.txt`, or a `pyproject.toml` with its `uv.lock` (E3-01).
+    """A `requirements.txt`, a `pyproject.toml` with its `uv.lock`, or a conda
+    `environment.yml` (E3-01, E3-02).
 
     ``requirements`` resolves the way ``packages`` does — the protected
     constraints merged in, the same solve. ``pyproject`` does not resolve at
     all: its own ``uv.lock`` is verified against the current
     ``pyproject.toml`` and exported, never re-solved, because a lock the
-    author already made is the whole point of bringing one.
+    author already made is the whole point of bringing one. ``conda`` resolves
+    the ``environment.yml`` in its own ``micromamba`` solve into an explicit
+    lock, with the protected constraints merged over its ``pip:`` layer.
     """
 
-    source_format: Literal["requirements", "pyproject"] = "requirements"
-    #: The `requirements.txt` text, or the `pyproject.toml` text.
+    source_format: Literal["requirements", "pyproject", "conda"] = "requirements"
+    #: The `requirements.txt`, `pyproject.toml` or conda `environment.yml` text.
     content: str = ""
     #: The `uv.lock` text. Required, and only meaningful, for `pyproject`.
     lock_content: str = ""
+
+
+class DockerfileSpec(_Model):
+    """The Dockerfile a `dockerfile`-sourced version builds from (E3-03).
+
+    Inline, the way ``DependencyFileSpec`` carries a ``requirements.txt``: a
+    file the author brings lives in the spec, so ``check_dockerfile`` and
+    every variant's capability report can read it **before** anything is
+    queued — which is the whole point of refusing an instruction a variant
+    does not implement at ``validate`` rather than halfway through a build.
+
+    The build *context* — the extra files a ``COPY`` needs — is the separate
+    upload E3-03 describes, bounded and checked by ``validate_build_context``.
+    A Dockerfile with no context is the common case and needs no upload at
+    all.
+    """
+
+    #: The Dockerfile text.
+    content: str = ""
 
 
 class ImageSourceSpec(_Model):
@@ -284,6 +386,7 @@ class ImageSourceSpec(_Model):
 class BuildSpec(_Model):
     source: Literal["packages", "dependencyFile", "dockerfile", "image"] = "packages"
     dependency_file: DependencyFileSpec | None = None
+    dockerfile: DockerfileSpec | None = None
     image: ImageSourceSpec | None = None
 
 
@@ -294,6 +397,7 @@ class EnvironmentSpec(_Model):
     platform: Platform = Field(default_factory=Platform)
     packages: Packages = Field(default_factory=Packages)
     files: list[FileEntry] = Field(default_factory=list)
+    contents_build: list[ContentsBuildEntry] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     commands: Commands = Field(default_factory=Commands)
     build_secrets: list[BuildSecret] = Field(default_factory=list)
@@ -362,6 +466,24 @@ def _requirement_problem(text: str) -> str | None:
     return None
 
 
+def _requirement_name(text: str) -> str:
+    """The package name a dependency line asks for, or `""` when it cannot be read.
+
+    `_requirement_problem` already refused a line this cannot parse; a
+    package-policy check that ran on the same line anyway would raise the
+    same problem a second time under a different finding, so this answers
+    empty rather than raising and lets the caller skip it.
+    """
+    try:
+        from packaging.requirements import InvalidRequirement, Requirement
+    except ImportError:  # pragma: no cover - packaging ships with pip and jupyter
+        return ""
+    try:
+        return Requirement(text).name
+    except InvalidRequirement:
+        return ""
+
+
 def _index_findings(field: str, url: str) -> list[SpecFinding]:
     if _URL_CREDENTIALS.match(url):
         return [
@@ -373,6 +495,12 @@ def _index_findings(field: str, url: str) -> list[SpecFinding]:
     if not url.startswith("https://"):
         return [SpecFinding(field, f"`{url}` is not an https URL")]
     return []
+
+
+def _same_cuda(asked: str, carried: str) -> bool:
+    """Whether a spec's CUDA names the base's: `12` and `12.8` both name 12.8."""
+    asked_parts = asked.strip().split(".")
+    return carried.strip().split(".")[: len(asked_parts)] == asked_parts
 
 
 def parse_requirements_txt(text: str) -> list[str]:
@@ -399,6 +527,40 @@ def parse_requirements_txt(text: str) -> list[str]:
     return lines
 
 
+def _dockerfile_findings(dockerfile: DockerfileSpec | None) -> list[SpecFinding]:
+    """What a `dockerfile`-sourced version must carry, and what the contract refuses.
+
+    The contract's own refusals are reported here, at `validate`, rather than
+    at build time: a `FROM` that is not an approved base, a privileged build,
+    the host network, a Docker socket mount, a host bind mount, and every
+    instruction §6 does not allow. Each is named with its line, because a
+    Dockerfile is somebody's file and "it was refused" is not a reason.
+    """
+    field = "spec.build.dockerfile"
+    if dockerfile is None:
+        return [SpecFinding(field, "is required when `spec.build.source` is `dockerfile`")]
+    if not dockerfile.content.strip():
+        return [SpecFinding(f"{field}.content", "is empty; it is the Dockerfile text")]
+    from .contract import dockerfile_findings_for_build, validate_dockerfile
+
+    # The contract's refusals, then what building it needs on top (E3-03):
+    # one approved base named by its channel, and no build context yet. The
+    # second set is not the contract's — a variant could honour both — so it
+    # is its own list, and a line the contract already refused is not named
+    # twice.
+    findings = validate_dockerfile(dockerfile.content)
+    refused = {finding.line for finding in findings}
+    findings += [
+        finding
+        for finding in dockerfile_findings_for_build(dockerfile.content)
+        if finding.line not in refused
+    ]
+    return [
+        SpecFinding(f"{field}.content", f"line {finding.line}: {finding.message}")
+        for finding in sorted(findings, key=lambda finding: finding.line)
+    ]
+
+
 def _dependency_file_findings(dependency_file: DependencyFileSpec | None) -> list[SpecFinding]:
     field = "spec.build.dependencyFile"
     if dependency_file is None:
@@ -409,7 +571,11 @@ def _dependency_file_findings(dependency_file: DependencyFileSpec | None) -> lis
     findings: list[SpecFinding] = []
     if not dependency_file.content.strip():
         name = (
-            "pyproject.toml" if dependency_file.source_format == "pyproject" else "requirements.txt"
+            "pyproject.toml"
+            if dependency_file.source_format == "pyproject"
+            else "environment.yml"
+            if dependency_file.source_format == "conda"
+            else "requirements.txt"
         )
         findings.append(SpecFinding(f"{field}.content", f"is empty; it is the {name} text"))
     elif dependency_file.source_format == "requirements":
@@ -419,6 +585,8 @@ def _dependency_file_findings(dependency_file: DependencyFileSpec | None) -> lis
                 findings.append(
                     SpecFinding(f"{field}.content[{index}]", f"`{requirement}`: {problem}")
                 )
+    elif dependency_file.source_format == "conda":
+        findings.extend(_conda_environment_findings(dependency_file.content))
     if len(dependency_file.content.encode("utf-8")) > MAX_DEPENDENCY_FILE_BYTES:
         findings.append(
             SpecFinding(f"{field}.content", f"is over {MAX_DEPENDENCY_FILE_BYTES} bytes")
@@ -438,13 +606,39 @@ def _dependency_file_findings(dependency_file: DependencyFileSpec | None) -> lis
         findings.append(
             SpecFinding(
                 f"{field}.lockContent",
-                "is only read for a `pyproject` source; a `requirements` source resolves fresh",
+                "is only read for a `pyproject` source; a `requirements` or `conda` source "
+                "resolves fresh",
             )
         )
     return findings
 
 
-def _image_findings(image: ImageSourceSpec | None) -> list[SpecFinding]:
+def _conda_environment_findings(content: str) -> list[SpecFinding]:
+    """An `environment.yml`'s own shape, before it reaches the conda solver (E3-02).
+
+    The same validate-before-resolve rule every source follows: a malformed
+    `environment.yml` is the version's to fix, and refusing it here — with the
+    field the resolver would have named — is cheaper than a solve that fails on
+    it after taking a worker.
+    """
+    from .resolve_conda import parse_conda_environment
+
+    field = "spec.build.dependencyFile.content"
+    try:
+        parse_conda_environment(content)
+    except EnvironmentsError as error:
+        return [SpecFinding(error.detail.get("field", field), error.message, error.code)]
+    return []
+
+
+def _image_findings(
+    image: ImageSourceSpec | None, *, registries: tuple[str, ...] = DEFAULT_ALLOWED_REGISTRIES
+) -> list[SpecFinding]:
+    """`registries` is the platform bootstrap, widened with an organization's
+    own private ones when its policy names any (E3-06) — never narrowed to
+    just the organization's list, since the public bootstrap stays reachable
+    whatever an organization's own policy adds, the same reading
+    `refuse_unless_allowed`'s own docstring already gives this list."""
     field = "spec.build.image"
     if image is None:
         return [SpecFinding(field, "is required when `spec.build.source` is `image`")]
@@ -454,12 +648,12 @@ def _image_findings(image: ImageSourceSpec | None) -> list[SpecFinding]:
         parsed = parse_image_reference(image.reference)
     except EnvironmentsError as error:
         return [SpecFinding(f"{field}.reference", error.message)]
-    if not image_registry_allowed(parsed) and not image.credential_secret_id:
+    if not image_registry_allowed(parsed, registries) and not image.credential_secret_id:
         return [
             SpecFinding(
                 f"{field}.reference",
                 f"`{parsed.registry}` is not an allowed registry; allowed: "
-                + ", ".join(DEFAULT_ALLOWED_REGISTRIES)
+                + ", ".join(registries)
                 + ", or reference a credential for a private one",
                 POLICY_DENIED,
             )
@@ -467,8 +661,76 @@ def _image_findings(image: ImageSourceSpec | None) -> list[SpecFinding]:
     return []
 
 
+def _organization_findings(
+    environment: Environment, policy: EnvironmentsPolicy
+) -> list[SpecFinding]:
+    """What an organization's own policy denies, beyond the platform's own
+    rules above (E3-06). A no-op field by field for a dimension the
+    organization has not narrowed — :data:`UNRESTRICTED_POLICY` produces no
+    findings here at all, which is every spec's reading until an
+    organization writes one.
+
+    Bases and packages are checked against the organization's own list
+    alone: an organization can only ever *forbid* an approved base (the
+    platform decides which bases exist at all) and there is no platform
+    allowlist of packages to widen. Indexes and licences are the same, and
+    licences are checked at attestation instead, once the SBOM names which
+    package actually carries one (`policy.refuse_unlicensed`) — a spec names
+    no licences of its own to check here. Registries are the one dimension
+    `_image_findings` widens rather than narrows; see its own docstring.
+    """
+    findings: list[SpecFinding] = []
+    spec = environment.spec
+    if (
+        spec.build.source not in ("image", "dockerfile")
+        and policy.allowed_bases is not None
+        and not policy.allows("bases", spec.base.ref)
+    ):
+        findings.append(
+            SpecFinding(
+                "spec.base.ref",
+                f"`{spec.base.ref}` is not an allowed base under this organization's "
+                "policy (the approved bases it allows: "
+                + (", ".join(policy.allowed_bases) or "(none)")
+                + ")",
+                POLICY_DENIED,
+            )
+        )
+    if policy.allowed_indexes is not None:
+        for index, url in enumerate(spec.packages.python.indexes):
+            if not policy.allows("indexes", url):
+                findings.append(
+                    SpecFinding(
+                        f"spec.packages.python.indexes[{index}]",
+                        f"`{url}` is not an allowed index under this organization's policy "
+                        "(the indexes it allows: "
+                        + (", ".join(policy.allowed_indexes) or "(none)")
+                        + ")",
+                        POLICY_DENIED,
+                    )
+                )
+    if policy.allowed_packages is not None:
+        for group_index, requirement in enumerate(spec.packages.python.dependencies):
+            name = _requirement_name(requirement)
+            if name and not policy.allows("packages", name):
+                findings.append(
+                    SpecFinding(
+                        f"spec.packages.python.dependencies[{group_index}]",
+                        f"`{name}` is not an allowed package under this organization's "
+                        "policy (the packages it allows: "
+                        + (", ".join(policy.allowed_packages) or "(none)")
+                        + ")",
+                        POLICY_DENIED,
+                    )
+                )
+    return findings
+
+
 def spec_findings(
-    environment: Environment, *, bases: Mapping[str, ApprovedBase] = APPROVED_BASES
+    environment: Environment,
+    *,
+    bases: Mapping[str, ApprovedBase] = APPROVED_BASES,
+    policy: EnvironmentsPolicy = UNRESTRICTED_POLICY,
 ) -> list[SpecFinding]:
     """Every rule of the specification the environment breaks."""
     findings: list[SpecFinding] = []
@@ -497,10 +759,12 @@ def spec_findings(
             )
         )
 
-    # An `image` source brings its own base (E3-04): `spec.base` names
-    # nothing Datalayer approved, so checking it against the table would
-    # refuse every import for the one reason imports exist to avoid.
-    if spec.build.source != "image":
+    # An `image` source brings its own base (E3-04), and a `dockerfile`
+    # source's base is the `FROM` its uploaded Dockerfile names (E3-03,
+    # validated against the approved bases by `check_dockerfile`, not here):
+    # `spec.base` names nothing Datalayer approved for either, so checking it
+    # against the table would refuse every one for the reason they exist.
+    if spec.build.source not in ("image", "dockerfile"):
         base = bases.get(spec.base.ref)
         if base is None:
             findings.append(
@@ -530,8 +794,15 @@ def spec_findings(
         )
     if spec.build.source == "dependencyFile":
         findings.extend(_dependency_file_findings(spec.build.dependency_file))
+    elif spec.build.source == "dockerfile":
+        findings.extend(_dockerfile_findings(spec.build.dockerfile))
     elif spec.build.source == "image":
-        findings.extend(_image_findings(spec.build.image))
+        registries = (
+            DEFAULT_ALLOWED_REGISTRIES + policy.allowed_registries
+            if policy.allowed_registries
+            else DEFAULT_ALLOWED_REGISTRIES
+        )
+        findings.extend(_image_findings(spec.build.image, registries=registries))
 
     python = spec.packages.python
     if python.manager not in SUPPORTED_PACKAGE_MANAGERS:
@@ -695,6 +966,18 @@ def spec_findings(
                 "spec.base.ref", f"`{base.ref}` has no CUDA; a GPU size class needs a CUDA base"
             )
         )
+    # The CUDA a spec asks for is the base's toolkit, which a channel pins
+    # (E2-17): a version that asks for another would build and then fail
+    # check 11 in every sandbox it starts.
+    cuda = resources.accelerator.cuda if wants_gpu else None
+    if cuda and base is not None and base.cuda and not _same_cuda(cuda, base.cuda):
+        findings.append(
+            SpecFinding(
+                "spec.resources.accelerator.cuda",
+                f"`{base.ref}` carries CUDA {base.cuda}, not {cuda}; ask for {base.cuda} "
+                "or leave `cuda` out",
+            )
+        )
 
     variants = spec.compatibility.variants
     if not variants.required:
@@ -730,6 +1013,7 @@ def spec_findings(
                     f"spec.compatibility.regions[{index}]", f"`{region}` is not a region name"
                 )
             )
+    findings.extend(_organization_findings(environment, policy))
     return findings
 
 
@@ -776,6 +1060,7 @@ def validate_environment(
     document: Mapping[str, Any] | str | Environment,
     *,
     bases: Mapping[str, ApprovedBase] = APPROVED_BASES,
+    policy: EnvironmentsPolicy = UNRESTRICTED_POLICY,
 ) -> Environment:
     """The Environment, or the error its findings amount to.
 
@@ -783,11 +1068,18 @@ def validate_environment(
     field always outranks the rest, whatever else the spec also asks for.
     Failing that, the first finding's own code is what is raised: valid but
     unbuildable yet is ``DL_ENV_CAPABILITY_UNSUPPORTED``, an image off the
-    allowlist is ``DL_ENV_POLICY_DENIED`` (E3-04), and so on for whatever a
-    future rule adds. Either way every finding is listed.
+    allowlist is ``DL_ENV_POLICY_DENIED`` (E3-04), an index or a base or a
+    package an organization's own policy denies is the same code (E3-06),
+    and so on for whatever a future rule adds. Either way every finding is
+    listed.
+
+    `policy` is the caller's own organization's environments policy, or
+    :data:`UNRESTRICTED_POLICY` for a personal owner, or an organization
+    that has not written this section — the reading every other MCP policy
+    rule gives an unset one.
     """
     environment = parse_environment(document)
-    findings = spec_findings(environment, bases=bases)
+    findings = spec_findings(environment, bases=bases, policy=policy)
     if findings:
         invalid = [finding for finding in findings if finding.code is SPEC_INVALID]
         first = invalid[0] if invalid else findings[0]
@@ -810,17 +1102,15 @@ def publication_findings(environment: Environment) -> list[SpecFinding]:
 
     D-12: *"A promoted version becomes public only by being published, and
     only when every input is public — public indexes, no ``files``, no
-    ``buildSecrets``, an approved base."* This function holds only the
-    ``buildSecrets`` half of that boundary — a build secret is IAM-held and
-    fetched for one build's own use, so it is never public by definition,
-    whether the version is otherwise made of nothing but public inputs or
-    not. The rest of D-12's boundary (public indexes, no baked ``files``, an
-    approved base) belongs to the publish route itself once it exists
-    (E2-15, not built yet as of this writing — there is no
-    ``services/library`` "environment" artifact type and no publish endpoint
-    in ``services/runtimes/datalayer_runtimes/services/environments.py`` to
-    call this from today). This is the seam that route calls when it lands,
-    named the way every other rule of the specification is.
+    ``buildSecrets``, an approved base."* This function holds the input half
+    of that boundary that the spec alone decides against a credential the
+    public does not hold: a build secret is IAM-held and so never public, and
+    a private package index is reached with a credential no public reader has.
+    The parts of D-12 that depend on a version's *status* rather than its
+    spec — a passing scan, a signed artifact, and that the datalayer variant's
+    base is an approved one — are the publish route's own to check against the
+    artifact it publishes (E2-15), since ``publication_findings`` is handed
+    the spec and nothing built from it.
 
     Deliberately never applied to `promote()` (the private, per-owner
     lifecycle step that makes a version an environment's active one): a
@@ -828,17 +1118,66 @@ def publication_findings(environment: Environment) -> list[SpecFinding]:
     ever builds or launches it (D-12's own words). Only the act of making a
     version world-visible is refused.
     """
-    if not environment.spec.build_secrets:
-        return []
-    ids = ", ".join(secret.id for secret in environment.spec.build_secrets)
-    return [
-        SpecFinding(
-            "spec.buildSecrets",
-            f"a version with a build secret ({ids}) can never be published to the "
-            "public Library (D-12); remove it, or keep the version private",
-            PUBLICATION_BLOCKED,
+    findings: list[SpecFinding] = []
+    if environment.spec.build_secrets:
+        ids = ", ".join(secret.id for secret in environment.spec.build_secrets)
+        findings.append(
+            SpecFinding(
+                "spec.buildSecrets",
+                f"a version with a build secret ({ids}) can never be published to the "
+                "public Library (D-12); remove it, or keep the version private",
+                PUBLICATION_BLOCKED,
+            )
         )
+    private = [url for url in environment.spec.packages.python.indexes if not index_is_public(url)]
+    if private:
+        findings.append(
+            SpecFinding(
+                "spec.packages.python.indexes",
+                f"a version that resolves from a private index ({', '.join(private)}) "
+                "can never be published to the public Library (D-12); publish only from "
+                f"public indexes ({', '.join(sorted(PUBLIC_PACKAGE_INDEX_HOSTS))})",
+                PUBLICATION_BLOCKED,
+            )
+        )
+    private_channels = [
+        channel for channel in _conda_channels(environment) if not channel_is_public(channel)
     ]
+    if private_channels:
+        findings.append(
+            SpecFinding(
+                "spec.build.dependencyFile.content.channels",
+                "a version that resolves from a private conda channel "
+                f"({', '.join(private_channels)}) can never be published to the public "
+                "Library (D-12); publish only from public channels "
+                f"({', '.join(sorted(PUBLIC_CONDA_CHANNELS))})",
+                PUBLICATION_BLOCKED,
+            )
+        )
+    return findings
+
+
+def _conda_channels(environment: Environment) -> tuple[str, ...]:
+    """The channels a conda ``dependencyFile`` names, or none for any other source.
+
+    A conda ``environment.yml``'s ``channels`` are package inputs the same as a
+    pip source's indexes, so publication weighs them the same (D-12). A file
+    that will not parse has no channels to weigh here — validation refuses it
+    before it is ever published — so a parse failure is an empty tuple, not a
+    raise.
+    """
+    build = environment.spec.build
+    dependency_file = build.dependency_file
+    if build.source != "dependencyFile" or dependency_file is None:
+        return ()
+    if dependency_file.source_format != "conda":
+        return ()
+    from .resolve_conda import parse_conda_environment
+
+    try:
+        return parse_conda_environment(dependency_file.content).channels
+    except EnvironmentsError:
+        return ()
 
 
 def assert_publishable(environment: Environment) -> None:

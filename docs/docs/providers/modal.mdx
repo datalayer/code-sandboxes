@@ -74,12 +74,14 @@ with Sandbox.create(
 
 ## Environments
 
-An [Environment](/docs/environments) built for Modal is an **image id**,
+An [Environment](/environments) built for Modal is an **image id**,
 `im-…` — pulled `from_aws_ecr` off the approved Datalayer base, with your
 lock installed by `uv pip sync --require-hashes` on top. A published name
-is worth having for operability, but a launch always pins the id: each
-build gets a fresh credential, so no layer cache survives between builds,
-and the id is the only reference that names one build and not another.
+is worth having for operability, but a launch always pins the id: a name
+moves when the same build is published again, and the id is the only
+reference that names one build's image. Modal answers an identical image
+definition with the image it already has, so two builds of the same lock
+can share one id.
 
 **Bring your own account:** a build runs in the environment owner's own
 Modal workspace, from the same `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` pair
@@ -96,8 +98,22 @@ with no image id — general Modal sandbox usage here is unaffected).
 Confirmed live: a launched sandbox's identity check now passes, where it
 used to report `uid: 0`.
 
-**A known, open gap:** two of the core tier's checks — imports and
-filesystem — still fail on a launched Environment sandbox, for a reason
-not yet root-caused: reproduced on a real, contract-built image, not on a
-plain `ModalSandbox`, so it is specific to something about that image
-under repeated `exec`, not the identity fix above.
+**The sandbox is held by `sleep infinity`, not the base's Jupyter.**
+Modal keeps the base image's CMD, `start-jupyter.sh`, under the builder's
+`ENTRYPOINT`, where Docker would reset it, so a sandbox started with no
+command ran a Jupyter server as its main process. That server exits
+within a minute and the sandbox ends with it: "Modal Sandbox is shutting
+down", a few commands in. Since 1.9.36 the artifact's CMD is
+`sleep infinity`, and `ModalSandbox` names `sleep infinity` when it
+launches an artifact, which covers images built by earlier releases too.
+Jupyter is started by exec when it is asked for
+(`prepare_jupyter_server`).
+
+**GPU versions.** On Modal a GPU is a launch option, not part of the
+image: a GPU version's image builds like any other on the CUDA base, and
+its sandboxes start on the GPU the version names. The build's smoke test
+does that (`gpu="L4"`, or `"H100:2"` for two) and adds the contract's
+check 11: the GPUs asked for are visible, and the image's CUDA is the
+version's. A GPU Modal does not offer — it offers `T4`, `L4`, `A10G`,
+`L40S`, `A100`, `A100-40GB`, `A100-80GB`, `H100`, `H200`, `B200` — is
+refused at `validate`, before anything is built.

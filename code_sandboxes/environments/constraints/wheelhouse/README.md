@@ -38,3 +38,10 @@ Pure Python (`py3-none-any`), so one wheel serves every base's Python
 version this channel carries. Rebuild it here, under this same file name,
 whenever `services/kernels/Dockerfile`'s pinned commit changes — the
 constraints file's own version pin and this wheel move together.
+
+The pooled kernel manager pin, `jupyter-kernels`, needs no wheel here: PyPI
+serves it, so a resolve satisfies it from the index like any other pin. It
+was previously the private `datalayer-kernels`, which no index carried and
+so was baked here as a wheel; the migration to the public
+[`jupyter-kernels`](https://pypi.org/project/jupyter-kernels/) package
+dropped that wheel.

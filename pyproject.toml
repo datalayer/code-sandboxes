@@ -26,6 +26,7 @@ dependencies = [
   "jupyter-server",
   "jupyter-server-client",
   "pydantic>=2.0",
+  "pyyaml",
   "rich",
   "typer>=0.12.0",
 ]
@@ -75,7 +76,7 @@ test = [
   "pytest-cov>=4.0",
 ]
 lint = ["mdformat>0.7", "mdformat-gfm>=0.3.5", "ruff"]
-typing = ["mypy>=0.990"]
+typing = ["mypy>=0.990", "types-PyYAML"]
 
 [project.license]
 file = "LICENSE"
@@ -104,6 +105,10 @@ filterwarnings = [
   # use of the client in a test became an exception. It took the live matrix
   # against a real Datalayer sandbox down before the sandbox was reached.
   "module:Datalayer is migrating its paths to use standard platformdirs:DeprecationWarning",
+  # The Daytona SDK (0.205) reads its own deprecated `DaytonaConfig.server_url`
+  # inside `Daytona(config)`: with `error` in force, every live Daytona test
+  # failed before reaching Daytona, and a nightly that skipped hid it.
+  "ignore:`server_url` is deprecated:DeprecationWarning",
 ]
 
 [tool.mypy]

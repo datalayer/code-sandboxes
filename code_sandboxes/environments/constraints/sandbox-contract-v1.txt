@@ -20,8 +20,18 @@
 # jupyterlab and jupyter-server-ydoc require jupyter-server>=2.19. The rebased fork
 # satisfies those ranges, so pip keeps it; its local label, which PyPI never serves,
 # tells it apart from the release.
+#
+# jupyter-kernels carries the pooled kernel manager the runtime's Jupyter config
+# selects (kernel_manager_class = jupyter_kernels.pool.mapping.PooledMappingKernelManager,
+# plane/etc/dockerfiles/jupyter-python/etc/jupyter/config/jupyter_config.py). Unlike the
+# deprecated private datalayer-kernels it replaced, PyPI serves it, so a resolve satisfies
+# it from the index and the wheelhouse carries no wheel for it. The pin is still forced in:
+# without it `uv pip sync --require-hashes` strips it from a user environment's image and the
+# runtime's Jupyter server crashloops on a kernel_manager_class it can no longer import
+# (found live on 2026-09-15, the first user-environment build to reach the smoke test).
 ipykernel==7.3.0
 jupyter-client==8.9.1
 jupyter-server==2.21.0+datalayer.1
 jupyter-server-nbmodel==0.2.8
+jupyter-kernels==1.2.23
 datalayer==1.7.4

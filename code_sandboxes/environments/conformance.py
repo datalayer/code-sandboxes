@@ -37,6 +37,7 @@ __all__ = [
     "cross_variant_packages",
     "drifted_from",
     "package_versions_of",
+    "run_accelerator_check",
     "run_conformance",
     "run_core_tier",
     "run_extended_tier",
@@ -457,6 +458,80 @@ def _secrets(
     )
 
 
+def expected_packages(environment: Any, lock_text: str) -> dict[str, str]:
+    """Each top-level distribution the spec names, pinned to what its lock resolved.
+
+    What Appendix B check 5 is given. Never every package the lock pins — most
+    of a real lock is transitive, and check 5 tries to *import* each name it is
+    handed; a build tool or a C-library-only wheel that was never meant to be
+    imported directly would fail a check with nothing wrong to report. The
+    spec's own `packages.python.dependencies` is what a person declared
+    wanting, so it is what disagreeing across variants (E2-08) means something
+    about.
+
+    Here rather than in the durable worker, which had the only copy, so that a
+    builder running its own smoke test asks the same question of its own
+    artifact (E2-03/04/05).
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+
+    from .resolve import locked_versions
+
+    dependency_file = environment.spec.build.dependency_file
+    if dependency_file is not None and dependency_file.source_format == "conda":
+        # A conda source names its packages in the file, not in
+        # `packages.python`, and its lock is not a pip one (E3-02). Read the
+        # other way, check 5 was handed nothing and passed for it.
+        from .resolve_conda import conda_expected_packages
+
+        return conda_expected_packages(dependency_file.content, lock_text or "")
+    pinned = locked_versions(lock_text) if lock_text else {}
+    names: list[str] = []
+    for text in _declared_dependencies(environment):
+        try:
+            names.append(canonicalize_name(Requirement(text).name))
+        except InvalidRequirement:
+            continue
+    return {name: pinned[name] for name in names if name in pinned}
+
+
+def _declared_dependencies(environment: Any) -> list[str]:
+    """The requirements a person declared, wherever the source keeps them.
+
+    A `dependencyFile` source names its packages in the file and leaves
+    `packages.python` empty, which is what the resolver reads too (E3-01).
+    Read from `packages.python` alone, check 5 was handed nothing for a
+    `requirements.txt` and passed for it, found live on 2026-09-18 (E3-08).
+    """
+    from .spec import parse_requirements_txt
+
+    build = environment.spec.build
+    dependency_file = build.dependency_file
+    if build.source == "dependencyFile" and dependency_file is not None:
+        if dependency_file.source_format == "requirements":
+            return parse_requirements_txt(dependency_file.content)
+        if dependency_file.source_format == "pyproject":
+            return _pyproject_dependencies(dependency_file.content)
+    return list(environment.spec.packages.python.dependencies)
+
+
+def _pyproject_dependencies(text: str) -> list[str]:
+    """`[project].dependencies` of a `pyproject.toml`, or none when it cannot be read."""
+    try:
+        import tomllib as toml
+    except ImportError:  # Python 3.10
+        try:
+            import tomli as toml  # type: ignore[no-redef]
+        except ImportError:
+            return []
+    try:
+        project = toml.loads(text).get("project") or {}
+    except toml.TOMLDecodeError:
+        return []
+    return [str(item) for item in project.get("dependencies") or []]
+
+
 def run_core_tier(
     sandbox: Sandbox,
     *,
@@ -522,33 +597,93 @@ def _egress(
     )
 
 
-def _gpu(sandbox: Sandbox, requested: bool, cuda: str | None, timeout: float | None) -> CheckResult:
+def _gpu(
+    sandbox: Sandbox,
+    requested: bool,
+    cuda: str | None,
+    timeout: float | None,
+    count: int = 1,
+) -> CheckResult:
+    """Check 11: the GPUs asked for are visible, and CUDA is the spec's.
+
+    Two CUDA versions are read, and they answer different questions. The
+    image's own toolkit (`nvcc`, or the base's `CUDA_VERSION`) is what the
+    spec's `accelerator.cuda` names and the base channel pins. `nvidia-smi`'s
+    "CUDA Version" is the newest CUDA the host's *driver* runs, which the
+    image does not choose: comparing the spec with it failed a correct image
+    on any newer driver (found on 2026-09-18, E2-17). The driver only has to
+    be new enough for the toolkit.
+    """
     if not requested:
         return _result(11, True, gating=False, detail="no accelerator was requested")
     body = (
-        "import re as _dl_re, subprocess as _dl_sp\n"
-        "_dl_out = {'returncode': None, 'gpus': [], 'cuda': None}\n"
+        "import os as _dl_os, re as _dl_re, shutil as _dl_sh, subprocess as _dl_sp\n"
+        "_dl_out = {'returncode': None, 'gpus': [], 'driver': None, 'cuda': None}\n"
         "try:\n"
         "    _dl_run = _dl_sp.run(['nvidia-smi'], capture_output=True, text=True, timeout=30)\n"
         "    _dl_out['returncode'] = _dl_run.returncode\n"
         "    _dl_match = _dl_re.search(r'CUDA Version:\\s*([0-9.]+)', _dl_run.stdout)\n"
-        "    _dl_out['cuda'] = _dl_match.group(1) if _dl_match else None\n"
+        "    _dl_out['driver'] = _dl_match.group(1) if _dl_match else None\n"
         "    _dl_names = _dl_sp.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'], "
         "capture_output=True, text=True, timeout=30)\n"
         "    _dl_out['gpus'] = [_dl_l.strip() for _dl_l in _dl_names.stdout.splitlines() "
         "if _dl_l.strip()]\n"
         "except (OSError, _dl_sp.SubprocessError) as _dl_error:\n"
         "    _dl_out['error'] = str(_dl_error)\n"
+        "try:\n"
+        "    _dl_nvcc = _dl_sh.which('nvcc') or '/usr/local/cuda/bin/nvcc'\n"
+        "    _dl_run = _dl_sp.run([_dl_nvcc, '--version'], capture_output=True, text=True, "
+        "timeout=30)\n"
+        "    _dl_match = _dl_re.search(r'release ([0-9.]+),', _dl_run.stdout)\n"
+        "    _dl_out['cuda'] = _dl_match.group(1) if _dl_match else None\n"
+        "except (OSError, _dl_sp.SubprocessError):\n"
+        "    pass\n"
+        "_dl_out['cuda'] = _dl_out['cuda'] or _dl_os.environ.get('CUDA_VERSION') or None\n"
     )
     answer = probe(sandbox, _code(11, body, "_dl_out"), timeout=timeout)
     problems = []
-    if answer.get("returncode") != 0 or not answer.get("gpus"):
+    gpus = answer.get("gpus") or []
+    if answer.get("returncode") != 0 or not gpus:
         problems.append("no GPU is visible")
-    if cuda and not str(answer.get("cuda") or "").startswith(cuda):
-        problems.append(f"CUDA is {answer.get('cuda')}, not {cuda}")
-    return _result(
-        11, not problems, gating=False, detail="; ".join(problems) or None, actual=answer
-    )
+    elif len(gpus) < count:
+        problems.append(f"{len(gpus)} GPU(s) visible, not the {count} asked for")
+    toolkit = str(answer.get("cuda") or "")
+    if cuda and not _version_is(toolkit, cuda):
+        problems.append(f"CUDA is {toolkit or None}, not {cuda}")
+    driver = str(answer.get("driver") or "")
+    if toolkit and driver and _version_tuple(driver) < _version_tuple(toolkit):
+        problems.append(f"the driver runs CUDA up to {driver}, older than the image's {toolkit}")
+    # A GPU version gates on this (E2-17): a version that asked for an
+    # accelerator and cannot see it, or sees the wrong CUDA, is not the
+    # version its spec describes. A version that asked for none never
+    # reaches here (the trivial pass above), so the extended tier still
+    # gates nothing for a CPU version.
+    return _result(11, not problems, gating=True, detail="; ".join(problems) or None, actual=answer)
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", version))
+
+
+def _version_is(version: str, asked: str) -> bool:
+    """Whether `version` is what `asked` names: `12` and `12.8` both name 12.8.3."""
+    wanted = _version_tuple(asked)
+    return bool(wanted) and _version_tuple(version)[: len(wanted)] == wanted
+
+
+def run_accelerator_check(
+    sandbox: Sandbox,
+    *,
+    cuda: str | None = None,
+    count: int = 1,
+    timeout: float | None = 120.0,
+) -> CheckResult:
+    """Appendix B check 11 alone, gating, for a version that asked for an accelerator (E2-17).
+
+    What a builder's smoke test adds to the core tier for a GPU version: the
+    rest of the extended tier records, and this one decides.
+    """
+    return _guard(11, True, lambda: _gpu(sandbox, True, cuda, timeout, count))
 
 
 def _throughput(
@@ -617,6 +752,7 @@ def run_extended_tier(
     contract: SandboxContract = SANDBOX_CONTRACT_V1,
     accelerator_requested: bool = False,
     cuda_version: str | None = None,
+    accelerator_count: int = 1,
     egress_allowed: Sequence[str] = (),
     egress_blocked: Sequence[str] = (),
     cold_start_seconds: float | None = None,
@@ -625,10 +761,17 @@ def run_extended_tier(
     concurrent_kernels: int = 4,
     timeout: float | None = 120.0,
 ) -> ValidationResult:
-    """Appendix B checks 10-14: recorded per variant, gating nothing."""
+    """Appendix B checks 10-14: recorded per variant. Only check 11 gates, and
+    only for a version that asked for an accelerator (E2-17) — a GPU version
+    that cannot see its GPU is not what its spec describes; every other
+    extended check records without gating."""
     checks = [
         _guard(10, False, lambda: _egress(sandbox, egress_allowed, egress_blocked, timeout)),
-        _guard(11, False, lambda: _gpu(sandbox, accelerator_requested, cuda_version, timeout)),
+        _guard(
+            11,
+            accelerator_requested,
+            lambda: _gpu(sandbox, accelerator_requested, cuda_version, timeout, accelerator_count),
+        ),
         _guard(12, False, lambda: _throughput(sandbox, contract, minimum_mib_per_second, timeout)),
         _guard(13, False, lambda: _cold_start(cold_start_seconds, cold_start_budget)),
         _guard(14, False, lambda: _concurrent(sandbox, concurrent_kernels, timeout)),
@@ -649,7 +792,10 @@ def run_conformance(
     extended: Mapping[str, Any] | None = None,
     timeout: float | None = 120.0,
 ) -> ValidationResult:
-    """Both tiers: the core tier decides, the extended tier is recorded beside it."""
+    """Both tiers together. The core tier decides; the extended tier is recorded
+    beside it, save for check 11, which also decides for a version that asked for
+    an accelerator (E2-17) — a GPU version that cannot see its GPU has not built
+    what its spec described."""
     core = run_core_tier(
         sandbox,
         python_version=python_version,

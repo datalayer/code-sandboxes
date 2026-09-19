@@ -229,15 +229,33 @@ sandbox.files.read_bytes("/tmp/data.parquet")
 
 ## Environments
 
-An [Environment](/docs/environments) built for Daytona is a **snapshot** —
-built from the approved Datalayer base, `uv pip sync --require-hashes`
-against the resolved lock, your files and `postInstall` commands, and an
-explicit `tini -- sleep infinity` entrypoint (Daytona's own default,
-otherwise, is a bare `sleep infinity`, with no init to reap orphans). The
-base already carries `uv`, the doctor and the sandbox contract's user and
-locale, so none of that is reinstalled — only the lock is genuinely
-per-build. The snapshot's own `id` is the artifact; a build also names it,
-for operability, but a launch never uses the name.
+An [Environment](/environments) built for Daytona is a **snapshot** —
+built from the approved Datalayer base, the resolved lock, your files and
+`postInstall` commands, and an explicit `tini -- sleep infinity` entrypoint
+(Daytona's own default, otherwise, is a bare `sleep infinity`, with no init
+to reap orphans). The base already carries `uv`, the doctor and the sandbox
+contract's user and locale, so none of that is reinstalled — only the lock is
+genuinely per-build. The snapshot's own `id` is the artifact; a build also
+names it, for operability, but a launch never uses the name.
+
+How the lock is installed depends on where the environment came from:
+
+| Source | Installed with |
+|---|---|
+| A package list, a `requirements.txt`, a `pyproject.toml` and its `uv.lock` | `uv pip sync --require-hashes`: the snapshot holds exactly the lock |
+| A conda `environment.yml` | `micromamba install` of the explicit lock into the base's own interpreter, then the pip layer the solve recorded |
+| A Dockerfile | Daytona's `Image.from_dockerfile`, its approved `FROM` pinned to the resolved digest, then `uv pip install --require-hashes` of the lock — `install`, not `sync`, so what the Dockerfile installed stays |
+
+**Deleted by id, and never stranded.** Retention deletes a snapshot nothing
+keeps any more, by its `id` — a name is reused once its snapshot is gone —
+and a snapshot already gone counts as deleted. A build that fails *after*
+Daytona built its snapshot, at the core tier or at the record, deletes that
+snapshot before it reports the failure, so nothing is left in your account
+that no version names.
+
+`make env-build-daytona`, in the `environments` folder of the
+[examples repository](https://github.com/datalayer/examples), builds a
+version for Daytona from the command line.
 
 **Bring your own account:** a build runs with the environment owner's own
 Daytona organization, not this package's ambient credentials — either
@@ -251,6 +269,16 @@ own artifact carries that the other three variants' don't: the size class
 for, and the `target` a build's snapshot lands in is the one a launch
 starts from — a version that changes size class or region rebuilds a
 second, distinct artifact rather than resizing the first.
+
+**A GPU is part of the snapshot too.** A GPU class (`gpu-small`,
+`gpu-large`) on the CUDA base bakes the spec's `accelerator` into it: its
+`type`, one of Daytona's GPUs, and its `count`. CPU and memory come from
+`resources.hints`, or Daytona's own size for that GPU, and the disk holds the
+CUDA base. Every sandbox of a GPU snapshot is ephemeral, as Daytona requires:
+`DaytonaSandbox` reads the snapshot's `gpu` and asks for it. The build's
+smoke test adds check 11 to the core tier: the GPUs asked for are visible,
+CUDA is the base's, and the host's driver is new enough for it. GPU compute
+is billed by Daytona to the owner's organization, which needs GPU credits.
 
 Of the four variants, Daytona is the one whose build-time doctor check and
 live launch agree in full: the doctor is *not* run at build time (a

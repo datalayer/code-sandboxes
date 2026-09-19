@@ -119,6 +119,7 @@ never went through a `smoke_test` method either.
 
 from __future__ import annotations
 
+import shlex
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -140,6 +141,11 @@ from ..errors import (
 )
 from ..files import files_step
 from ..resolve import WHEELHOUSE_PATH, apt_pins_in
+from ..resolve_conda import (
+    conda_lock_pip_requirements,
+    is_conda_lock,
+    micromamba_bootstrap_command,
+)
 from ..spec import Environment
 from .managed import ManagedBuilder
 
@@ -191,6 +197,27 @@ class Builder(ManagedBuilder):
     variant = "e2b"
     item = "E2-03"
     title = "E2B"
+    #: A `packages` list and, for conda (E3-02), an `environment.yml`
+    #: dependency file installed with `micromamba`.
+    build_sources = ("packages", "dependencyFile", "dockerfile")
+    #: What E2B's own Dockerfile parser does not handle (E3-03). Read from the
+    #: SDK on 2026-09-17: `e2b.template.dockerfile_parser` branches on FROM,
+    #: RUN, COPY, ADD, WORKDIR, USER, ENV, ARG, CMD and ENTRYPOINT, and for
+    #: anything else **prints `Unsupported instruction` and carries on**. So a
+    #: template built from a Dockerfile naming one of these comes back without
+    #: it and reports success — which is exactly what a capability report
+    #: exists to prevent.
+    forbidden_instructions = (
+        "VOLUME",
+        "EXPOSE",
+        "HEALTHCHECK",
+        "SHELL",
+        "ONBUILD",
+        "STOPSIGNAL",
+        "LABEL",
+        "MAINTAINER",
+    )
+    dependency_formats = ("conda",)
     #: Firecracker microVMs: no GPU passthrough.
     gpu = False
     #: E0-04's spike found only a registry login for the private base, never
@@ -390,15 +417,38 @@ class Builder(ManagedBuilder):
                 chain.copy("datalayer-sandbox", _DOCTOR_PATH, mode=0o755, user="root")
                 .copy("wheelhouse", _WHEELHOUSE_PATH, user="root")
                 .copy("lock.txt", _LOCK_PATH, user="root")
-                .run_cmd(f'pip install --no-cache-dir "uv=={_UV_VERSION}"', user="root")
-                # Packages install as root (E0-04): a user install lands
-                # under /home/user, which the runtime mounts over.
-                .run_cmd(
+            )
+            if is_conda_lock(request.lock_text):
+                # A conda source (E3-02): `micromamba install --file` reads the
+                # `@EXPLICIT` lock without re-solving, and the pip layer the
+                # solve resolved — the user's pip requirements and the protected
+                # pins over them — comes from the lock's own `# datalayer-pip:`
+                # header, so the kernel stack (E1-04) and everything the solve
+                # installed is present the same as for a pip source. micromamba
+                # is installed first: the approved base bakes uv but not it.
+                chain = chain.run_cmd(micromamba_bootstrap_command(), user="root")
+                chain = chain.run_cmd(
+                    f"micromamba install --yes --name base --file {_LOCK_PATH}",
+                    user="root",
+                )
+                pip_requirements = conda_lock_pip_requirements(request.lock_text)
+                if pip_requirements:
+                    requirements = " ".join(shlex.quote(req) for req in pip_requirements)
+                    chain = chain.run_cmd(
+                        f"pip install --no-cache-dir --find-links {_WHEELHOUSE_PATH} "
+                        f"{requirements}",
+                        user="root",
+                    )
+            else:
+                chain = chain.run_cmd(
+                    f'pip install --no-cache-dir "uv=={_UV_VERSION}"', user="root"
+                ).run_cmd(
+                    # Packages install as root (E0-04): a user install lands
+                    # under /home/user, which the runtime mounts over.
                     "uv pip sync --system --require-hashes "
                     f"--find-links {_WHEELHOUSE_PATH} {_LOCK_PATH}",
                     user="root",
                 )
-            )
             for command in files_step(request.environment, variant=self.variant):
                 chain = chain.run_cmd(command)
             for command in spec.commands.post_install:

@@ -526,3 +526,105 @@ def test_stop_forgets_the_temporary_workdir_it_removed(tmp_path: Path, monkeypat
     second = Path(sandbox._resolve_workdir())
     assert second.is_dir()
     assert second != first
+
+
+class TestRestartingTheKernelRatherThanTheConnection:
+    """Appendix B check 7, against a server this process does not own.
+
+    `stop()` then `start()` is this client's lifecycle: when the Jupyter
+    server belongs to somebody else — a Datalayer runtime pod, which is every
+    attached sandbox — it drops the websocket and leaves the kernel process
+    running, so the next execution lands in the same interpreter with every
+    global still set. Found live on r1, 2026-09-16: the smoke test read
+    `state survived the restart`.
+    """
+
+    def test_the_kernel_is_restarted_through_the_server_s_own_api(self, monkeypatch):
+        sandbox = _started_sandbox(monkeypatch, kernel_id="kernel-1")
+        asked: dict = {}
+
+        class _Response:
+            ok = True
+            status_code = 200
+
+        def _post(url, params=None, headers=None, timeout=None):
+            asked["url"] = url
+            asked["params"] = params
+            return _Response()
+
+        monkeypatch.setattr("code_sandboxes.jupyter_server_sandbox.requests.post", _post)
+        try:
+            assert sandbox.restart_kernel() is True
+            assert asked["url"].endswith("/api/kernels/kernel-1/restart")
+        finally:
+            sandbox.stop()
+
+    def test_the_connection_is_kept_across_the_restart(self, monkeypatch):
+        """jupyter-server moves a kernel's websocket onto the restarted kernel.
+
+        Reconnecting broke it: `jupyter_kernel_client`'s channels stay bound
+        to the socket they were built with, so after a `stop()` and `start()`
+        every execution answered `ok` with no output (r1, 2026-09-18).
+        """
+        sandbox = _started_sandbox(monkeypatch, kernel_id="kernel-1")
+        lifecycle: list[str] = []
+        client = sandbox._client
+        monkeypatch.setattr(client, "stop", lambda *a, **k: lifecycle.append("stop"))
+        monkeypatch.setattr(client, "start", lambda *a, **k: lifecycle.append("start"))
+
+        class _Response:
+            ok = True
+            status_code = 200
+
+        monkeypatch.setattr(
+            "code_sandboxes.jupyter_server_sandbox.requests.post",
+            lambda *args, **kwargs: _Response(),
+        )
+        try:
+            assert sandbox.restart_kernel() is True
+            assert lifecycle == []
+            assert sandbox._client is client
+        finally:
+            sandbox.stop()
+
+    def test_a_server_that_refuses_the_restart_is_reported_not_raised(self, monkeypatch):
+        sandbox = _started_sandbox(monkeypatch, kernel_id="kernel-1")
+
+        class _Response:
+            ok = False
+            status_code = 503
+
+        monkeypatch.setattr(
+            "code_sandboxes.jupyter_server_sandbox.requests.post",
+            lambda *args, **kwargs: _Response(),
+        )
+        try:
+            assert sandbox.restart_kernel() is False
+        finally:
+            sandbox.stop()
+
+    def test_a_server_that_cannot_be_reached_is_reported_not_raised(self, monkeypatch):
+        sandbox = _started_sandbox(monkeypatch, kernel_id="kernel-1")
+
+        def _explode(*args, **kwargs):
+            raise OSError("no route to host")
+
+        monkeypatch.setattr("code_sandboxes.jupyter_server_sandbox.requests.post", _explode)
+        try:
+            assert sandbox.restart_kernel() is False
+        finally:
+            sandbox.stop()
+
+    def test_a_sandbox_with_no_kernel_id_asks_nothing(self, monkeypatch):
+        sandbox = _started_sandbox(monkeypatch, kernel_id=None)
+
+        def _should_not_be_called(*args, **kwargs):
+            raise AssertionError("the server must not be asked without a kernel id")
+
+        monkeypatch.setattr(
+            "code_sandboxes.jupyter_server_sandbox.requests.post", _should_not_be_called
+        )
+        try:
+            assert sandbox.restart_kernel() is False
+        finally:
+            sandbox.stop()

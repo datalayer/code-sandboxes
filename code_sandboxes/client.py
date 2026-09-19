@@ -508,7 +508,21 @@ class CodeSandboxClient:
         return self.is_started
 
     def restart(self) -> None:
-        """Restart the wrapped sandbox through its public lifecycle."""
+        """Restart the wrapped sandbox, clearing what it was holding.
+
+        A sandbox this process owns is restarted by its own lifecycle: stop
+        and start destroy and recreate it, and nothing survives. One that is
+        merely *attached* to a server somebody else runs — a Jupyter server
+        in a Datalayer runtime pod — is not: stopping drops this client's
+        websocket while the kernel process goes on running, and starting
+        reconnects to the same interpreter with every global still set. A
+        sandbox that knows how to restart what it is attached to says so with
+        `restart_kernel`, and that is used in preference; the lifecycle is
+        the fallback for every variant that has no such distinction.
+        """
+        restart_kernel = getattr(self._sandbox, "restart_kernel", None)
+        if callable(restart_kernel) and restart_kernel():
+            return
         self._sandbox.stop()
         self._sandbox.start()
 

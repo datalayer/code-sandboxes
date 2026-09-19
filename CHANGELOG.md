@@ -8,6 +8,87 @@
 
 ## Unreleased
 
+## 1.9.18
+
+- **A lock no longer carries a wall clock, so the build cache can hit**
+  (`environments/resolve.py`, `resolve_conda.py`; PLAN_ENVS.md E1-26, D-12).
+  The lock's header carried a `# resolved-at:` line, and its digest is over
+  the whole text — so two resolves of the same spec, in the same base,
+  pinning the same 320 packages, produced two different digests. Found by
+  resolving one environment twice on r1 on 2026-09-16: the texts differed in
+  exactly that one line out of 5,388. Section 5's cache key is over the lock
+  digest, so D-12's build cache could never hit, and it never had:
+  `environments.cache.lookups` read `hit=false` twelve times out of twelve.
+  When a lock was resolved is on the lock document Runtimes stores, in its
+  `created_at`, which is where it belongs. `resolved_at` is gone from
+  `lock_document`, `conda_lock_document`, `resolve_environment` and
+  `resolve_conda_environment`; the two tests that asserted determinism by
+  freezing the clock now assert it without one.
+
+## 1.9.17
+
+- **An artifact's size is read from the registry** (`environments/attest.py`;
+  PLAN_ENVS.md E1-25). `attest_artifact` took `size_bytes` from its caller and
+  nobody ever passed one — the builder answers a reference, not a weight — so
+  every artefact was recorded with `sizeBytes: null` and
+  `environments.artifact.bytes`, the series section 14 tracks the artifact
+  size in, had no point in it although artifacts had been recorded (seen on r1,
+  2026-09-16, through the OTEL query API). `Attestor.size_of()` asks the
+  registry, with the client the scan is already read from, and a size that
+  cannot be read is logged rather than raised: a missing number on a dashboard
+  is not a reason to refuse an artifact that is otherwise signed. 3 new tests.
+
+## 1.9.15
+
+- **A restart restarts the kernel, not just this client's socket**
+  (`jupyter_server_sandbox`, `client`; PLAN_ENV.md E0-09, Appendix B check
+  7). `CodeSandboxClient.restart()` was `stop()` then `start()`, which is
+  right for a sandbox this process owns — it is destroyed and recreated, and
+  nothing survives — and wrong for one *attached* to a Jupyter server
+  somebody else runs, which is every Datalayer runtime pod: stopping drops
+  the websocket while the kernel process keeps running, so the reconnect
+  lands in the same interpreter with every global still set. Check 7 is
+  "nothing is assumed to persist across restarts", and it read `state survived the restart ('True')` for exactly this reason — found live on r1,
+  2026-09-16, the first drill whose smoke test reached the check.
+  `JupyterServerSandbox.restart_kernel()` now asks the server's own
+  `POST /api/kernels/{id}/restart` (the way `_do_interrupt` already uses the
+  API rather than the client's lifecycle) and reconnects onto the new
+  kernel; `restart()` prefers it and falls back to the lifecycle for every
+  variant that draws no such distinction. 7 new tests.
+- **`datalayer/python-cpu:2026.09` repinned** to
+  `sha256:122d3e31f5e2507251457cbf47871c39ac1753adb1d83777ab0743fa11cd6148`:
+  the contract layer now sets `MappingKernelManager.root_dir`, so kernels
+  start in `/home/datalayer/content`. The image already declared `WORKDIR`
+  there and `sandbox-contract/v1`'s User row already required it, but a
+  kernel's cwd is the Jupyter server's to choose and jupyter-python's config
+  roots it at `$HOME` — so every environment's kernel ran in
+  `/home/datalayer` and Appendix B check 2 read `cwd is '/home/datalayer', not '/home/datalayer/content'`. The file browser stays rooted at `$HOME`,
+  where a person expects to see everything they have; only the kernel moves.
+- Two assertions that had rotted through three base releases are pinned in
+  one place again: the channel's digest and its apt snapshot were duplicated
+  across `test_environment_bases.py` and `test_environment_resolve.py`, and
+  2026-09-15's and 2026-09-16's releases left both red rather than catching
+  anything.
+
+## 1.9.14
+
+- **`datalayer/python-cpu:2026.09` base channel repinned** to the rebuilt
+  `jupyter-python:0.2.2` (now carrying `jupyter-kernels==1.2.23`) plus the
+  contract layer, digest
+  `sha256:aa5413000bb5b6ecd0a0cf03959b107f0d572f65bf230c08bbdf9a4569775545`,
+  released 2026-09-16 to `environments/base/python-cpu`. Every variant pins the
+  same digest.
+
+## 1.9.13
+
+- **`jupyter-kernels==1.2.23` forced into `sandbox-contract/v1`**: it carries
+  the pooled kernel manager the runtime's Jupyter config selects
+  (`kernel_manager_class = jupyter_kernels.pool.mapping.PooledMappingKernelManager`),
+  replacing the deprecated private `datalayer-kernels`. PyPI serves it, so a
+  resolve satisfies it from the index and the wheelhouse carries no wheel for
+  it; the pin keeps `uv pip sync --require-hashes` from stripping it out of a
+  user environment's image.
+
 ## 1.9.12
 
 - **`owner_repository`, `owner_cache_repository` and `ECR_ENVIRONMENT_PREFIX`

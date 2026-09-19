@@ -24,6 +24,7 @@ An SDK imported at module scope would turn `validate` into a 500.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Callable
 
 from ..builders import (
@@ -36,7 +37,7 @@ from ..builders import (
     ValidationResult,
 )
 from ..errors import CAPABILITY_UNSUPPORTED, SPEC_INVALID, EnvironmentsError
-from ..spec import GPU_SIZE_CLASSES, Environment
+from ..spec import GPU_SIZE_CLASSES, Environment, EnvironmentSpec
 
 __all__ = ["ManagedBuilder"]
 
@@ -67,8 +68,17 @@ class ManagedBuilder:
     supports_build_secrets = True
     #: The build sources it will accept in this phase.
     build_sources: tuple[str, ...] = ("packages",)
+    #: When `dependencyFile` is among `build_sources`, the `sourceFormat`s the
+    #: variant's own build actually installs. A conda source (E3-02) installs
+    #: with `micromamba`; a `pyproject`/`requirements` dependencyFile is not
+    #: built for a managed variant yet (E3-01), so it is not listed here.
+    dependency_formats: tuple[str, ...] = ()
     package_managers: tuple[str, ...] = ("uv", "pip")
-    #: Dockerfile instructions its own builder does not implement (§6).
+    #: Dockerfile instructions its own builder does not implement (§6, E3-03).
+    #: Checked against a `dockerfile`-sourced spec at `validate`, before
+    #: anything is queued — the point being to refuse an instruction a variant
+    #: would otherwise drop, rather than hand back an image quietly missing
+    #: whatever it asked for.
     forbidden_instructions: tuple[str, ...] = ()
     #: Where its artifacts live; empty when the variant is regionless.
     regions: tuple[str, ...] = ()
@@ -121,6 +131,10 @@ class ManagedBuilder:
                     field="spec.build.source",
                 )
             )
+        elif spec.build.source == "dependencyFile":
+            findings.extend(self._dependency_file_findings(spec))
+        elif spec.build.source == "dockerfile":
+            findings.extend(self._dockerfile_findings(spec))
         if spec.packages.python.manager not in self.package_managers:
             findings.append(
                 CapabilityFinding(
@@ -141,34 +155,7 @@ class ManagedBuilder:
                 )
             )
         if not self.gpu:
-            # A GPU is asked for two ways, and the spec's own validation
-            # couples them; a `validate` can be reached before that, so both
-            # are read here rather than trusting the coupling.
-            if spec.resources.size_class in GPU_SIZE_CLASSES:
-                findings.append(
-                    CapabilityFinding(
-                        code=CAPABILITY_UNSUPPORTED.code,
-                        message=(
-                            f"{self.title} has no GPU, so `{spec.resources.size_class}` cannot be "
-                            f"built for it. Drop {self.variant} from the variants, or build "
-                            "the GPU classes for modal or daytona, which run them on their "
-                            "own hardware"
-                        ),
-                        field="spec.resources.sizeClass",
-                    )
-                )
-            elif spec.resources.accelerator != "none":
-                findings.append(
-                    CapabilityFinding(
-                        code=CAPABILITY_UNSUPPORTED.code,
-                        message=(
-                            f"{self.title} has no GPU, so an accelerator cannot be built for it. "
-                            f"Drop {self.variant} from the variants, or build the GPU classes for "
-                            "modal or daytona, which run them on their own hardware"
-                        ),
-                        field="spec.resources.accelerator",
-                    )
-                )
+            findings.extend(self._gpu_findings(spec))
         if self.regions:
             asked = [
                 region
@@ -201,6 +188,58 @@ class ManagedBuilder:
             )
         return findings
 
+    def _gpu_findings(self, spec: EnvironmentSpec) -> list[CapabilityFinding]:
+        """A variant with no GPU refuses either way a GPU is asked for. A GPU
+        is asked two ways, and the spec's own validation couples them; a
+        `validate` can be reached before that, so both are read here rather
+        than trusting the coupling."""
+        if spec.resources.size_class in GPU_SIZE_CLASSES:
+            return [
+                CapabilityFinding(
+                    code=CAPABILITY_UNSUPPORTED.code,
+                    message=(
+                        f"{self.title} has no GPU, so `{spec.resources.size_class}` cannot be "
+                        f"built for it. Drop {self.variant} from the variants, or build "
+                        "the GPU classes for modal or daytona, which run them on their "
+                        "own hardware"
+                    ),
+                    field="spec.resources.sizeClass",
+                )
+            ]
+        if spec.resources.accelerator != "none":
+            return [
+                CapabilityFinding(
+                    code=CAPABILITY_UNSUPPORTED.code,
+                    message=(
+                        f"{self.title} has no GPU, so an accelerator cannot be built for it. "
+                        f"Drop {self.variant} from the variants, or build the GPU classes for "
+                        "modal or daytona, which run them on their own hardware"
+                    ),
+                    field="spec.resources.accelerator",
+                )
+            ]
+        return []
+
+    def _dependency_file_findings(self, spec: EnvironmentSpec) -> list[CapabilityFinding]:
+        """A `dependencyFile` this variant accepts still only builds the
+        `sourceFormat`s it has an install step for (E3-01, E3-02): a conda
+        file installs with `micromamba`, but a `pyproject` or `requirements`
+        one is not built for a managed variant yet."""
+        source_format = spec.build.dependency_file.source_format
+        if source_format in self.dependency_formats:
+            return []
+        return [
+            CapabilityFinding(
+                code=CAPABILITY_UNSUPPORTED.code,
+                message=(
+                    f"a `{source_format}` dependency file is not built for "
+                    f"{self.title} yet; it builds "
+                    f"{', '.join(self.dependency_formats) or 'no dependency file'}"
+                ),
+                field="spec.build.dependencyFile.sourceFormat",
+            )
+        ]
+
     def _own_findings(
         self, environment: Environment, lock_text: str | None
     ) -> list[CapabilityFinding]:
@@ -223,7 +262,23 @@ class ManagedBuilder:
     def inspect(self, artifact: ArtifactReference) -> ArtifactMetadata:
         raise self._not_built("inspect an artifact")
 
-    def smoke_test(self, artifact: ArtifactReference) -> ValidationResult:
+    def smoke_test(
+        self,
+        artifact: ArtifactReference,
+        *,
+        environment: Any = None,
+        lock_text: str | None = None,
+        secret_values: Sequence[str] = (),
+    ) -> ValidationResult:
+        """Launch the artifact and run Appendix B's core tier in it (E2-03/04/05).
+
+        `environment` and `lock_text` are what the core tier needs and an
+        artifact does not carry: the Python version the spec asks for and the
+        packages its lock pins. The caller has both — it read them to build —
+        and passes them rather than making every adapter fetch them again.
+        They are keyword-only and optional so a caller that has neither still
+        type-checks, and an adapter that needs them says so itself.
+        """
         raise self._not_built("smoke-test an artifact")
 
     def resolve(self, version_ref: str) -> ArtifactReference:
@@ -236,6 +291,36 @@ class ManagedBuilder:
         raise self._not_built("delete an artifact")
 
     # -- helpers for the subclasses -------------------------------------------
+
+    def _dockerfile_findings(self, spec: Any) -> list[CapabilityFinding]:
+        """Every instruction in the spec's Dockerfile this variant would not honour.
+
+        The contract's own refusals are `spec.py`'s to make and apply to every
+        variant alike; this is the narrower question of what *this* builder
+        does with a Dockerfile it accepts. Each is named with its line, since
+        a Dockerfile is somebody's file.
+        """
+        if not self.forbidden_instructions:
+            return []
+        dockerfile = getattr(spec.build, "dockerfile", None)
+        content = getattr(dockerfile, "content", "") or ""
+        if not content.strip():
+            return []
+        from ..contract import parse_dockerfile
+
+        refused = set(self.forbidden_instructions)
+        return [
+            CapabilityFinding(
+                code=CAPABILITY_UNSUPPORTED.code,
+                message=(
+                    f"line {instruction.line}: {self.title} does not implement "
+                    f"`{instruction.keyword}`"
+                ),
+                field="spec.build.dockerfile.content",
+            )
+            for instruction in parse_dockerfile(content)
+            if instruction.keyword in refused
+        ]
 
     @staticmethod
     def _spec_finding(message: str, field: str) -> CapabilityFinding:

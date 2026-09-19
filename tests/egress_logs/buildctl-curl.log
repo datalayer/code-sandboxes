@@ -1,0 +1,41 @@
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 325B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/buildpack-deps:bookworm-scm
+#2 DONE 0.2s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/4] FROM docker.io/library/buildpack-deps:bookworm-scm@sha256:bb8654d03bd8341e702f1ae30adca91a11f4164da2d37dbe7a0bf49e4901bd03
+#4 CACHED
+
+#5 [2/4] RUN git clone -q https://github.com/psf/requests.git /tmp/r || true
+#5 0.063 fatal: unable to access 'https://github.com/psf/requests.git/': CONNECT tunnel failed, response 403
+#5 DONE 0.1s
+
+#6 [3/4] RUN curl -fsSL https://raw.githubusercontent.com/psf/requests/main/README.md -o /dev/null || true
+#6 0.065 curl: (22) The requested URL returned error: 403
+#6 DONE 0.1s
+
+#7 [4/4] RUN wget https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz -O /dev/null
+#7 0.060 --2026-09-19 08:44:09--  https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz
+#7 0.066 Connecting to 172.18.0.2:3128... connected.
+#7 0.067 Proxy tunneling failed: ForbiddenUnable to establish SSL connection.
+#7 ERROR: process "/bin/sh -c wget https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz -O /dev/null" did not complete successfully: exit code: 4
+------
+ > [4/4] RUN wget https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz -O /dev/null:
+0.060 --2026-09-19 08:44:09--  https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz
+0.066 Connecting to 172.18.0.2:3128... connected.
+0.067 Proxy tunneling failed: ForbiddenUnable to establish SSL connection.
+------
+Dockerfile:4
+--------------------
+   2 |     RUN git clone -q https://github.com/psf/requests.git /tmp/r || true
+   3 |     RUN curl -fsSL https://raw.githubusercontent.com/psf/requests/main/README.md -o /dev/null || true
+   4 | >>> RUN wget https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz -O /dev/null
+   5 |
+--------------------
+error: failed to solve: process "/bin/sh -c wget https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz -O /dev/null" did not complete successfully: exit code: 4

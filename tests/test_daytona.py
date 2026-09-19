@@ -700,6 +700,44 @@ def test_a_snapshot_and_an_image_together_are_refused():
         sandbox._create_params(daytona)
 
 
+class _SnapshotsNamed:
+    """`daytona.snapshot`, answering the records it was given by id."""
+
+    def __init__(self, **records) -> None:
+        self.records = records
+
+    def get(self, snapshot_id):
+        if snapshot_id not in self.records:
+            raise KeyError(snapshot_id)
+        return self.records[snapshot_id]
+
+
+def test_a_sandbox_of_a_gpu_snapshot_is_ephemeral():
+    """E2-17: a GPU is baked into an Environment's snapshot, so its sandbox asks
+    for a GPU without `gpu=`, and Daytona refuses it unless it is ephemeral."""
+    import types
+
+    daytona = pytest.importorskip("daytona")
+    sandbox = _started(SandboxConfig(), snapshot="dl-gpu-v1")
+    sandbox._daytona = types.SimpleNamespace(
+        snapshot=_SnapshotsNamed(**{"dl-gpu-v1": types.SimpleNamespace(gpu=2)})
+    )
+    params = sandbox._create_params(daytona)
+    assert isinstance(params, daytona.CreateSandboxFromSnapshotParams)
+    assert params.auto_delete_interval == 0
+
+
+def test_a_sandbox_of_a_cpu_snapshot_is_kept_as_asked():
+    import types
+
+    daytona = pytest.importorskip("daytona")
+    for records in ({"dl-geo-v3": types.SimpleNamespace(gpu=0)}, {}):
+        sandbox = _started(SandboxConfig(), snapshot="dl-geo-v3")
+        sandbox._daytona = types.SimpleNamespace(snapshot=_SnapshotsNamed(**records))
+        params = sandbox._create_params(daytona)
+        assert getattr(params, "auto_delete_interval", None) != 0
+
+
 def test_a_snapshot_alone_still_creates_from_the_snapshot():
     daytona = pytest.importorskip("daytona")
 

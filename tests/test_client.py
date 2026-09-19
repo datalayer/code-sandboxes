@@ -157,6 +157,62 @@ def test_variables_interrupt_and_restart_delegate_to_sandbox():
     assert client.is_alive() is True
 
 
+class TestRestartingWhatIsActuallyHoldingTheState:
+    """A restart has to clear the interpreter, not just this client's socket.
+
+    Appendix B check 7 is "nothing is assumed to persist across restarts". A
+    sandbox this process owns is cleared by its own lifecycle; one attached
+    to somebody else's Jupyter server is not, because the kernel outlives
+    the websocket. Found live on r1, 2026-09-16: `state survived the
+    restart`.
+    """
+
+    def test_a_sandbox_that_can_restart_its_kernel_is_asked_to(self):
+        class _AttachedSandbox(_FakeSandbox):
+            def __init__(self):
+                super().__init__()
+                self.kernel_restarts = 0
+
+            def restart_kernel(self):
+                self.kernel_restarts += 1
+                return True
+
+        sandbox = _AttachedSandbox()
+        sandbox.start()
+        CodeSandboxClient(sandbox).restart()
+
+        assert sandbox.kernel_restarts == 1
+        # And the lifecycle was left alone: stopping it would have dropped a
+        # connection the restarted kernel is still reachable on.
+        assert sandbox.is_started is True
+
+    def test_a_kernel_restart_that_fails_falls_back_to_the_lifecycle(self):
+        class _RefusingSandbox(_FakeSandbox):
+            def __init__(self):
+                super().__init__()
+                self.stops = 0
+
+            def restart_kernel(self):
+                return False
+
+            def stop(self):
+                self.stops += 1
+                super().stop()
+
+        sandbox = _RefusingSandbox()
+        sandbox.start()
+        CodeSandboxClient(sandbox).restart()
+
+        assert sandbox.stops == 1, "a refused kernel restart still restarts the sandbox"
+        assert sandbox.is_started is True
+
+    def test_a_sandbox_with_no_kernel_of_its_own_restarts_as_it_always_did(self):
+        sandbox = _FakeSandbox()
+        sandbox.start()
+        CodeSandboxClient(sandbox).restart()
+        assert sandbox.is_started is True
+
+
 def test_a_sandbox_that_knows_it_is_gone_is_believed():
     """`is_alive` reports what the sandbox can find out, not the local start
     flag, so a backend that died under us is not reported as ready."""
