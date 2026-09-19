@@ -184,9 +184,12 @@ def a_builder(**changes) -> Builder:
 class Buildctl:
     """A `buildctl` that writes the metadata a successful build writes."""
 
-    def __init__(self, *, digest: str | None = DIGEST, returncode: int = 0) -> None:
+    def __init__(
+        self, *, digest: str | None = DIGEST, returncode: int = 0, stderr: str = "solved\n"
+    ) -> None:
         self.digest = digest
         self.returncode = returncode
+        self.stderr = stderr
         self.argv: list[str] = []
         self.context: Path | None = None
         self.env: dict[str, str] | None = None
@@ -201,7 +204,7 @@ class Buildctl:
                 Path(self.argv[position + 1]).write_text(
                     json.dumps({"containerimage.digest": self.digest}), encoding="utf-8"
                 )
-        return subprocess.CompletedProcess(self.argv, self.returncode, "", "solved\n")
+        return subprocess.CompletedProcess(self.argv, self.returncode, "", self.stderr)
 
 
 # -- The Dockerfile ------------------------------------------------------------

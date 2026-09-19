@@ -1,0 +1,30 @@
+warning  libmamba Download error (56) Failure when receiving data from the peer [https://conda.anaconda.org/conda-forge/noarch/repodata.json.zst]
+    CONNECT tunnel failed, response 403
+warning  libmamba Retrying in 2 seconds
+warning  libmamba Download error (56) Failure when receiving data from the peer [https://conda.anaconda.org/conda-forge/linux-64/repodata.json.zst]
+    CONNECT tunnel failed, response 403
+warning  libmamba Retrying in 2 seconds
+warning  libmamba Download error (56) Failure when receiving data from the peer [https://conda.anaconda.org/conda-forge/noarch/repodata.json.zst]
+    CONNECT tunnel failed, response 403
+warning  libmamba Retrying in 2 seconds
+warning  libmamba Download error (56) Failure when receiving data from the peer [https://conda.anaconda.org/conda-forge/linux-64/repodata.json.zst]
+    CONNECT tunnel failed, response 403
+warning  libmamba Retrying in 2 seconds
+warning  libmamba Download error (56) Failure when receiving data from the peer [https://conda.anaconda.org/conda-forge/noarch/repodata.json.zst]
+    CONNECT tunnel failed, response 403
+warning  libmamba Retrying in 2 seconds
+warning  libmamba Download error (56) Failure when receiving data from the peer [https://conda.anaconda.org/conda-forge/linux-64/repodata.json.zst]
+    CONNECT tunnel failed, response 403
+warning  libmamba Retrying in 2 seconds
+warning  libmamba Download error (56) Failure when receiving data from the peer [https://conda.anaconda.org/conda-forge/noarch/repodata.json.zst]
+    CONNECT tunnel failed, response 403
+warning  libmamba Retrying in 2 seconds
+critical libmamba Multiple errors occurred:
+    Download error (56) Failure when receiving data from the peer [https://conda.anaconda.org/conda-forge/noarch/repodata.json.zst]
+    CONNECT tunnel failed, response 403
+    Subdir conda-forge/noarch not loaded!
+    If you run into this error repeatedly, your package cache may be corrupted.
+    Please try running `mamba clean -a` to remove this cache before retrying the operation.
+
+    If you still are having issues, please report the error on `mamba-org/mamba`'s issue tracker:
+    https://github.com/mamba-org/mamba/issues/new?assignees=&labels=&projects=&template=bug.yml

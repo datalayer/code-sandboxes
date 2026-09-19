@@ -1,0 +1,16 @@
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 80B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for ghcr.io/astral-sh/uv:0.12.11
+#2 ERROR: failed to do request: Head "https://ghcr.io/v2/astral-sh/uv/manifests/0.12.11": Forbidden
+------
+ > [internal] load metadata for ghcr.io/astral-sh/uv:0.12.11:
+------
+Dockerfile:1
+--------------------
+   1 | >>> FROM ghcr.io/astral-sh/uv:0.12.11
+   2 |     RUN true
+   3 |
+--------------------
+error: failed to solve: ghcr.io/astral-sh/uv:0.12.11: failed to resolve source metadata for ghcr.io/astral-sh/uv:0.12.11: failed to do request: Head "https://ghcr.io/v2/astral-sh/uv/manifests/0.12.11": Forbidden
