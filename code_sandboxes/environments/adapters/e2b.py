@@ -163,7 +163,7 @@ _UV_VERSION = "0.12.11"
 _DOCTOR_PATH = "/opt/datalayer/bin/datalayer-sandbox"
 _WHEELHOUSE_PATH = "/opt/datalayer/wheelhouse"
 _LOCK_PATH = "/opt/datalayer/lock.txt"
-_CONTENT_DIR = "/home/datalayer/content"
+_CONTENT_DIR = "/home/datalayer"
 
 #: The sandbox contract's own user (D-4, §3). `set_user` makes it the
 #: template's persistent default; the steps that must run as root instead

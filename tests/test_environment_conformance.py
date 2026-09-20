@@ -40,7 +40,7 @@ GOOD: dict[int, Any] = {
         "gid": 100,
         "user": "datalayer",
         "home": "/home/datalayer",
-        "cwd": "/home/datalayer/content",
+        "cwd": "/home/datalayer",
     },
     3: {"version": "3.12", "full": "3.12.6", "pip": "/opt/conda/bin/pip", "uv": None},
     5: {

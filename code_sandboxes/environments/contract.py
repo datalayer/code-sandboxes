@@ -109,7 +109,7 @@ SANDBOX_CONTRACT_V1 = SandboxContract(
     uid=1000,
     gid=100,
     home="/home/datalayer",
-    workdir="/home/datalayer/content",
+    workdir="/home/datalayer",
     reserved_path="/opt/datalayer",
     doctor_path="/opt/datalayer/bin/datalayer-sandbox",
     python_executables=("python3", "pip"),
@@ -141,7 +141,9 @@ SANDBOX_CONTRACT_V1 = SandboxContract(
             area="User",
             requirement=(
                 "Non-root user `datalayer`, uid 1000, gid 100, home `/home/datalayer`, "
-                "working directory `/home/datalayer/content`."
+                "working directory `/home/datalayer` — the home itself, which is "
+                "where a person's folders are mounted and what the file browser "
+                "shows, so `pwd` and the browser agree."
             ),
             reason=(
                 "Runtime pods run as 1000:100 and home folders on the shared filesystem are owned "
@@ -192,7 +194,7 @@ SANDBOX_CONTRACT_V1 = SandboxContract(
         ContractRow(
             area="Filesystem",
             requirement=(
-                "`/opt/datalayer` is reserved and read-only to the user; `/home/datalayer/content` "
+                "`/opt/datalayer` is reserved and read-only to the user; `/home/datalayer` "
                 "is writable; nothing is assumed to persist across restarts."
             ),
             reason="Datalayer's tools live under `/opt/datalayer`; "

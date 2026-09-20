@@ -15,12 +15,12 @@ This page is generated from `code_sandboxes/environments/contract.py`: change th
 |---|---|---|---|
 | Architecture | `linux/amd64`. | Modal pulls registry images for `linux/amd64` only; adopted everywhere for parity. | `doctor:architecture` |
 | Base OS | Debian-derived: Debian or Ubuntu. | E2B builds templates only from Debian-derived images; adopted everywhere for parity. | `doctor:os` |
-| User | Non-root user `datalayer`, uid 1000, gid 100, home `/home/datalayer`, working directory `/home/datalayer/content`. | Runtime pods run as 1000:100 and home folders on the shared filesystem are owned that way. Modal ignores `USER`, so its adapter asserts the user in the run command. | `doctor:user`, `doctor:uid`, `doctor:gid`, `doctor:home`, `doctor:workdir`, `conformance:2` |
+| User | Non-root user `datalayer`, uid 1000, gid 100, home `/home/datalayer`, working directory `/home/datalayer` — the home itself, which is where a person's folders are mounted and what the file browser shows, so `pwd` and the browser agree. | Runtime pods run as 1000:100 and home folders on the shared filesystem are owned that way. Modal ignores `USER`, so its adapter asserts the user in the run command. | `doctor:user`, `doctor:uid`, `doctor:gid`, `doctor:home`, `doctor:workdir`, `conformance:2` |
 | Python | `python3` and `pip` on `PATH`. | The kernel, the doctor and the package installers all need them. | `doctor:python`, `doctor:pip`, `conformance:3` |
 | Kernel stack | `ipykernel`, `jupyter_client` and the Datalayer runtime agent, at versions inside the range Datalayer's protected constraints allow. | A pin outside that range builds, then gives a sandbox that never connects. | `doctor:kernel`, `conformance:4` |
 | Entrypoint | A long-running process that `exec`s the arguments it is given. | Modal requires it, Daytona defaults to `sleep infinity` and E2B uses a start command; the adapters make all three the same. | `conformance:8` |
 | Signals | PID 1 reaps children and forwards `SIGTERM`; shutdown finishes within 10 seconds. | A sandbox that ignores `SIGTERM` is killed with its work unsaved, and zombies pile up. | `doctor:init`, `conformance:8` |
-| Filesystem | `/opt/datalayer` is reserved and read-only to the user; `/home/datalayer/content` is writable; nothing is assumed to persist across restarts. | Datalayer's tools live under `/opt/datalayer`; user code writes where its content is. | `doctor:reserved_path`, `doctor:workdir`, `conformance:6` |
+| Filesystem | `/opt/datalayer` is reserved and read-only to the user; `/home/datalayer` is writable; nothing is assumed to persist across restarts. | Datalayer's tools live under `/opt/datalayer`; user code writes where its content is. | `doctor:reserved_path`, `doctor:workdir`, `conformance:6` |
 | Network | Egress is governed at runtime by policy, not baked into the image; no build-time credentials on disk. | A credential left in a layer is readable by anyone who can pull the image. | `conformance:9`, `conformance:10` |
 | Locale and time | `C.UTF-8`, UTC, and current CA certificates. | Tools behave the same on every provider, and HTTPS works. | `doctor:locale`, `doctor:timezone`, `doctor:ca_certificates` |
 | Health | `datalayer-sandbox doctor --json` exits 0 and reports the contract version, the Python version, the kernel versions, the user and the writable paths. | This command is the first check of every smoke test. | `doctor`, `conformance:1` |
@@ -35,7 +35,7 @@ This page is generated from `code_sandboxes/environments/contract.py`: change th
 | uid | `1000` |
 | gid | `100` |
 | Home | `/home/datalayer` |
-| Working directory | `/home/datalayer/content` |
+| Working directory | `/home/datalayer` |
 | Reserved, read-only | `/opt/datalayer` |
 | Doctor | `/opt/datalayer/bin/datalayer-sandbox` |
 | Locale | `C.UTF-8` |

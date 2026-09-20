@@ -38,7 +38,7 @@ def test_the_contract_carries_the_identity_the_owner_took() -> None:
     """PLAN_ENV.md, D-6: gid 100 is the one departure from section 3."""
     contract = SANDBOX_CONTRACT_V1
     assert (contract.user, contract.uid, contract.gid) == ("datalayer", 1000, 100)
-    assert (contract.home, contract.workdir) == ("/home/datalayer", "/home/datalayer/content")
+    assert (contract.home, contract.workdir) == ("/home/datalayer", "/home/datalayer")
     assert contract.reserved_path == "/opt/datalayer"
     assert contract.doctor_path == "/opt/datalayer/bin/datalayer-sandbox"
     assert SUPPORTED_CONTRACTS == ("sandbox-contract/v1",)

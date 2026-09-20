@@ -573,7 +573,7 @@ class TestBuildingASnapshot:
         a_builder(daytona=daytona).build(a_request())
         image = daytona.client.snapshot.create_calls[0].args[0].image
         assert image.calls[-1].name == "workdir"
-        assert image.calls[-1].args[0] == "/home/datalayer/content"
+        assert image.calls[-1].args[0] == "/home/datalayer"
 
     def test_the_entrypoint_is_always_set(self) -> None:
         """Daytona's own default, unset, is `sleep infinity` with no PID 1 (§11.3

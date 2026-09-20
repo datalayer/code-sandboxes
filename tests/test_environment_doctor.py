@@ -32,7 +32,7 @@ class CompliantHost(doctor.Host):
         "/home/datalayer/content",
         "/opt/datalayer",
     }
-    writable: ClassVar[set[str]] = {"/home/datalayer/content"}
+    writable: ClassVar[set[str]] = {"/home/datalayer"}
 
     def machine(self):
         return "x86_64"
@@ -56,7 +56,7 @@ class CompliantHost(doctor.Host):
         return self.environment
 
     def cwd(self):
-        return "/home/datalayer/content"
+        return "/home/datalayer"
 
     def which(self, name):
         return "/opt/conda/bin/" + name
@@ -124,7 +124,7 @@ def test_a_compliant_sandbox_passes_every_row() -> None:
     assert report["ok"] is True and report["failed"] is None
     assert [row["id"] for row in report["rows"]] == list(doctor.ROW_IDS)
     assert report["paths"] == {
-        "writable": ["/home/datalayer/content"],
+        "writable": ["/home/datalayer"],
         "readOnly": ["/opt/datalayer"],
     }
 
@@ -139,7 +139,7 @@ def test_the_image_before_the_move_fails_exactly_what_the_move_and_the_contract_
 
 def test_a_writable_reserved_path_fails() -> None:
     class Writable(CompliantHost):
-        writable: ClassVar[set[str]] = {"/home/datalayer/content", "/opt/datalayer"}
+        writable: ClassVar[set[str]] = {"/home/datalayer", "/opt/datalayer"}
 
     report = doctor.check(Writable())
     assert report["failed"] == "reserved_path"

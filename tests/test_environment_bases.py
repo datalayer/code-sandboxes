@@ -70,7 +70,7 @@ def test_the_2026_09_channel_of_python_cpu_resolves_the_digest_its_release_pushe
     first: two releases (2026-09-15's and 2026-09-16's) changed the channel
     and left this assertion on 2026-09-14's digest, so it sat red rather than
     catching anything. Current: released 2026-09-16, the contract layer that
-    starts kernels in `/home/datalayer/content` (E1-05, Appendix B check 2).
+    starts kernels in `/home/datalayer` (E1-05, Appendix B check 2).
     """
     ref = "datalayer/python-cpu"
     digest = "sha256:122d3e31f5e2507251457cbf47871c39ac1753adb1d83777ab0743fa11cd6148"

@@ -238,10 +238,10 @@ class TestTheDockerfileItGenerates:
             "uv pip sync --system --require-hashes --find-links /opt/datalayer/wheelhouse "
             "/opt/datalayer/lock.txt\n"
             "USER 1000:100\n"
-            "WORKDIR /home/datalayer/content\n"
+            "WORKDIR /home/datalayer\n"
             "RUN --network=none python -c 'import geopandas'\n"
             "USER 1000:100\n"
-            "WORKDIR /home/datalayer/content\n"
+            "WORKDIR /home/datalayer\n"
             "RUN /opt/datalayer/bin/datalayer-sandbox doctor --json > /tmp/doctor.json\n"
         )
 

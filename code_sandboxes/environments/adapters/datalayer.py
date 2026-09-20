@@ -447,12 +447,12 @@ class Builder:
         baked = files_step(request.environment, variant=self.variant)
         if baked:
             lines.append("USER 1000:100")
-            lines.append("WORKDIR /home/datalayer/content")
+            lines.append("WORKDIR /home/datalayer")
             for command in baked:
                 lines.append(f"RUN {command}")
         if spec.commands.post_install:
             lines.append("USER 1000:100")
-            lines.append("WORKDIR /home/datalayer/content")
+            lines.append("WORKDIR /home/datalayer")
             for command in spec.commands.post_install:
                 # No network: a command that fetches something makes an
                 # artifact whose contents depend on the day it was built.
@@ -465,7 +465,7 @@ class Builder:
         lines.extend(
             [
                 "USER 1000:100",
-                "WORKDIR /home/datalayer/content",
+                "WORKDIR /home/datalayer",
                 # The contract's own check, in the image, at build time.
                 "RUN /opt/datalayer/bin/datalayer-sandbox doctor --json > /tmp/doctor.json",
             ]

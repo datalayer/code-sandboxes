@@ -310,7 +310,7 @@ class TestBuildingATemplate:
         names = [call.name for call in fake.calls]
         assert names[-2:] == ["set_user", "set_workdir"]
         assert fake.calls[-2].args == ("datalayer",)
-        assert fake.calls[-1].args == ("/home/datalayer/content",)
+        assert fake.calls[-1].args == ("/home/datalayer",)
 
     def test_env_is_set_when_the_spec_has_any(self) -> None:
         fake = FakeTemplate()

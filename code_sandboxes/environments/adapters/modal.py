@@ -196,7 +196,7 @@ def modal_gpu(accelerator_type: str, count: int = 1) -> str | None:
 _UV_VERSION = "0.12.11"
 
 _LOCK_PATH = "/opt/datalayer/lock.txt"
-_CONTENT_DIR = "/home/datalayer/content"
+_CONTENT_DIR = "/home/datalayer"
 
 #: The 2023.12 default fails installing Modal's own runtime deps on Python
 #: 3.13 (E0-04, confirmed live 2026-09-13): see the module docstring.

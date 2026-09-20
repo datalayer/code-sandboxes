@@ -579,7 +579,7 @@ def test_a_contract_artifact_drops_privileges_and_sets_the_workdir():
         "DATALAYER_SANDBOX_CONTRACT_GID": "100",
         "DATALAYER_SANDBOX_CONTRACT_HOME": "/home/datalayer",
     }
-    assert call["kwargs"]["workdir"] == "/home/datalayer/content"
+    assert call["kwargs"]["workdir"] == "/home/datalayer"
 
 
 def test_a_plain_sandbox_asks_for_nothing_extra():

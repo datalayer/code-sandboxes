@@ -72,7 +72,7 @@ DEFAULT_MODAL_PYTHON_VERSION = "3.12"
 _CONTRACT_UID = "1000"
 _CONTRACT_GID = "100"
 _CONTRACT_HOME = "/home/datalayer"
-_CONTRACT_CONTENT_DIR = "/home/datalayer/content"
+_CONTRACT_CONTENT_DIR = "/home/datalayer"
 
 
 def _resolve_modal_gpu(gpu_flavor: str, modal_module: Any) -> Any:

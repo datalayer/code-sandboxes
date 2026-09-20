@@ -123,7 +123,7 @@ __all__ = ["DAYTONA_GPUS", "Builder", "daytona_gpu"]
 MOVING_TAGS = ("latest", "lts", "stable")
 
 _LOCK_PATH = "/opt/datalayer/lock.txt"
-_CONTENT_DIR = "/home/datalayer/content"
+_CONTENT_DIR = "/home/datalayer"
 
 #: A long-running PID 1 (§11.3 item 3, contract's "Entrypoint" and "Signals"
 #: rows): the Datalayer base bakes none of its own, and Daytona's own default
