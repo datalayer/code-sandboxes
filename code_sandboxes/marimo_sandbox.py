@@ -29,6 +29,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from .base import marks_execution
 from .jupyter_server_sandbox import JupyterServerSandbox
 from .marimo_reactive import (
     HELPER_NAME,
@@ -113,6 +114,16 @@ class MarimoSandbox(JupyterServerSandbox):
                 metadata={"variant": VARIANT, "reactive": "marimo"},
             )
         ]
+
+    def _do_interrupt(self) -> bool:
+        """Interrupt the kernel, which stops the cell running in it.
+
+        A reaction is a run of cells, one execute request each; interrupting
+        the kernel ends the current one with a `KeyboardInterrupt`, and
+        `run_cell` runs nothing downstream of a cell that failed — so one
+        interrupt stops the whole reaction, not just the cell it landed in.
+        """
+        return super()._do_interrupt()
 
     def _install_helper(self) -> None:
         """Put the graph in the kernel, installing marimo first if it is missing."""
@@ -227,6 +238,10 @@ class MarimoSandbox(JupyterServerSandbox):
             dependent_code = self._cells.get(dependent)
             if dependent_code is None:
                 continue
+            # An interrupt that landed between two cells: the kernel had
+            # nothing to stop, so honour it here instead of running on.
+            if self._interrupt_requested.is_set():
+                break
             dependent_result = self._plain_run(dependent_code, timeout=timeout, **handlers)
             run.reactions.append(
                 CellRun(cell_id=dependent, code=dependent_code, result=dependent_result)
@@ -235,6 +250,7 @@ class MarimoSandbox(JupyterServerSandbox):
                 break
         return run
 
+    @marks_execution
     def run_code(  # type: ignore[override]
         self,
         code: str,
@@ -251,6 +267,12 @@ class MarimoSandbox(JupyterServerSandbox):
 
         The cells it made re-run are on the result's ``marimo_reactions``
         (cell ids), so a caller that wants them can ask `cells` for their code.
+
+        The execution window is open for the whole run; each cell inside it
+        is a parent `run_code`, which closes the window on its way out and
+        the next cell reopens — `interrupt()` reaches the kernel whenever a
+        cell is actually running, and `run_cell` reads the request between
+        cells.
         """
         if language != "python":
             raise ValueError(f"MarimoSandbox only supports Python, got: {language}")

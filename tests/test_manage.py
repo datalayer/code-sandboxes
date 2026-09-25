@@ -42,6 +42,7 @@ def test_every_variant_has_a_manager():
         "google-colab",
         "jupyter-server",
         "kaggle",
+        "marimo",
         "modal",
         "monty",
     ]
