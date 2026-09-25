@@ -371,6 +371,24 @@ class GoogleColabSandboxManager(JupyterServerSandboxManager):
         return info
 
 
+class MarimoSandboxManager(JupyterServerSandboxManager):
+    """Kernels of a Jupyter Server, as a Marimo sandbox sees them.
+
+    A ``marimo`` sandbox is a kernel on a Jupyter Server that also holds
+    Marimo's reactive cell graph; the server does not tell those kernels
+    apart, so this manager is the ``jupyter-server`` one answering under the
+    variant it was asked for.
+    """
+
+    variant = "marimo"
+
+    def _info(self, kernel: dict) -> SandboxInfo:  # type: ignore[override]
+        info = super()._info(kernel)
+        info.variant = self.variant
+        info.metadata["reactive"] = "marimo"
+        return info
+
+
 class KaggleSandboxManager(SandboxManager):
     """The user's Kaggle kernels, through the official ``kaggle`` package.
 
@@ -1141,6 +1159,7 @@ _MANAGERS: dict[str, type[SandboxManager]] = {
     "jupyter-server": JupyterServerSandboxManager,
     "google-colab": GoogleColabSandboxManager,
     "kaggle": KaggleSandboxManager,
+    "marimo": MarimoSandboxManager,
     "modal": ModalSandboxManager,
     "daytona": DaytonaSandboxManager,
     "datalayer": DatalayerSandboxManager,
@@ -1163,7 +1182,7 @@ def get_manager(variant: str, **kwargs: Any) -> SandboxManager:
             ``google-colab``, ``google_colab`` and ``Google Colab`` all name
             the same one.
         **kwargs: Variant-specific connection settings — ``server_url`` /
-            ``token`` (jupyter), ``proxy_token`` (google-colab), ``app_name``
+            ``token`` (jupyter-server, marimo), ``proxy_token`` (google-colab), ``app_name``
             (modal), ``api_key`` / ``api_url`` / ``target`` (daytona),
             ``username`` (kaggle), ``token`` / ``run_url`` (datalayer),
             ``docker_client`` (docker).

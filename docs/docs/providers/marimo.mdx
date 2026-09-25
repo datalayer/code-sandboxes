@@ -1,0 +1,63 @@
+---
+sidebar_position: 11
+title: Marimo
+---
+
+# Marimo
+
+A Jupyter kernel with Marimo's reactivity in it. Marimo notebooks are
+reactive — running a cell re-runs every cell that depends on what it defined —
+and Marimo works that out from the cells' source, not from running them. A
+`marimo` sandbox is a [`jupyter-server`](./jupyter-server) sandbox whose kernel
+also holds Marimo's dataflow graph: the client stays `jupyter-kernel-client`
+and the Jupyter protocol, and the graph is driven through ordinary execute
+requests.
+
+- **Requirements:** the same as `jupyter-server`, plus `marimo` in the kernel's
+  environment. When it is missing, the sandbox installs it with pip at start;
+  pass `install_marimo=False` to refuse that and fail instead.
+- **Parameters:** those of `jupyter-server` (`server_url`, `token`,
+  `host`/`port`, `python_executable`), plus `install_marimo`.
+
+## Usage
+
+Cells have an id; running one runs the cells that read what it defines, in
+dependency order:
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="marimo") as sandbox:
+    sandbox.run_cell("a", "x = 1")
+    sandbox.run_cell("b", "y = x + 1\nprint(y)")   # prints 2
+    run = sandbox.run_cell("a", "x = 10")            # re-runs b: prints 11
+    run.reactions[0].cell_id                          # "b"
+```
+
+`run_cell` answers a `MarimoRun`: the cell's own `result`, its `registration`
+(the names it defines and reads, its conflicts, a cycle) and the `reactions`
+it caused, each a `CellRun`. A cell that fails stops the reaction — nothing
+downstream runs on a state the failure left half-made — and `react=False`
+runs the cell alone.
+
+The graph itself is available: `register_cell` puts a cell in it without
+running it, `remove_cell` takes it out, `plan(cell_id)` lists what would
+re-run, `graph()` snapshots every cell's names, neighbours, conflicts and
+cycles, and `cells` is the registered source by id.
+
+`run_code` keeps working as on every sandbox — each call is a cell of its own,
+so an agent that never heard of cells still gets a consistent state: what it
+ran earlier and that depends on what it just ran is run again. The ids of the
+cells that re-ran are on the result as `marimo_reactions`.
+
+The concrete implementation is available from a top-level module:
+
+```python
+from code_sandboxes.marimo_sandbox import MarimoSandbox
+```
+
+## Management
+
+`marimo` sandboxes are kernels on a Jupyter Server, which does not tell them
+apart from any other kernel; `get_manager("marimo")` is the `jupyter-server`
+manager answering under the `marimo` variant.

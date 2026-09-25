@@ -109,6 +109,7 @@ class SandboxVariant(str, Enum):
     GOOGLE_COLAB = "google-colab"
     JUPYTER = "jupyter-server"
     KAGGLE = "kaggle"
+    MARIMO = "marimo"
     MODAL = "modal"
     MONTY = "monty"
 
