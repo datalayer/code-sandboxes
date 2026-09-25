@@ -8,6 +8,20 @@
 
 ## Unreleased
 
+## 1.9.13
+
+- **`marimo` sandbox** (#34, #35): a Jupyter server sandbox whose kernel also
+  holds Marimo's dataflow graph. `run_cell(cell_id, code)` runs a cell, then
+  the cells that depend on what it defined, in dependency order; a failing
+  cell stops the reaction. `register_cell`, `remove_cell`, `plan`, `graph`
+  and `cells` expose the graph; `run_code` keeps working, each call a cell of
+  its own, with the re-run cell ids on the result as `marimo_reactions`. The
+  graph is Marimo's own (`marimo._runtime.dataflow`), installed into the
+  kernel by one execute request and asked over the Jupyter protocol; marimo
+  is pip-installed into a kernel that lacks it unless `install_marimo=False`.
+  `get_manager("marimo")` is the `jupyter-server` manager under the marimo
+  variant. The same helper source drives jupyter-react's `variant="marimo"`.
+
 ## 1.9.12
 
 - **`owner_repository`, `owner_cache_repository` and `ECR_ENVIRONMENT_PREFIX`
