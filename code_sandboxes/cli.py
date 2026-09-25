@@ -41,6 +41,7 @@ _SUPPORTED_RUN_VARIANTS = frozenset(
         "google-colab",
         "jupyter-server",
         "kaggle",
+        "marimo",
         "modal",
         "monty",
     }

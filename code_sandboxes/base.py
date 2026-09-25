@@ -534,6 +534,7 @@ class Sandbox(ABC):
                 - "eval": Simple Python exec() based, minimal isolation
                 - "docker": Docker container based (requires Docker)
                 - "jupyter-server": Jupyter Server with persistent kernel state
+                - "marimo": Jupyter Server whose kernel holds Marimo's reactive cell graph
                 - "datalayer": Cloud-based Datalayer runtime (default)
             config: Optional full configuration object (overrides individual params).
             timeout: Default timeout for code execution in seconds.
@@ -623,6 +624,10 @@ class Sandbox(ABC):
             from .jupyter_server_sandbox import JupyterServerSandbox
 
             sandbox = JupyterServerSandbox(config=config, **kwargs)
+        elif variant_value == "marimo":
+            from .marimo_sandbox import MarimoSandbox
+
+            sandbox = MarimoSandbox(config=config, **kwargs)
         elif variant_value == "datalayer":
             from .datalayer_sandbox import DatalayerSandbox
 
@@ -721,6 +726,10 @@ class Sandbox(ABC):
             from .jupyter_server_sandbox import JupyterServerSandbox
 
             return JupyterServerSandbox.list_environments()
+        if variant_value == "marimo":
+            from .marimo_sandbox import MarimoSandbox
+
+            return MarimoSandbox.list_environments()
         if variant_value == "monty":
             from .monty_sandbox import MontySandbox
 

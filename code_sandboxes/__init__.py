@@ -14,6 +14,7 @@ sandboxes (in-process execution):
 Remote sandboxes (out-of-process execution via Jupyter kernel protocol):
     - DockerSandbox: Docker container based, good isolation
     - JupyterServerSandbox: Jupyter Server with persistent kernel state
+    - MarimoSandbox: a Jupyter Server kernel holding Marimo's reactive cell graph
     - DatalayerSandbox: Cloud-based Datalayer runtime, full isolation
     - GoogleColabSandbox: Google Colab runtime, connects to an assigned kernel
     - KaggleSandbox: Kaggle runtime, connects to an interactive notebook kernel
@@ -156,6 +157,7 @@ from .manage import (
     get_manager,
     manageable_variants,
 )
+from .marimo_sandbox import CellRun, MarimoRun, MarimoSandbox
 from .modal_sandbox import ModalSandbox
 from .models import (
     CodeError,
@@ -202,6 +204,7 @@ __all__ = [
     "RUNTIMES_API_PREFIX",
     "BuildEntry",
     "BuiltArtifact",
+    "CellRun",
     "CloudflareSandbox",
     "CodeError",
     "CodeExecutionOutcome",
@@ -240,6 +243,8 @@ __all__ = [
     "Logs",
     "MIMEType",
     "ManifestLocation",
+    "MarimoRun",
+    "MarimoSandbox",
     "MaterializeEntry",
     "ModalSandbox",
     "MontySandbox",
