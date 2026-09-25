@@ -17,7 +17,7 @@ Use `Sandbox.create()` to create a new sandbox:
 
 Canonical variant names are `cloudflare`, `coreweave`, `datalayer`,
 `daytona`, `docker`, `e2b`, `eval`, `google-colab`, `jupyter-server`, `kaggle`,
-`modal`, and `monty`. Older `local-*` names are no longer supported.
+`marimo`, `modal`, and `monty`. Older `local-*` names are no longer supported.
 
 A name is read in whatever case and separator it arrives in: `google-colab`,
 `google_colab` and `GOOGLE_COLAB` all name the same variant. A space does not
@@ -78,6 +78,7 @@ Each page below explains how to configure each variant.
 | [`eval`](./eval) | In-process `exec()` for fast development-only runs |
 | [`google-colab`](./google-colab) | Google Colab runtime via runtime proxy |
 | [`jupyter-server`](./jupyter-server) | Jupyter kernel-backed execution with persistent state |
+| [`marimo`](./marimo) | A Jupyter kernel holding Marimo's reactive cell graph: running a cell re-runs what depends on it |
 | [`kaggle`](./kaggle) | Kaggle runtime (interactive or batch) |
 | [`modal`](./modal) | Modal container execution |
 | [`monty`](./monty) | Secure in-process Python subset via Monty |

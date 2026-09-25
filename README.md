@@ -25,6 +25,7 @@ Canonical variant names:
 - `google-colab`
 - `jupyter-server`
 - `kaggle`
+- `marimo`
 - `modal`
 - `monty`
 
