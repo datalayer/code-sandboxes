@@ -44,6 +44,12 @@ module.exports = {
         },
         {
           type: 'doc',
+          docId: 'provider-ingress/index',
+          position: 'left',
+          label: 'Provider Ingress',
+        },
+        {
+          type: 'doc',
           docId: 'install/index',
           position: 'left',
           label: 'Install',
