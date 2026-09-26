@@ -8,6 +8,29 @@
 
 ## Unreleased
 
+## 1.9.38
+
+- **The environments line and main are one branch again**: everything
+  released from `feat/env-custom` as 1.9.13 through 1.9.37 (custom
+  environments: resolve, build, attest, sign, the egress proxy, conda
+  artifacts, the contract's working directory) is on `main`, rebased onto
+  the marimo sandbox. The `1.9.13` entry below is what PyPI's 1.9.13 shipped;
+  main's own "1.9.13: the marimo sandbox" never reached PyPI (the version was
+  taken) and is this release instead:
+- **`marimo` sandbox** (#34, #35): a Jupyter server sandbox whose kernel also
+  holds Marimo's dataflow graph. `run_cell(cell_id, code)` runs a cell, then
+  the cells that depend on what it defined, in dependency order; a failing
+  cell stops the reaction. `register_cell`, `remove_cell`, `plan`, `graph`
+  and `cells` expose the graph; `run_code` keeps working, each call a cell of
+  its own, with the re-run cell ids on the result as `marimo_reactions`. The
+  graph is Marimo's own (`marimo._runtime.dataflow`), installed into the
+  kernel by one execute request and asked over the Jupyter protocol; marimo
+  is pip-installed into a kernel that lacks it unless `install_marimo=False`.
+  `get_manager("marimo")` is the `jupyter-server` manager under the marimo
+  variant. The same helper source drives jupyter-react's `variant="marimo"`.
+- Releases are cut by a `v*` tag now (`.github/workflows/release.yaml`,
+  trusted publishing); see RELEASE.md.
+
 ## 1.9.18
 
 - **A lock no longer carries a wall clock, so the build cache can hit**
