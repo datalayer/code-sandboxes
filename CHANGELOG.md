@@ -8,6 +8,26 @@
 
 ## Unreleased
 
+## 1.9.39
+
+- The GitHub workflow files are all `.yaml` now (`build`, `py-tests`,
+  `py-code-style`, `py-typing`, `reusable-python`, `environments-live`), the
+  spelling `release.yaml` already had; the reusable workflow's callers and
+  the contributing page follow.
+- **Marimo reactivity through the Jupyter-shaped API** (#37). `run_code`
+  names its cell through the execution context (`Context(id=...)`; the same
+  id replaces the cell) and the result says what happened: `cell_id`, and
+  `reactions` — every cell re-run because of it, each a `Reaction` with its
+  code and its own `ExecutionResult`. `CodeSandboxClient.execute`,
+  `execute_code` and `execute_code_streaming` take `cell_id`; a reply carries
+  the reactions under `marimo` with their own Jupyter-shaped outputs;
+  `execute_interactive` emits them after the cell's own, each message tagged
+  `metadata.marimo = {cell_id, reaction}`; the stream tags every event with
+  `marimo_cell_id`. The client passes `run_cell`, `register_cell`,
+  `remove_cell`, `plan`, `graph` and `cells` through to a reactive sandbox and
+  says so with `reactive`. The `marimo_reactions` extra attribute is replaced
+  by the typed `reactions` field. Nothing changes on the wire.
+
 ## 1.9.38
 
 - **The environments line and main are one branch again**: everything
@@ -337,7 +357,7 @@
   that `stop()` skipped entirely, orphaned for good. Fixed identically in
   `daytona_sandbox.py`, `modal_sandbox.py` and `e2b_sandbox.py`.
 - **A nightly live matrix for the three managed builders**
-  (`.github/workflows/environments-live.yml`, PLAN_ENV.md E2-11). Builds a
+  (`.github/workflows/environments-live.yaml`, PLAN_ENV.md E2-11). Builds a
   real artifact on each real provider from a real, hash-verified lock,
   launches a sandbox from it, and runs the formal core tier — opening (or
   commenting on) an issue naming the provider and the check on a genuine

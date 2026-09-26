@@ -179,7 +179,10 @@ def test_run_code_is_a_cell_of_its_own_and_reacts(sandbox):
     sandbox.run_code("print(base * 2)")
     result = sandbox.run_code("base = 7")
     assert result.code_error is None
-    assert getattr(result, "marimo_reactions", None) == ["cell-2"]
+    assert result.cell_id == "cell-3"
+    assert [reaction.cell_id for reaction in result.reactions] == ["cell-2"]
+    assert result.reactions[0].code == "print(base * 2)"
+    assert result.reactions[0].result.logs.stdout[-1].line == "14"
     assert sandbox.kernel_client.executed[-1] == "print(base * 2)"
 
 
@@ -207,3 +210,108 @@ def test_the_variant_is_known():
 
     assert normalize_variant(SandboxVariant.MARIMO) == "marimo"
     assert [env.name for env in Sandbox.list_environments("marimo")] == ["marimo"]
+
+
+# -- the Jupyter-shaped API carries the reactivity (code-sandboxes#37) --------
+
+
+def test_a_context_id_names_the_cell_and_the_same_id_replaces_it(sandbox):
+    from code_sandboxes.models import Context
+
+    first = sandbox.run_code("n = 1", context=Context(id="a"))
+    sandbox.run_code("print(n + 1)", context=Context(id="b"))
+    again = sandbox.run_code("n = 5", context=Context(id="a"))
+    assert first.cell_id == "a" and again.cell_id == "a"
+    assert sorted(sandbox.cells) == ["a", "b"]
+    assert [reaction.cell_id for reaction in again.reactions] == ["b"]
+    assert again.reactions[0].result.logs.stdout[-1].line == "6"
+
+
+def test_the_jupyter_shaped_reply_carries_the_reactions(sandbox):
+    from code_sandboxes import CodeSandboxClient
+
+    client = CodeSandboxClient(sandbox)
+    client.execute("n = 1", cell_id="a")
+    client.execute("print(n * 3)", cell_id="b")
+    reply = client.execute("n = 4", cell_id="a")
+    assert reply["status"] == "ok"
+    assert reply["marimo"]["cell_id"] == "a"
+    (reaction,) = reply["marimo"]["reactions"]
+    assert reaction["cell_id"] == "b" and reaction["status"] == "ok"
+    assert reaction["outputs"] == [{"output_type": "stream", "name": "stdout", "text": "12\n"}]
+
+
+def test_execute_interactive_tags_every_message_with_its_cell(sandbox):
+    from code_sandboxes import CodeSandboxClient
+
+    client = CodeSandboxClient(sandbox)
+    client.execute("n = 1", cell_id="a")
+    client.execute("print('b sees', n)", cell_id="b")
+    seen = []
+    client.execute_interactive("n = 2\nprint('a ran')", cell_id="a", output_hook=seen.append)
+    tags = [(m["metadata"]["marimo"]["cell_id"], m["metadata"]["marimo"]["reaction"]) for m in seen]
+    assert tags == [("a", False), ("b", True)]
+    assert seen[1]["content"]["text"] == "b sees 2\n"
+
+
+def test_streaming_yields_the_reactions_events_tagged(sandbox):
+    from code_sandboxes import CodeSandboxClient
+
+    client = CodeSandboxClient(sandbox)
+    client.execute("n = 1", cell_id="a")
+    client.execute("print(n)", cell_id="b")
+    events = list(client.execute_code_streaming("n = 9", cell_id="a"))
+    assert [(e.marimo_cell_id, e.marimo_reaction) for e in events] == [("b", True)]
+    assert events[0].line == "9"
+
+
+def test_a_failing_reaction_is_reported_not_hidden(sandbox):
+    from code_sandboxes import CodeSandboxClient
+
+    client = CodeSandboxClient(sandbox)
+    client.execute("n = 1", cell_id="a")
+    client.execute("assert n < 5", cell_id="b")
+    client.execute("print('after b')", cell_id="c")  # depends on nothing: never re-run
+    reply = client.execute("n = 10", cell_id="a")
+    assert reply["status"] == "ok"  # the cell itself ran
+    (reaction,) = reply["marimo"]["reactions"]
+    assert reaction["cell_id"] == "b" and reaction["status"] == "error"
+    assert reaction["outputs"][0]["output_type"] == "error"
+
+
+def test_the_client_offers_the_graph_to_a_reactive_sandbox_only(sandbox):
+    from code_sandboxes import CodeSandboxClient
+    from code_sandboxes.eval_sandbox import EvalSandbox
+
+    client = CodeSandboxClient(sandbox)
+    assert client.reactive is True
+    client.run_cell("a", "x = 1")
+    client.run_cell("b", "y = x")
+    assert client.plan("a") == ["b"]
+    assert set(client.graph()["cells"]) == {"a", "b"}
+    client.remove_cell("b")
+    assert client.cells == {"a": "x = 1"}
+
+    plain = CodeSandboxClient(EvalSandbox())
+    assert plain.reactive is False
+    with pytest.raises(TypeError, match="not reactive"):
+        plain.plan("a")
+
+
+def test_a_refused_cell_is_still_named_and_a_stopped_reaction_is_not_ok(sandbox):
+    from code_sandboxes import CodeSandboxClient, Reaction
+    from code_sandboxes.models import Context
+
+    refused = sandbox.run_code("def broken(:", context=Context(id="a"))
+    assert refused.cell_id == "a" and refused.code_error is not None
+    events = list(sandbox.run_code_streaming("def broken(:", context=Context(id="a")))
+    assert [e.marimo_cell_id for e in events] == ["a"]
+
+    client = CodeSandboxClient(sandbox)
+    client.execute("n = 1", cell_id="p")
+    client.execute("n\nraise SystemExit(3)", cell_id="q")  # reads n: a dependent
+    client.execute("print('r')", cell_id="r")  # depends on nothing
+    reply = client.execute("n = 2", cell_id="p")
+    (reaction,) = reply["marimo"]["reactions"]
+    assert reaction["cell_id"] == "q" and reaction["status"] == "error"
+    assert isinstance(Reaction, type)

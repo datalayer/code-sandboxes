@@ -18,6 +18,7 @@ requests.
   pass `install_marimo=False` to refuse that and fail instead.
 - **Parameters:** those of `jupyter-server` (`server_url`, `token`,
   `host`/`port`, `python_executable`), plus `install_marimo`.
+- **Language:** Python only; `run_code` refuses any other `language`.
 
 ## Usage
 
@@ -34,21 +35,117 @@ with Sandbox.create(variant="marimo") as sandbox:
     run.reactions[0].cell_id                          # "b"
 ```
 
-`run_cell` answers a `MarimoRun`: the cell's own `result`, its `registration`
-(the names it defines and reads, its conflicts, a cycle) and the `reactions`
-it caused, each a `CellRun`. A cell that fails stops the reaction — nothing
-downstream runs on a state the failure left half-made — and `react=False`
-runs the cell alone.
+`run_cell(cell_id, code, *, react=True, timeout=None)` answers a `MarimoRun`:
 
-The graph itself is available: `register_cell` puts a cell in it without
-running it, `remove_cell` takes it out, `plan(cell_id)` lists what would
-re-run, `graph()` snapshots every cell's names, neighbours, conflicts and
-cycles, and `cells` is the registered source by id.
+| Field | What it holds |
+|---|---|
+| `cell_id` | The cell that was asked for. |
+| `result` | The cell's own `ExecutionResult`, with `cell_id` set and `reactions` listing what it made re-run. |
+| `reactions` | The cells re-run because they depend on this one, in the order they ran, each a `CellRun` (`cell_id`, `code`, `result`). |
+| `registration` | The cell's names as the graph read them — `defs`, `refs`, `conflicts`, `cycle` — or its `error` when the source does not parse. |
+| `ok` | Whether the cell itself ran and raised nothing; the reactions have their own `result.success`. |
 
-`run_code` keeps working as on every sandbox — each call is a cell of its own,
-so an agent that never heard of cells still gets a consistent state: what it
-ran earlier and that depends on what it just ran is run again. The ids of the
-cells that re-ran are on the result as `marimo_reactions`.
+The output handlers of `run_code` (`on_stdout`, `on_stderr`, `on_result`,
+`on_error`) apply to the cell and to every reaction.
+
+### What re-runs, and when it stops
+
+- **A cell runs, then its descendants.** After the cell, every cell that
+  transitively reads a name it defines runs, in topological order
+  (`plan(cell_id)` is that list). A cell nobody reads from re-runs nothing.
+- **A failure stops the reaction.** A reaction that raises, is interrupted,
+  or whose execution fails stops the chain: nothing downstream runs on a
+  state the failure left half-made, which is what Marimo does too. The
+  failed reaction is reported in `reactions`, not hidden; the cells after it
+  are simply not there.
+- **A cell that fails re-runs nothing.** When the cell itself raises, its
+  dependents are left as they were.
+- **`interrupt()` is honoured between cells.** The kernel stops the cell
+  that is running; a request that lands between two reactions stops the
+  chain before the next one.
+- **`react=False` runs the cell alone**, registering it all the same, so its
+  dependents are stale until they run.
+
+### What the graph refuses, and what it only reports
+
+Registration is Marimo's own compiler (`marimo._ast.compiler.compile_cell`),
+so a cell's `defs` and `refs` are what Marimo would compute for it.
+
+- **Source that does not parse is refused before running.** `registration`
+  holds `{"cell": id, "error": "SyntaxError: … (line n)"}`, the run's
+  `result.code_error` is that `SyntaxError`, and nothing was executed. The
+  cell is not in the graph.
+- **A name defined by two cells is reported, not refused.** Marimo's editor
+  refuses such a notebook; here the cell registers, runs, and its
+  `registration["conflicts"]` names the shared definitions (`graph()` lists
+  them all under `conflicts`). Both definers count as parents of whatever
+  reads the name, so running either re-runs it.
+- **A cycle is reported, not refused.** Two cells each reading what the other
+  defines register with `registration["cycle"] = True` (and under `cycles`
+  in `graph()`). Leave a cycle in the graph and the plan through it is not
+  well defined; remove or rewrite one side.
+- **Only registered cells take part.** Code run by another means — a plain
+  execute request from another client, or the `envs` prelude — changes the
+  namespace without the graph knowing; nothing re-runs for it.
+
+### The graph itself
+
+| Call | Answers |
+|---|---|
+| `register_cell(cell_id, code)` | Puts the cell in the graph without running it; answers its registration (the same id again replaces the cell). |
+| `remove_cell(cell_id)` | Takes the cell out; its dependents lose that parent and nothing is re-run. |
+| `plan(cell_id)` | The cells that would re-run after `cell_id`, in order; `[]` for a cell that is not registered. |
+| `graph()` | Every cell's `defs`, `refs`, `parents` and `children`, plus the graph's `conflicts` and `cycles`. |
+| `cells` | The registered cells' source, by id. |
+
+## Through the Jupyter-shaped API
+
+`run_code` keeps working as on every sandbox, and it is reactive too. Name the
+cell through the execution context — `Context(id="a")` — and the same id again
+replaces that cell rather than adding a second; leave it out (or pass the
+default context) and each call is a cell of its own, named `cell-1`, `cell-2`,
+…, so an agent that never heard of cells still gets a consistent state: what
+it ran earlier and that depends on what it just ran is run again.
+
+The result says what happened: `cell_id` is the cell it ran as, and
+`reactions` lists every cell re-run because of it, in the order they ran, each
+a `Reaction` with the cell's `code` and its own `ExecutionResult`. A reaction
+that fails stops the chain and is reported, not hidden. On every other
+variant `cell_id` is `None` and `reactions` is empty.
+
+`run_code_streaming` yields the cell's events, then each reaction's, in the
+order the base streaming yields them (stdout, stderr, results, then the
+error). Every event carries `marimo_cell_id` (the cell it came from) and
+`marimo_reaction` (`False` for the cell that was run, `True` for a cell re-run
+because of it), so a consumer that reads the stream as a Jupyter client does
+can still tell the cells apart.
+
+`CodeSandboxClient` carries the same through the Jupyter protocol, so a
+consumer that only reads replies and streams loses nothing:
+
+```python
+from code_sandboxes import CodeSandboxClient
+
+client = CodeSandboxClient.create(variant="marimo")
+client.execute("n = 1", cell_id="a")
+client.execute("print(n * 3)", cell_id="b")
+reply = client.execute("n = 4", cell_id="a")
+reply["marimo"]["cell_id"]                       # "a"
+reply["marimo"]["reactions"][0]["cell_id"]       # "b"
+reply["marimo"]["reactions"][0]["outputs"]       # [{"output_type": "stream", ..., "text": "12\n"}]
+```
+
+- `execute`, `execute_code` and `execute_code_streaming` take `cell_id`; a
+  reply from a reactive sandbox carries `marimo` — the `cell_id` it ran as
+  and the `reactions`, each with its own Jupyter-shaped `outputs`, `status`
+  (`"ok"` only when the reaction succeeded) and `execution_count`.
+- `execute_interactive` emits the reactions' outputs after the cell's own,
+  every message tagged `metadata.marimo = {cell_id, reaction}` — the way a
+  kernel's IOPub messages carry their parent — so a client routes each output
+  to the cell it belongs to.
+- `client.reactive` says whether the sandbox keeps a graph, and `run_cell`,
+  `register_cell`, `remove_cell`, `plan`, `graph` and `cells` pass through to
+  it; on any other variant they raise `TypeError`.
 
 The concrete implementation is available from a top-level module:
 
@@ -56,8 +153,78 @@ The concrete implementation is available from a top-level module:
 from code_sandboxes.marimo_sandbox import MarimoSandbox
 ```
 
+## Reactive cells on any sandbox: `MarimoCells`
+
+The graph needs nothing of a kernel but execute requests and stdout, so it
+does not have to be the `marimo` variant's. `MarimoCells` is the same
+reactivity as a *driver* over any `CodeSandboxClient` — a Datalayer runtime,
+a Kaggle kernel, a sandbox somebody else launched — through the client's
+Jupyter-shaped `execute`:
+
+```python
+from code_sandboxes import CodeSandboxClient, MarimoCells
+
+client = CodeSandboxClient.create(variant="datalayer", environment="python-cpu-env")
+cells = MarimoCells(client)            # install_marimo=True, timeout=None
+cells.run_cell("a", "x = 1")
+run = cells.run_cell("b", "print(x)")
+cells.run_cell("a", "x = 2").reactions[0].cell_id    # "b", re-run
+```
+
+- `install()` puts the helper in the kernel the first time it is needed:
+  it probes `import marimo`, installs marimo with pip when it is missing
+  (`install_marimo=False` raises instead), sends the helper source as one
+  execute request, and reads back the cells the kernel already holds. It is
+  idempotent, and every other call makes it first.
+- `run_cell(cell_id, code, *, react=True, timeout=None)` answers a
+  `CellsRun`: the `cell` (a `CellReply` — `cell_id`, `code`, the reply, `ok`,
+  `outputs`), the `reactions` (each a `CellReply`), the `registration`, and
+  `ok`. The rules are the sandbox's: a refused cell never runs, a failed
+  reaction stops the chain. `to_dict()` is the run as plain data — `cell_id`,
+  `status`, `outputs`, `registration`, `reactions` — the shape a tool answers
+  with.
+- `run_code(code)` is a cell of its own, `cell-1`, `cell-2`, ….
+- `register_cell`, `remove_cell`, `plan`, `graph` and `cells` are the
+  sandbox's, over the client.
+- **The graph lives in the kernel, not in the driver.** A second driver made
+  on the same sandbox — another replica answering the same session, say —
+  reads the registered cells back at `install()` and continues them. On a
+  client whose sandbox *is* a `MarimoSandbox`, both see one graph.
+
+This is what an MCP toolset uses to give an agent reactive cells on the
+sandbox its session already holds (the Datalayer MCP Server's `marimo`
+toolset, code-sandboxes#37).
+
+## How it works
+
+- **One helper, sent as source.** `code_sandboxes.marimo_reactive` holds the
+  source of a small class, `_MarimoReactive`, that keeps a Marimo dataflow
+  graph (`marimo._runtime.dataflow.DirectedGraph`) beside the kernel's
+  namespace. A `marimo` sandbox sends it as one execute request at `start()`;
+  a driver sends it at `install()`. It binds itself to `__marimo_reactive__`
+  and is not replaced when it is already there, which is what keeps the
+  graph across drivers.
+- **Questions are execute requests; answers are one stdout line.** Every
+  graph call — `register`, `remove`, `plan`, `snapshot`, `codes` — is
+  `__marimo_reactive__.answer("plan", "a")` sent as code; the helper prints
+  `__MARIMO__` followed by the answer as base64 JSON, and the caller decodes
+  the stream messages it already reads. Nothing on the wire is new, which is
+  what keeps `jupyter-kernel-client` the client API.
+- **Running is running.** A cell's execution is the ordinary `run_code` of
+  the `jupyter-server` sandbox — the same kernel, the same namespace, the
+  same output messages — and a reaction is another one. The order comes from
+  the graph; the results come from the kernel.
+- **The same source runs in three places.** The package executes the helper
+  source at import time too, so its tests exercise exactly the code the
+  kernel runs and `local_helper()` answers graph questions without a kernel;
+  and `@datalayer/jupyter-react` carries the source verbatim
+  (`jupyter/marimo/reactive.ts`) for the browser-side components. Keep the
+  copies identical.
+
 ## Management
 
 `marimo` sandboxes are kernels on a Jupyter Server, which does not tell them
 apart from any other kernel; `get_manager("marimo")` is the `jupyter-server`
-manager answering under the `marimo` variant.
+manager answering under the `marimo` variant. A sandbox's `info.variant` is
+`marimo` and its `info.metadata["reactive"]` is `"marimo"`, which is how a
+client tells a reactive sandbox from a plain kernel.
