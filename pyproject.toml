@@ -26,6 +26,7 @@ dependencies = [
   "jupyter-server",
   "jupyter-server-client",
   "pydantic>=2.0",
+  "pyyaml",
   "rich",
   "typer>=0.12.0",
 ]
@@ -39,7 +40,7 @@ code-sandboxes = "code_sandboxes.cli:main"
 # needs where it RUNS — inside a sandbox image that exposes /dev/fuse. The
 # host side needs none of it.
 # `datalayer-core` carries the frame protocol both ends speak.
-bridge = ["datalayer-core>=1.1.65", "fusepy>=3.0", "websockets>=12"]
+bridge = ["datalayer-core>=1.2.12", "fusepy>=3.0", "websockets>=12"]
 cloudflare = ["httpx>=0.27"]
 # What the Datalayer Environment builder needs where it RUNS — the durable
 # worker (PLAN_ENV.md E1-07): the ECR API for the owner's repository, the
@@ -47,7 +48,7 @@ cloudflare = ["httpx>=0.27"]
 # `buildctl` is a binary in that image, not a package.
 environments-builder = ["boto3>=1.34", "httpx>=0.27"]
 coreweave = ["cwsandbox>=1.6"]
-datalayer = ["agent_runtimes>=1.0.16"]
+datalayer = ["agent_runtimes>=1.3.13"]
 daytona = ["daytona>=0.205.1"]
 docker = ["docker>=6.0"]
 e2b = ["e2b-code-interpreter>=2.9.1"]
@@ -75,7 +76,7 @@ test = [
   "pytest-cov>=4.0",
 ]
 lint = ["mdformat>0.7", "mdformat-gfm>=0.3.5", "ruff"]
-typing = ["mypy>=0.990"]
+typing = ["mypy>=0.990", "types-PyYAML"]
 
 [project.license]
 file = "LICENSE"
@@ -104,6 +105,10 @@ filterwarnings = [
   # use of the client in a test became an exception. It took the live matrix
   # against a real Datalayer sandbox down before the sandbox was reached.
   "module:Datalayer is migrating its paths to use standard platformdirs:DeprecationWarning",
+  # The Daytona SDK (0.205) reads its own deprecated `DaytonaConfig.server_url`
+  # inside `Daytona(config)`: with `error` in force, every live Daytona test
+  # failed before reaching Daytona, and a nightly that skipped hid it.
+  "ignore:`server_url` is deprecated:DeprecationWarning",
 ]
 
 [tool.mypy]

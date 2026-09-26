@@ -69,27 +69,24 @@ would make an artifact refuse to build for a reason that says nothing about
 what it does once actually launched. A real answer needs a launched
 sandbox, which is a smoke test's job (E1-14), not this builder's.
 
-**GPU classes are not built here.** `gpu = True` on this builder is a true
-capability (Daytona's own hardware runs one, D-20), and `validate` leaves a
-GPU size class buildable rather than refusing it — the constraint table of
-section 6 has nothing against it, and an existing test
-(`test_a_gpu_spec_is_buildable_on_modal_and_daytona`) already pins that
-answer. What actually stops a GPU build today is upstream: the CUDA base
-channel is E2-17's to publish, and `bases.py` has no digest to resolve
-`python-cuda` to yet, so a `BuildRequest` for one cannot be constructed in
-practice. `build()` itself still guards it explicitly, refusing plainly
-rather than baking an unsourced guess at a GPU type and count into a
-snapshot, in case that ever changes before the real numbers do (section 11.3
-item 7).
+**A GPU is baked into the snapshot** (E2-17, D-20), from the spec's own
+`resources.accelerator`: its `type` is one of Daytona's GPUs, checked at
+`validate` so a GPU Daytona does not offer is refused before any build, and
+its `count` is the number of them. CPU and memory come from the spec's hints,
+or Daytona's own default for that GPU; the disk from the hints, or enough for
+the CUDA base. A sandbox of a GPU snapshot is ephemeral, which Daytona
+requires of every GPU sandbox (`DaytonaSandbox` reads the snapshot's `gpu`).
 
 @module code_sandboxes.environments.adapters.daytona
 """
 
 from __future__ import annotations
 
+import contextlib
+import shlex
 import tempfile
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -99,8 +96,9 @@ from ..builders import (
     ArtifactReference,
     BuildRequest,
     CapabilityFinding,
+    ValidationResult,
 )
-from ..contract import SANDBOX_CONTRACT_V1
+from ..contract import SANDBOX_CONTRACT_V1, pin_dockerfile_base
 from ..errors import (
     ARTIFACT_MISSING,
     BUILD_FAILED,
@@ -110,16 +108,22 @@ from ..errors import (
 )
 from ..files import files_step
 from ..resolve import WHEELHOUSE_IMAGE_PATH, apt_pins_in
-from ..spec import GPU_SIZE_CLASSES, Environment
+from ..resolve_conda import (
+    conda_lock_pip_requirements,
+    is_conda_lock,
+    micromamba_bootstrap_command,
+    micromamba_install_command,
+)
+from ..spec import GPU_SIZE_CLASSES, Environment, EnvironmentSpec
 from .managed import ManagedBuilder
 
-__all__ = ["Builder"]
+__all__ = ["DAYTONA_GPUS", "Builder", "daytona_gpu"]
 
 #: Tags Daytona refuses for a snapshot's source image: each moves.
 MOVING_TAGS = ("latest", "lts", "stable")
 
 _LOCK_PATH = "/opt/datalayer/lock.txt"
-_CONTENT_DIR = "/home/datalayer/content"
+_CONTENT_DIR = "/home/datalayer"
 
 #: A long-running PID 1 (§11.3 item 3, contract's "Entrypoint" and "Signals"
 #: rows): the Datalayer base bakes none of its own, and Daytona's own default
@@ -138,6 +142,44 @@ _CPU_RESOURCES: dict[str, dict[str, int]] = {
     "medium": {"cpu": 4, "memory": 8, "disk": 20},
     "large": {"cpu": 8, "memory": 16, "disk": 40},
 }
+
+
+#: The GPUs Daytona offers, as its SDK's `GpuType` names them (E2-17). Spelled
+#: out rather than read from the SDK, because `validate` runs where the SDK may
+#: not be installed; a test holds the two together.
+DAYTONA_GPUS: tuple[str, ...] = ("H100", "H200", "RTX-PRO-6000", "RTX-4090", "RTX-5090")
+
+#: A GPU snapshot's disk when the spec gives no hint: the CUDA base alone is
+#: about 15 GB, and Daytona's own default would not hold it with room to work.
+_GPU_DISK_GI = 50
+
+
+def daytona_gpu(accelerator_type: str) -> str | None:
+    """Daytona's name for an accelerator type, or `None` when Daytona has no such GPU.
+
+    `h100`, `H100` and `rtx_4090` name what Daytona calls `H100` and
+    `RTX-4090`; a `T4` or an `A100-80GB` is Modal's vocabulary, not Daytona's.
+    """
+    name = accelerator_type.strip().upper().replace("_", "-")
+    return name if name in DAYTONA_GPUS else None
+
+
+def _snapshot_name(request: BuildRequest) -> str:
+    """The name a build gives its snapshot, unique to the build (its uid is in it)."""
+    return f"dl-{request.environment.metadata.name}-v{request.version}-{request.build_uid}"
+
+
+def _pip_lock_command(*, authored: bool) -> str:
+    """Install the pip lock: `sync` to it, or `install` it over an authored Dockerfile.
+
+    `sync` would remove what the Dockerfile installed and the lock does not
+    name (E3-03, `DOCKERFILE_COVERAGE`).
+    """
+    verb, target = ("install", "-r ") if authored else ("sync", "")
+    return (
+        f"uv pip {verb} --system --require-hashes "
+        f"--find-links {WHEELHOUSE_IMAGE_PATH} {target}{_LOCK_PATH}"
+    )
 
 
 def _daytona_sdk() -> Any:
@@ -171,8 +213,20 @@ class Builder(ManagedBuilder):
     variant = "daytona"
     item = "E2-04"
     title = "Daytona"
-    #: Daytona runs GPUs, on its own hardware and the owner's account (E2-17).
-    #: This builder does not build one yet: see `_own_findings`.
+    #: A `packages` list, or a dependency file: a conda `environment.yml`
+    #: installed with `micromamba` (E3-02), and a `requirements.txt` or a
+    #: `pyproject.toml` with its lock (E3-01), both of which resolve to the
+    #: very pip lock a `packages` list does — `build` tells a conda lock from
+    #: a pip one and nothing finer, so nothing here is format-specific.
+    build_sources = ("packages", "dependencyFile", "dockerfile")
+    #: None beyond the contract's own (E3-03): `Image.from_dockerfile` keeps
+    #: the Dockerfile text as it is and Daytona builds it on a real Docker
+    #: builder, so the grammar it accepts is Docker's. Checked in the SDK on
+    #: 2026-09-17.
+    forbidden_instructions = ()
+    dependency_formats = ("requirements", "pyproject", "conda")
+    #: Daytona runs GPUs, on its own hardware and the owner's account (E2-17),
+    #: baked into the snapshot with the rest of its resources.
     gpu = True
     #: E0-04's spike found only a registry login for the private base, never
     #: a per-step arbitrary named secret (E3-05): `buildSecrets` is refused.
@@ -197,6 +251,9 @@ class Builder(ManagedBuilder):
         self._daytona_sdk = daytona_sdk or _daytona_sdk
         self._registry_sdk = registry_sdk or _daytona_registry_sdk
         self._client_instance: Any = None
+        #: The builds `cancel` was asked to stop: one whose snapshot is only
+        #: finished after the cancel deletes it itself (E2-18).
+        self._cancelled: set[str] = set()
 
     def _provider_secrets(self) -> dict[str, str]:
         """The owner's Daytona secrets the build credential carries (D-8, E2-01).
@@ -267,15 +324,7 @@ class Builder(ManagedBuilder):
                     field="spec.compatibility.regions",
                 )
             )
-        # A GPU class is left buildable here on purpose (`gpu = True`,
-        # D-20): the CUDA base E2-17 has not published yet, so a GPU
-        # `BuildRequest` cannot reach `build()` in practice — `bases.py`'s
-        # own resolver has no digest to resolve `python-cuda` to, and
-        # refuses first. `build()` itself still guards it explicitly (see
-        # its own docstring), so a spec that somehow got a `resolved_base`
-        # anyway is refused plainly rather than baking an unsourced guess
-        # at a GPU type and count into a snapshot.
-        #
+        findings.extend(self._accelerator_findings(environment.spec))
         # `spec.buildSecrets` needs no check of its own here: `supports_build_secrets
         # = False` above (E3-05, merged since this branch started) makes
         # `ManagedBuilder._own_findings` refuse it before this method is
@@ -297,21 +346,9 @@ class Builder(ManagedBuilder):
         (E0-04).
         """
         spec = request.environment.spec
-        if request.size_class in GPU_SIZE_CLASSES:
-            # `validate` leaves a GPU class buildable (`gpu = True`, D-20):
-            # `bases.py` has no CUDA digest to resolve yet, so this cannot
-            # be reached in practice — refused plainly here rather than
-            # baking an unsourced guess at a GPU type and count into a
-            # snapshot (E2-17 is what will give this real numbers).
-            raise EnvironmentsError(
-                CAPABILITY_UNSUPPORTED,
-                f"Daytona runs `{request.size_class}` on its own GPUs, but the CUDA base "
-                "and the GPU resource shape this needs are E2-17's, not built yet",
-                detail={"variant": self.variant, "missing": "E2-17"},
-            )
         sdk = self._daytona_sdk()
         client = self._client(sdk)
-        name = f"dl-{request.environment.metadata.name}-v{request.version}-{request.build_uid}"
+        name = _snapshot_name(request)
 
         registry_id = self._register_base_pull(client, request.resolved_base)
         try:
@@ -319,7 +356,8 @@ class Builder(ManagedBuilder):
                 lock_file = Path(scratch) / "lock.txt"
                 lock_file.write_text(request.lock_text, encoding="utf-8")
 
-                image = sdk.Image.base(request.resolved_base)
+                authored = spec.build.dockerfile if spec.build.source == "dockerfile" else None
+                image = self._starting_image(sdk, request, authored, Path(scratch))
                 # `env` before anything installs, the same order the
                 # Datalayer and E2B builders keep: a package that compiles
                 # against a library found through an env var behaves
@@ -343,28 +381,38 @@ class Builder(ManagedBuilder):
                 # wheelhouse again would only duplicate what `uv pip sync`
                 # can already reach at `WHEELHOUSE_IMAGE_PATH`. Only the
                 # lock is genuinely per-build.
-                image = (
-                    image.add_local_file(str(lock_file), _LOCK_PATH)
+                image = image.add_local_file(str(lock_file), _LOCK_PATH)
+                if is_conda_lock(request.lock_text):
+                    # A conda source (E3-02): `micromamba install --file`
+                    # reads the `@EXPLICIT` lock without re-solving, and the
+                    # pip layer the solve resolved — the user's pip
+                    # requirements and the protected pins over them — comes
+                    # from the lock's own `# datalayer-pip:` header, so the
+                    # kernel stack (E1-04) and everything the solve installed is
+                    # present the same as for a pip source. micromamba is
+                    # installed first: the approved base bakes uv but not it.
+                    image = image.run_commands(micromamba_bootstrap_command())
+                    image = image.run_commands(micromamba_install_command(_LOCK_PATH))
+                    pip_requirements = conda_lock_pip_requirements(request.lock_text)
+                    if pip_requirements:
+                        requirements = " ".join(shlex.quote(req) for req in pip_requirements)
+                        image = image.run_commands(
+                            "pip install --no-cache-dir "
+                            f"--find-links {WHEELHOUSE_IMAGE_PATH} {requirements}"
+                        )
+                else:
                     # `uv` is not installed here: the approved base already
                     # bakes it (E1-05, `resolve.py`'s own `bootstrap_uv`
                     # docstring — "an approved Datalayer base already has it
-                    # baked in"), and this phase's `build_sources` is
-                    # `("packages",)` only, so every build starts from that
-                    # base. Reinstalling it added an extra un-hashed network
-                    # fetch outside the resolved lock for no reason (found in
-                    # review) — matching the Datalayer builder's own
-                    # `dockerfile()`, which installs `uv` only for the
-                    # `image` source, not implemented for this variant yet.
+                    # baked in"). Reinstalling it added an extra un-hashed
+                    # network fetch outside the resolved lock for no reason
+                    # (found in review).
                     #
                     # Packages install as root, the same reason the
                     # Datalayer and E2B builders give: a user install lands
                     # under the content directory's own home, which the
                     # runtime mounts over.
-                    .run_commands(
-                        "uv pip sync --system --require-hashes "
-                        f"--find-links {WHEELHOUSE_IMAGE_PATH} {_LOCK_PATH}"
-                    )
-                )
+                    image = image.run_commands(_pip_lock_command(authored=authored is not None))
                 image = image.dockerfile_commands([f"USER 1000:100\nWORKDIR {_CONTENT_DIR}"])
                 for command in files_step(request.environment, variant=self.variant):
                     image = image.run_commands(command)
@@ -393,7 +441,12 @@ class Builder(ManagedBuilder):
                     logged.append(line)
                     self._log(line)
 
-                resources = self._resources(sdk, request.size_class)
+                resources = self._resources(sdk, request.size_class, spec)
+                # A snapshot is region-scoped, and the region that scopes it is
+                # Daytona's, not this platform's. `validate` already refuses
+                # more than one, so the first is the only one.
+                declared = list(request.environment.spec.compatibility.regions)
+                region = declared[0] if declared else None
                 try:
                     snapshot = client.snapshot.create(
                         sdk.CreateSnapshotParams(
@@ -401,12 +454,24 @@ class Builder(ManagedBuilder):
                             image=image,
                             resources=resources,
                             entrypoint=_CONTRACT_ENTRYPOINT,
-                            region_id=request.region,
+                            # Only a region Daytona knows. `request.region` is
+                            # *Datalayer's* — `r1` — and sending it answered
+                            # "Region not found" on the first real Daytona
+                            # build (2026-09-17). The owner names a Daytona
+                            # region in `compatibility.regions`; with none,
+                            # the field is left out and the account's own
+                            # default decides, which is what every snapshot
+                            # in the owner's account already has.
+                            **({"region_id": region} if region else {}),
                         ),
                         on_logs=on_logs,
                         timeout=self.max_build_seconds,
                     )
                 except Exception as error:
+                    # Daytona keeps a snapshot that failed, in `error`, under
+                    # the build's own name: one over its size limit was left
+                    # there (E2-17, 2026-09-18). Nothing records it, so it goes.
+                    self._discard_named(sdk, client, name)
                     raise EnvironmentsError(
                         BUILD_FAILED,
                         f"The Daytona build failed: {error}",
@@ -417,6 +482,17 @@ class Builder(ManagedBuilder):
             # not control, whether the build above succeeded or not (D-18).
             self._unregister_base_pull(client, registry_id)
 
+        if request.build_uid in self._cancelled:
+            # Finished after the build was cancelled: nothing will record it,
+            # so it goes now rather than wait in the account for nobody.
+            self._log(f"The build was cancelled: deleting the snapshot {snapshot.id} it made")
+            with contextlib.suppress(EnvironmentsError):
+                self._delete_by_id(sdk, client, snapshot.id)
+            raise EnvironmentsError(
+                BUILD_FAILED,
+                "The build was cancelled, and the snapshot it made was deleted",
+                detail={"variant": self.variant, "name": name},
+            )
         return ArtifactReference(
             variant=self.variant,
             immutable_reference=snapshot.id,
@@ -431,10 +507,57 @@ class Builder(ManagedBuilder):
             contract_version=spec.contract or SANDBOX_CONTRACT_V1.version,
         )
 
-    def _resources(self, sdk: Any, size_class: str) -> Any:
-        """The CPU resources a size class bakes into the snapshot (§11.3 item 4)."""
-        shape = _CPU_RESOURCES.get(size_class, _CPU_RESOURCES["small"])
-        return sdk.Resources(cpu=shape["cpu"], memory=shape["memory"], disk=shape["disk"])
+    @staticmethod
+    def _starting_image(sdk: Any, request: BuildRequest, authored: Any, scratch: Path) -> Any:
+        """The image the chain starts from: the base, or the author's Dockerfile on it.
+
+        A Dockerfile source (E3-03) starts from the author's own Dockerfile,
+        its base pinned to the digest the resolver chose — which is also what
+        the build's registry entry lets Daytona pull. The contract's steps are
+        chained after it either way.
+        """
+        if authored is None:
+            return sdk.Image.base(request.resolved_base)
+        dockerfile = scratch / "Dockerfile"
+        dockerfile.write_text(
+            pin_dockerfile_base(authored.content, request.resolved_base), encoding="utf-8"
+        )
+        return sdk.Image.from_dockerfile(str(dockerfile))
+
+    @staticmethod
+    def _accelerator_findings(spec: EnvironmentSpec) -> list[CapabilityFinding]:
+        """A GPU Daytona does not offer, refused before any build (E2-17)."""
+        accelerator = spec.resources.accelerator
+        if accelerator == "none" or daytona_gpu(accelerator.type):
+            return []
+        return [
+            CapabilityFinding(
+                code="DL_ENV_CAPABILITY_UNSUPPORTED",
+                message=(
+                    f"Daytona has no GPU called `{accelerator.type}`; it offers "
+                    + ", ".join(DAYTONA_GPUS)
+                ),
+                field="spec.resources.accelerator.type",
+            )
+        ]
+
+    def _resources(self, sdk: Any, size_class: str, spec: EnvironmentSpec) -> Any:
+        """What the snapshot bakes in: a class's CPU, or the spec's GPU (§11.3 item 4, E2-17)."""
+        accelerator = spec.resources.accelerator
+        if size_class not in GPU_SIZE_CLASSES or accelerator == "none":
+            shape = _CPU_RESOURCES.get(size_class, _CPU_RESOURCES["small"])
+            return sdk.Resources(cpu=shape["cpu"], memory=shape["memory"], disk=shape["disk"])
+        # D-4 gives the GPU classes no CPU or memory of their own (E4-11 has
+        # them, for Datalayer's nodes): the GPU is what the class is for, and
+        # Daytona sizes the rest of the machine for it unless the spec hints.
+        hints = spec.resources.hints
+        return sdk.Resources(
+            cpu=round(hints.cpu) if hints.cpu else None,
+            memory=round(hints.memory_gi) if hints.memory_gi else None,
+            disk=round(hints.disk_gi) if hints.disk_gi else _GPU_DISK_GI,
+            gpu=accelerator.count,
+            gpu_type=sdk.GpuType(daytona_gpu(accelerator.type)),
+        )
 
     def _register_base_pull(self, client: Any, resolved_base: str) -> str | None:
         """A private registry entry for this build's base pull (D-17, D-18).
@@ -523,6 +646,156 @@ class Builder(ManagedBuilder):
         except Exception as error:
             raise self._provider_error("ask whether the snapshot exists", error) from error
         return True
+
+    def delete(self, artifact: ArtifactReference) -> None:
+        """Remove the snapshot, by id; one already gone is removed (E2-18).
+
+        Deleting what is gone is a success because the collector deletes
+        first and marks second (E1-17): a sweep that died between the two
+        deletes again tomorrow, and must not be refused for having worked.
+
+        **By id, never by name.** The SDK takes either, and a name is reused
+        once its snapshot is deleted (E0-04) — deleting by name could remove
+        a later build's snapshot that inherited it.
+        """
+        sdk = self._daytona_sdk()
+        self._delete_by_id(
+            sdk, self._client(sdk), artifact.provider_artifact_id or artifact.immutable_reference
+        )
+
+    def _delete_by_id(self, sdk: Any, client: Any, snapshot: str) -> None:
+        try:
+            client.snapshot.delete(snapshot)
+        except sdk.DaytonaNotFoundError:
+            self._log(f"The Daytona snapshot {snapshot} was already gone")
+            return
+        except Exception as error:
+            raise self._provider_error("delete the snapshot", error) from error
+        self._log(f"Deleted the Daytona snapshot {snapshot}")
+
+    def cancel(self, request: BuildRequest) -> None:
+        """Stop a build: delete the snapshot it is making, now or once it is made (E2-18).
+
+        The build step calls this when the build is cancelled, and then lets
+        the build's own thread finish unheard, so a snapshot Daytona goes on
+        building is recorded by nobody. It is found by the name this build
+        gave it, which is unique to the build (the build uid is in it), and
+        deleted by its id. One not made yet is deleted by `build` itself, the
+        moment Daytona hands it back.
+        """
+        self._cancelled.add(request.build_uid)
+        sdk = self._daytona_sdk()
+        client = self._client(sdk)
+        self._discard_named(sdk, client, _snapshot_name(request))
+
+    def _discard_named(self, sdk: Any, client: Any, name: str) -> None:
+        """Delete, by its id, the snapshot this build named, when Daytona has one.
+
+        A build's name is its own (the build uid is in it), so looking it up
+        by name cannot find another build's. Never a second reason to fail:
+        what could not be deleted is said in the log.
+        """
+        try:
+            snapshot = client.snapshot.get(name)
+        except Exception:
+            return
+        self._log(f"Deleting the snapshot {snapshot.id} this build made, which nothing records")
+        try:
+            self._delete_by_id(sdk, client, snapshot.id)
+        except EnvironmentsError as error:
+            self._log(f"The snapshot {snapshot.id} could not be deleted: {error.message}")
+
+    def smoke_test(
+        self,
+        artifact: ArtifactReference,
+        *,
+        environment: Any = None,
+        lock_text: str | None = None,
+        secret_values: Sequence[str] = (),
+    ) -> ValidationResult:
+        """Launch the snapshot and run Appendix B's core tier in it (E2-04).
+
+        This box's own `Done when` asks for exactly this — "a sandbox launched
+        from its id passes the core tier" — and until 2026-09-17 it refused
+        through `ManagedBuilder`, so **no Daytona build could reach
+        `succeeded`**: the workflow calls this step, the snapshot was built and
+        live at the provider, and the build was recorded failed.
+
+        **Launched by id, never by name** (E0-04): a Daytona sandbox record
+        keeps the snapshot's *name*, and a name is republished, so only the id
+        says which artifact actually ran.
+
+        **Restarted by stopping and starting the sandbox**, not the kernel
+        (E0-04 again): Daytona's own daemon is PID 1 here, so there is no
+        kernel to restart, and check 8 means the thing that survives a real
+        restart.
+
+        The sandbox is deleted whether the tier passed or not — a smoke test
+        that leaves a sandbox running bills the owner for a check.
+        """
+        if environment is None:
+            raise EnvironmentsError(
+                CAPABILITY_UNSUPPORTED,
+                "A Daytona smoke test needs the version's spec: the core tier "
+                "asks for the Python version it declared and the packages its "
+                "lock pinned, and an artifact carries neither",
+                detail={"variant": self.variant},
+            )
+        from ..conformance import expected_packages, run_accelerator_check, run_core_tier
+
+        snapshot = artifact.provider_artifact_id or artifact.immutable_reference
+        sandbox = self._smoke_test_sandbox(snapshot)
+        self._log(f"Launching {snapshot} to smoke-test it")
+        try:
+            sandbox.start()
+            result = run_core_tier(
+                sandbox,
+                python_version=environment.spec.language.version,
+                expected_packages=expected_packages(environment, lock_text or ""),
+                secret_values=tuple(secret_values),
+                restart=lambda: self._restart(sandbox),
+            )
+            accelerator = environment.spec.resources.accelerator
+            if accelerator != "none":
+                # A GPU version is only the version its spec describes when
+                # its GPUs are visible and its CUDA is the spec's (check 11,
+                # E2-17): the core tier alone passes on a machine with none.
+                result.checks.append(
+                    run_accelerator_check(sandbox, cuda=accelerator.cuda, count=accelerator.count)
+                )
+            return result
+        except EnvironmentsError:
+            raise
+        except Exception as error:
+            raise self._provider_error("smoke-test the snapshot", error) from error
+        finally:
+            try:
+                sandbox.stop()
+            except Exception as error:
+                self._log(f"The smoke-test sandbox could not be stopped: {error}")
+
+    def _smoke_test_sandbox(self, snapshot: str) -> Any:
+        """A sandbox of this build's own snapshot, deleted when it stops."""
+        from ...daytona_sandbox import DaytonaSandbox
+
+        secrets = self._provider_secrets()
+        return DaytonaSandbox(
+            api_key=secrets.get("DAYTONA_API_KEY"),
+            organization_id=secrets.get("DAYTONA_ORGANIZATION_ID"),
+            snapshot=snapshot,
+            delete_on_stop=True,
+        )
+
+    @staticmethod
+    def _restart(sandbox: Any) -> None:
+        """Check 8's restart, as Daytona can do it.
+
+        Its daemon is PID 1, so there is no kernel to restart: the sandbox
+        itself is stopped and started, which is the stronger version of the
+        same question.
+        """
+        sandbox.stop()
+        sandbox.start()
 
     def _provider_error(self, what: str, error: BaseException) -> EnvironmentsError:
         return EnvironmentsError(

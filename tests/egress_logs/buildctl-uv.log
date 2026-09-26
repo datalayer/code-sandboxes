@@ -1,0 +1,54 @@
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 193B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.12-slim
+#2 DONE 0.2s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/3] FROM docker.io/library/python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 26B done
+#5 DONE 0.0s
+
+#6 [2/3] COPY uv /usr/local/bin/uv
+#6 CACHED
+
+#7 [3/3] RUN uv pip install --system "requests @ https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz"
+#7 0.175 Using Python 3.12.14 environment at: /usr/local
+#7 9.090   × Failed to download and build `requests @
+#7 9.090   │ https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz`
+#7 9.090   ├─▶ Request failed after 3 retries in 8.9s
+#7 9.090   ├─▶ Failed to fetch:
+#7 9.090   │   `https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz`
+#7 9.090   ├─▶ error sending request for url
+#7 9.090   │   (https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz)
+#7 9.090   ├─▶ client error (Connect)
+#7 9.090   ╰─▶ tunnel error: unsuccessful
+#7 ERROR: process "/bin/sh -c uv pip install --system \"requests @ https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz\"" did not complete successfully: exit code: 1
+------
+ > [3/3] RUN uv pip install --system "requests @ https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz":
+0.175 Using Python 3.12.14 environment at: /usr/local
+9.090   × Failed to download and build `requests @
+9.090   │ https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz`
+9.090   ├─▶ Request failed after 3 retries in 8.9s
+9.090   ├─▶ Failed to fetch:
+9.090   │   `https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz`
+9.090   ├─▶ error sending request for url
+9.090   │   (https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz)
+9.090   ├─▶ client error (Connect)
+9.090   ╰─▶ tunnel error: unsuccessful
+------
+Dockerfile:3
+--------------------
+   1 |     FROM python:3.12-slim
+   2 |     COPY uv /usr/local/bin/uv
+   3 | >>> RUN uv pip install --system "requests @ https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz"
+   4 |
+--------------------
+error: failed to solve: process "/bin/sh -c uv pip install --system \"requests @ https://github.com/psf/requests/archive/refs/tags/v2.32.3.tar.gz\"" did not complete successfully: exit code: 1

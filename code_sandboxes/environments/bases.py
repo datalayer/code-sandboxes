@@ -59,6 +59,9 @@ class ApprovedBase(BaseModel):
     python_versions: tuple[str, ...]
     #: Whether the base carries CUDA, which a GPU size class requires.
     accelerator: bool = False
+    #: The CUDA toolkit the base pins, ``major.minor`` (E2-17): what a spec's
+    #: ``accelerator.cuda`` may ask for, and what check 11 reads back.
+    cuda: str | None = None
     #: Channel, then variant, to the digest resolution pins. A channel with no
     #: variant is approved and not yet published.
     channels: dict[str, dict[str, str]] = Field(default_factory=dict)
@@ -109,8 +112,9 @@ APPROVED_BASES: dict[str, ApprovedBase] = {
     base.ref: base
     for base in (
         # E1-05: jupyter-python:0.2.2 (Ubuntu security packages and conda's own
-        # OpenSSL upgraded, JupyterLab's staging yarn.lock dropped) plus the
-        # contract layer, released 2026-09-14 to environments/base/python-cpu.
+        # OpenSSL upgraded, JupyterLab's staging yarn.lock dropped, jupyter-kernels
+        # installed) plus the contract layer, released 2026-09-16 to
+        # environments/base/python-cpu.
         # One image, so every variant pins the same digest until a variant
         # needs a base of its own. The prior digest, jupyter-python:0.2.1,
         # carried 31 fixable-critical findings the scan (E1-08) blocks every
@@ -125,17 +129,40 @@ APPROVED_BASES: dict[str, ApprovedBase] = {
                     # `.spec.VARIANTS`, spelled out: `spec` imports from this
                     # module, so importing it back here would be circular.
                     ("datalayer", "e2b", "daytona", "modal"),
-                    "sha256:334adf6c2714c8919ef60beeca1db12e3531a391c9dde41932c782f81c432b36",
+                    # 2026-09-16: kernels now start in the contract's own
+                    # working directory. The image already declared `WORKDIR
+                    # /home/datalayer/content`, but a kernel's cwd is the
+                    # Jupyter server's to choose, and jupyter-python's config
+                    # roots it at `$HOME` — so every environment's kernel ran
+                    # in `/home/datalayer` and Appendix B check 2 read "cwd is
+                    # '/home/datalayer', not '/home/datalayer/content'". The
+                    # contract layer now sets `MappingKernelManager.root_dir`,
+                    # which moves the kernel without moving the file browser.
+                    "sha256:122d3e31f5e2507251457cbf47871c39ac1753adb1d83777ab0743fa11cd6148",
                 )
             },
-            snapshots={"2026.09": "20260914T150000Z"},
+            snapshots={"2026.09": "20260916T120000Z"},
         ),
-        # E2-17: jupyter-python-cuda plus the same layer.
+        # E2-17: jupyter-python-cuda:0.3.2 (jupyter-python 0.2.2 and CUDA 12.8's
+        # compiler and runtime headers, pinned) plus the same layer, released
+        # 2026-09-18 to environments/base/python-cuda as `2026.09-a3baa7b80931`.
+        # 6.9 GB: the first release carried the whole toolkit (15.7 GB), and a
+        # PyTorch environment on it made a snapshot Daytona refused, over its
+        # 20 GB limit. The doctor passes all fifteen checks and `nvcc` answers
+        # 12.8 without a GPU.
         ApprovedBase(
             ref="datalayer/python-cuda",
             python_versions=("3.13",),
             accelerator=True,
-            channels={"2026.09": {}},
+            cuda="12.8",
+            channels={
+                "2026.09": dict.fromkeys(
+                    ("datalayer", "e2b", "daytona", "modal"),
+                    "sha256:dc8f0015b4f7dbca92a88d2d6a4a96714b76f9a1af9dddd86835812493e40f08",
+                )
+            },
+            # After its CUDA layer's own `apt-get update`, which ran that day.
+            snapshots={"2026.09": "20260918T150000Z"},
         ),
     )
 }

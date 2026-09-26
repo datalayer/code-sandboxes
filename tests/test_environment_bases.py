@@ -25,14 +25,25 @@ DIGEST = "sha256:" + "a" * 64
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
-def test_the_2026_09_channel_of_python_cuda_has_no_digest_until_it_is_pushed(
+def test_the_2026_09_channel_of_python_cuda_resolves_the_digest_its_release_pushed(
     variant: str,
 ) -> None:
-    """PLAN_ENV.md, E2-17: the CUDA channel is not in ECR yet, so nothing may be made up."""
-    ref = "datalayer/python-cuda"
-    assert APPROVED_BASES[ref].channels == {"2026.09": {}}
+    """PLAN_ENV.md, E2-17: released 2026-09-18, one image for every variant,
+    carrying the CUDA 12.8 toolkit a spec's `accelerator.cuda` may ask for."""
+    base = APPROVED_BASES["datalayer/python-cuda"]
+    assert resolve_base(base.ref, "2026.09", variant) == (
+        "sha256:dc8f0015b4f7dbca92a88d2d6a4a96714b76f9a1af9dddd86835812493e40f08"
+    )
+    assert (base.accelerator, base.cuda) == (True, "12.8")
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_a_channel_with_no_digest_yet_is_refused_rather_than_made_up(variant: str) -> None:
+    """A channel is approved before its release pushes it: nothing may be made up."""
+    ref = "datalayer/python-next"
+    bases = {ref: ApprovedBase(ref=ref, python_versions=("3.13",), channels={"2026.10": {}})}
     with pytest.raises(BaseChannelUnpublishedError) as refused:
-        resolve_base(ref, "2026.09", variant)
+        resolve_base(ref, "2026.10", variant, bases)
     error = refused.value
     assert isinstance(error, EnvironmentsError)
     assert error.code is errors.ARTIFACT_MISSING
@@ -40,9 +51,9 @@ def test_the_2026_09_channel_of_python_cuda_has_no_digest_until_it_is_pushed(
     assert error.detail == {
         "reason": "base_channel_unpublished",
         "base": ref,
-        "channel": "2026.09",
+        "channel": "2026.10",
         "variant": variant,
-        "repository": "environments/base/" + ref.rsplit("/", 1)[-1],
+        "repository": "environments/base/python-next",
     }
     assert "sha256:" not in str(error)
     assert error.to_body()["code"] == "DL_ENV_ARTIFACT_MISSING"
@@ -52,10 +63,17 @@ def test_the_2026_09_channel_of_python_cuda_has_no_digest_until_it_is_pushed(
 def test_the_2026_09_channel_of_python_cpu_resolves_the_digest_its_release_pushed(
     variant: str,
 ) -> None:
-    """PLAN_ENV.md, E1-05: released 2026-09-14 (jupyter-python 0.2.2, E1-08's
-    scan fix), same digest for every variant."""
+    """PLAN_ENV.md, E1-05: the digest the channel's last release pushed, the
+    same one for every variant.
+
+    **This moves with every base release**, and `bases.py` is where it moves
+    first: two releases (2026-09-15's and 2026-09-16's) changed the channel
+    and left this assertion on 2026-09-14's digest, so it sat red rather than
+    catching anything. Current: released 2026-09-16, the contract layer that
+    starts kernels in `/home/datalayer` (E1-05, Appendix B check 2).
+    """
     ref = "datalayer/python-cpu"
-    digest = "sha256:334adf6c2714c8919ef60beeca1db12e3531a391c9dde41932c782f81c432b36"
+    digest = "sha256:122d3e31f5e2507251457cbf47871c39ac1753adb1d83777ab0743fa11cd6148"
     assert APPROVED_BASES[ref].channels == {"2026.09": dict.fromkeys(VARIANTS, digest)}
     assert resolve_base(ref, "2026.09", variant) == digest
 
@@ -114,9 +132,13 @@ def test_each_base_is_published_under_its_own_repository() -> None:
 
 
 def test_the_2026_09_channel_of_python_cpu_pins_apt_to_its_snapshot() -> None:
-    """D-9: the moment just after the channel's image upgraded its packages."""
-    assert channel_snapshot("datalayer/python-cpu", "2026.09") == "20260914T150000Z"
-    assert channel_snapshot("datalayer/python-cuda", "2026.09") == ""
+    """D-9: the moment just after the channel's image upgraded its packages.
+
+    Moves with the channel, like the digest above, and had rotted the same
+    way — left on 2026-09-14's id after the channel moved to 2026-09-16's.
+    """
+    assert channel_snapshot("datalayer/python-cpu", "2026.09") == "20260916T120000Z"
+    assert channel_snapshot("datalayer/python-cuda", "2026.09") == "20260918T150000Z"
     assert channel_snapshot("datalayer/nothing", "2026.09") == ""
 
 

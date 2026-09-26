@@ -39,6 +39,7 @@ Where the solve runs is the :class:`ResolveRunner`'s business:
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shlex
 import shutil
@@ -49,7 +50,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 from .bases import APPROVED_BASES, ApprovedBase, channel_snapshot, resolve_base
 from .build_secrets import resolve_build_secret
@@ -76,10 +77,16 @@ from .spec import (
     parse_requirements_txt,
 )
 
+if TYPE_CHECKING:
+    from .resolve_conda import CondaResolveRunner
+
 __all__ = [
     "APT_PIN_PREFIX",
     "APT_SNAPSHOT_PREFIX",
+    "BUILDKIT_PROXY_ENV",
     "CONSTRAINTS_PATH",
+    "COVERAGE_PREFIX",
+    "DOCKERFILE_COVERAGE",
     "LOCK_FORMAT",
     "PROTECTED_PIN_PREFIX",
     "BuildkitResolveRunner",
@@ -92,6 +99,9 @@ __all__ = [
     "apt_pins",
     "apt_pins_in",
     "apt_snapshot_in",
+    "buildkit_proxy",
+    "buildkit_proxy_options",
+    "egress_refused_hosts",
     "lock_document",
     "locked_versions",
     "merge_requirements",
@@ -126,11 +136,126 @@ WHEELHOUSE_PATH = Path(__file__).parent / "constraints" / "wheelhouse"
 #: How an apt pin is written in the lock. A comment, so every reader of a
 #: ``pip`` requirements file — the CLI's diff included — ignores it.
 APT_PIN_PREFIX = "# datalayer-apt: "
+#: What a lock says it does not cover, as a header line.
+COVERAGE_PREFIX = "# datalayer-coverage: "
+#: A `dockerfile` source's lock (E3-03): what the resolver saw, and no more.
+DOCKERFILE_COVERAGE = (
+    "the declared packages and Datalayer's protected pins only; what the Dockerfile's own "
+    "instructions install is not locked, so a rebuild may install different versions of it"
+)
 #: The Ubuntu snapshot the apt pins were taken from, as the lock records it.
 #: The builder installs the pins from the same snapshot, since a pinned
 #: version can leave the live mirror (D-9).
 APT_SNAPSHOT_PREFIX = "# datalayer-apt-snapshot: "
 _SNAPSHOT_ID = re.compile(r"^\d{8}T\d{6}Z$")
+
+#: Where a build's own steps reach the network through, when the build pool
+#: gives them nowhere else to go (E1-06): an HTTP proxy that allows only the
+#: package indexes, the snapshot mirrors and the registries. The address is
+#: the one `buildkitd` itself sees, since a step runs in its network.
+BUILDKIT_PROXY_ENV = "DATALAYER_BUILDKIT_PROXY"
+_PROXY_URL = re.compile(r"^http://[A-Za-z0-9.\-]+:\d{1,5}$")
+
+
+def buildkit_proxy(proxy: str | None = None) -> str:
+    """The proxy a build's steps go through: ``proxy``, or the environment's.
+
+    Empty is no proxy, which is what a `buildkitd` with open egress needs
+    (`plane local`'s own). Anything that is not ``http://host:port`` is
+    refused rather than handed to every package manager of every build.
+    """
+    value = (os.environ.get(BUILDKIT_PROXY_ENV, "") if proxy is None else proxy).strip()
+    if value and not _PROXY_URL.match(value):
+        raise ValueError(f"{BUILDKIT_PROXY_ENV} must be http://host:port, not {value!r}")
+    return value
+
+
+def buildkit_proxy_options(proxy: str) -> list[str]:
+    """The ``buildctl`` options that send a build's steps through ``proxy``.
+
+    The Dockerfile frontend predefines these build args: a ``RUN`` step sees
+    them without an ``ARG``, they never reach the image's config or history,
+    and they do not change a cache key. Both spellings, since ``apt`` and
+    ``curl`` read only the lower-case one for plain HTTP and ``uv``, ``pip``
+    and ``micromamba`` read either.
+    """
+    if not proxy:
+        return []
+    options: list[str] = []
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        options += ["--opt", f"build-arg:{name}={proxy}"]
+    for name in ("NO_PROXY", "no_proxy"):
+        options += ["--opt", f"build-arg:{name}=127.0.0.1,localhost"]
+    return options
+
+
+#: What each tool writes when the build pool's egress proxy refuses it a
+#: tunnel (E2-19). Read from the tools themselves, through the chart's own
+#: Squid refusing every host, on 2026-09-19: pip, uv 0.12, micromamba 2.3,
+#: git, curl 8 without `-f`, wget, and a Go client — `buildkitd`'s own pulls.
+#: Each is a refused CONNECT and nothing else: a host that answered 403 over
+#: its own TLS says so differently. `curl -f` ("The requested URL returned
+#: error: 403"), `wget -q` (nothing) and `apt` over plain HTTP ("403
+#: Forbidden [IP: proxy]") cannot be told from the host's own 403, and are
+#: left to the log.
+_EGRESS_REFUSED = re.compile(
+    r"Tunnel connection failed: 403"  # pip, requests, urllib3
+    r"|tunnel error: unsuccessful"  # uv
+    r"|CONNECT tunnel failed, response 403"  # curl, git, micromamba
+    r"|Proxy tunneling failed: Forbidden"  # wget
+    r'|"https?://[^"\s]+": Forbidden'  # Go: buildkitd, containerd
+)
+#: A host a line names: urllib3's `host='…'`, or the host of a URL.
+_NAMED_HOST = re.compile(r"host='(?P<pool>[A-Za-z0-9.\-]+)'|https?://(?P<url>[A-Za-z0-9.\-]+)")
+#: `buildctl`'s plain progress: `#12 0.874 <what the step wrote>`. Steps run
+#: side by side, so a line is read against the lines of its own step.
+_BUILDKIT_LINE = re.compile(r"^#(?P<step>\d+) (?:\d+\.\d+ )?(?P<text>.*)$")
+
+
+def egress_refused_hosts(log: str, *, proxy: str = "", limit: int = 10) -> list[str]:
+    """The hosts the build pool's egress proxy refused, as a build's log shows them (E2-19).
+
+    A refusal is found by what the tool writes (`_EGRESS_REFUSED`), and its
+    host is the one the same line names — pip's `host='files.pythonhosted.org'`,
+    git's URL — or else the last one its step named before it: uv and
+    micromamba write the URL a line or four above the refusal, wget and a
+    silent `curl` only in the `RUN` line. The proxy's own address is never a
+    host it refused. In the order they were first refused, at most ``limit``.
+    """
+    own = {"127.0.0.1", "localhost"}
+    if proxy:
+        own.add(proxy.split("://", 1)[-1].rsplit(":", 1)[0])
+    hosts: list[str] = []
+    last: dict[str, str] = {}
+    for raw in log.splitlines():
+        line = _BUILDKIT_LINE.match(raw)
+        step, text = (line.group("step"), line.group("text")) if line else ("", raw)
+        named = [
+            host.lower().rstrip(".")
+            for match in _NAMED_HOST.finditer(text)
+            for host in (match.group("pool") or match.group("url"),)
+            if host and host.lower().rstrip(".") not in own
+        ]
+        if _EGRESS_REFUSED.search(text):
+            host = named[0] if named else last.get(step, "")
+            if host and host not in hosts:
+                hosts.append(host)
+                if len(hosts) >= limit:
+                    break
+        if named:
+            last[step] = named[-1]
+    return hosts
+
+
+def egress_findings(hosts: Sequence[str]) -> list[dict[str, str]]:
+    """The refused hosts as a failure's findings: what a page lists, not the log."""
+    return [{"kind": "egress_refused", "subject": host} for host in hosts]
+
+
+def egress_hosts_text(hosts: Sequence[str]) -> str:
+    quoted = [f"`{host}`" for host in hosts]
+    return quoted[0] if len(quoted) == 1 else ", ".join(quoted[:-1]) + " and " + quoted[-1]
+
 
 #: How a protected pin is recorded in the lock.
 PROTECTED_PIN_PREFIX = "# datalayer-protected: "
@@ -465,6 +590,19 @@ def parse_resolver_failure(
                 },
             )
 
+    # An index the build pool may not reach is not an outage: resolving again
+    # is refused again, so it is said with the host rather than retried.
+    refused = egress_refused_hosts(output)
+    if refused and "No solution found" not in text:
+        return EnvironmentsError(
+            PACKAGE_NOT_FOUND,
+            f"The build pool's egress proxy refused {egress_hosts_text(refused)}: a version "
+            "resolves only against the indexes the build pool allows. Use one of them, or "
+            "ask for the host to be allowed",
+            detail={**detail, "refused_hosts": refused, "findings": egress_findings(refused)},
+            retryable=False,
+        )
+
     pair = _conflicting_pair(mentions) if "No solution found" in text else None
     if pair:
         return EnvironmentsError(
@@ -610,8 +748,11 @@ class BuildkitResolveRunner:
         tlscacert: str | None = None,
         apt_snapshot: str = "",
         timeout: float = 900.0,
+        proxy: str | None = None,
     ) -> None:
         self._buildctl = (shutil.which("buildctl") or "") if buildctl is None else buildctl
+        #: The build pool's egress proxy (E1-06), or `DATALAYER_BUILDKIT_PROXY`.
+        self._proxy = buildkit_proxy(proxy)
         #: The build pool's `buildkitd` takes mTLS connections only
         #: (PLAN_ENV.md E1-06); a plain-socket one, such as `plane local`'s
         #: own ephemeral daemon, needs none of these three. All or nothing,
@@ -748,6 +889,7 @@ class BuildkitResolveRunner:
                 f"dockerfile={root}",
                 "--output",
                 f"type=local,dest={out}",
+                *buildkit_proxy_options(self._proxy),
             ]
             say(f"Solving the lock in {request.base_reference}")
             try:
@@ -848,7 +990,36 @@ def locked_versions(lock_text: str) -> dict[str, str]:
         ]
         if len(pinned) == 1:
             versions[canonicalize_name(requirement.name)] = pinned[0]
+        elif requirement.url:
+            wheel = _wheel_version(requirement.name, requirement.url)
+            if wheel:
+                versions[canonicalize_name(requirement.name)] = wheel
     return versions
+
+
+def _wheel_version(name: str, url: str) -> str | None:
+    """The version of a direct reference to a wheel, read from its file name.
+
+    How a `pyproject` lock brings Datalayer's `jupyter-server` fork, which no
+    index serves (E3-08): `uv` records a hash only for a wheel it fetched by
+    URL, so the export pins it as `jupyter-server @ https://…whl`, with no
+    `==` for the version. The wheel's name carries one, and nothing else here
+    does. A reference that is not a wheel of the same distribution pins none.
+    """
+    from urllib.parse import unquote, urlsplit
+
+    from packaging.utils import InvalidWheelFilename, canonicalize_name, parse_wheel_filename
+
+    filename = unquote(urlsplit(url).path.rsplit("/", 1)[-1])
+    if not filename.endswith(".whl"):
+        return None
+    try:
+        wheel_name, version, _build, _tags = parse_wheel_filename(filename)
+    except InvalidWheelFilename:
+        return None
+    if wheel_name != canonicalize_name(name):
+        return None
+    return str(version)
 
 
 def apt_pins_in(lock_text: str) -> dict[str, str]:
@@ -886,7 +1057,7 @@ def lock_document(
     python_version: str,
     base_reference: str,
     merged: MergedRequirements,
-    resolved_at: datetime | None = None,
+    coverage: str | None = None,
 ) -> dict[str, Any]:
     """The stored lock: its text, its digest, and what a reader needs from it.
 
@@ -894,14 +1065,26 @@ def lock_document(
     output, so the document is still a requirements file — ``pip install -r``
     reads it, and so does every tool that only knows that format — while
     saying everything the build installs.
+
+    **Nothing here is a wall clock.** The header carried a ``# resolved-at:``
+    line until 2026-09-16, and since the digest is over the whole text, two
+    resolves of the same spec, in the same base, pinning the same 320 packages
+    produced two different digests — the texts differed in that one line out
+    of 5,388, found by resolving the same environment twice on r1. The cache
+    key of section 5 is over the lock digest, so D-12's build cache could
+    never hit: `environments.cache.lookups` read `hit=false` 12 times out of
+    12. When the lock was resolved is on the lock document Runtimes stores, in
+    its ``created_at``, where it belongs.
     """
-    when = (resolved_at or _utcnow()).replace(microsecond=0).isoformat()
     header = [
         "# Resolved by Datalayer (PLAN_ENV.md D-9). Do not edit: a change makes a new version.",
-        f"# resolved-at: {when}",
         f"# python: {python_version}",
         f"# base: {base_reference}",
     ]
+    if coverage:
+        # What this lock does not cover, in the lock itself: it travels with
+        # the version, and a reader of the lock is who needs to know (E3-03).
+        header.append(f"{COVERAGE_PREFIX}{coverage}")
     for pin in outcome.apt_pins.items():
         header.append(f"{APT_PIN_PREFIX}{pin[0]}={pin[1]}")
     if outcome.apt_pins and outcome.apt_source:
@@ -928,6 +1111,9 @@ def resolve_bases(
     variants: Sequence[str],
     bases: dict[str, ApprovedBase] = APPROVED_BASES,
     registry: str | None = None,
+    *,
+    ref: str | None = None,
+    channel: str | None = None,
 ) -> dict[str, str]:
     """Each variant's base, pinned by digest (D-9, §4).
 
@@ -937,15 +1123,15 @@ def resolve_bases(
     Hub. Bare ``<repository>@sha256:…`` otherwise, which is what every test
     and fixture that never passes a credential still gets.
     """
-    base = bases.get(environment.spec.base.ref)
-    repository = base.repository if base is not None else environment.spec.base.ref
+    ref = ref or environment.spec.base.ref
+    channel = channel or environment.spec.base.channel
+    base = bases.get(ref)
+    repository = base.repository if base is not None else ref
     if registry:
         repository = f"{registry}/{repository}"
     resolved: dict[str, str] = {}
     for variant in variants:
-        digest = resolve_base(
-            environment.spec.base.ref, environment.spec.base.channel, variant, bases
-        )
+        digest = resolve_base(ref, channel, variant, bases)
         resolved[variant] = f"{repository}@{digest}"
     return resolved
 
@@ -1031,10 +1217,12 @@ def _verified_pyproject_lock(
         root = Path(directory)
         (root / "pyproject.toml").write_text(dependency_file.content, encoding="utf-8")
         (root / "uv.lock").write_text(dependency_file.lock_content, encoding="utf-8")
+        environment = _uv_environment(root)
         try:
             checked = invoke(
                 [resolved_uv, "lock", "--dry-run"],
                 cwd=root,
+                env=environment,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -1082,6 +1270,7 @@ def _verified_pyproject_lock(
         exported = invoke(
             [resolved_uv, "export", "--locked", "--format", "requirements.txt"],
             cwd=root,
+            env=environment,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -1108,6 +1297,23 @@ def _verified_pyproject_lock(
         "content": text,
         "python_version": python_version,
         "package_count": len(packages),
+    }
+
+
+def _uv_environment(root: Path) -> dict[str, str]:
+    """What `uv` checks a lock with: its cache in the scratch directory, and no downloads.
+
+    The durable worker runs as a user with no home, so `uv`'s default cache
+    under `~/.cache` could not be made, and neither could the interpreter it
+    downloads when none satisfies `requires-python` (found on 2026-09-18, E3-08).
+    The interpreter comes from the worker's image instead, where the base
+    channel's own Python is installed: a check that fetched one per resolve would
+    be a check that depends on the network in a way nothing records.
+    """
+    return {
+        **os.environ,
+        "UV_CACHE_DIR": str(root / ".uv-cache"),
+        "UV_PYTHON_DOWNLOADS": "never",
     }
 
 
@@ -1158,8 +1364,8 @@ def resolve_environment(
     credential: Any = None,
     log: Callable[[str], None] | None = None,
     runner: ResolveRunner | None = None,
+    conda_runner: CondaResolveRunner | None = None,
     bases: dict[str, ApprovedBase] = APPROVED_BASES,
-    resolved_at: datetime | None = None,
     uv: str | None = None,
     pyproject_run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
     image_transport: Any = None,
@@ -1185,11 +1391,15 @@ def resolve_environment(
         Where the solve's output goes, line by line: the build's log.
     runner
         Where the solve runs. D-9's BuildKit solve by default.
+    conda_runner
+        Where a conda ``dependencyFile``'s own ``micromamba`` solve runs
+        (E3-02): the conda seam's runner, injected by tests and by ``plane
+        local`` the same way ``runner`` is for a pip source, and D-9's BuildKit
+        conda solve by default. A pip source ignores it, and a conda source
+        ignores ``runner``, since the two solves are different tools.
     bases
         The approved bases, injected by tests and by a plane whose channel is
         published somewhere else.
-    resolved_at
-        The moment the lock records. Now by default.
     uv, pyproject_run
         A `pyproject` `dependencyFile` source's own verification (E3-01):
         the `uv` to check and export with, and how it is run — injected by
@@ -1224,13 +1434,15 @@ def resolve_environment(
     environment = parse_environment(spec)
     python = environment.spec.packages.python
     source = environment.spec.build.source
-    if source not in ("packages", "dependencyFile", "image"):
-        raise EnvironmentsError(
-            CAPABILITY_UNSUPPORTED,
-            f"`{source}` is not resolved yet: only `packages`, `dependencyFile` and `image` "
-            "are, in this phase",
-            detail={"field": "spec.build.source", "source": source},
-        )
+    # A Dockerfile names its own base in `FROM` (E3-03): that is what is
+    # pinned and solved in, never `spec.base`, which the schema still asks for.
+    dockerfile = environment.spec.build.dockerfile if source == "dockerfile" else None
+    base_ref, base_channel = environment.spec.base.ref, environment.spec.base.channel
+    if dockerfile is not None:
+        from .contract import dockerfile_base
+
+        named = dockerfile_base(dockerfile.content, bases)
+        base_ref, base_channel = named.ref, named.channel
     if python.manager == "conda":
         raise EnvironmentsError(
             CAPABILITY_UNSUPPORTED,
@@ -1248,10 +1460,30 @@ def resolve_environment(
             resolve_secret=resolve_secret,
         )
         if source == "image"
-        else resolve_bases(environment, wanted, bases, registry=_registry_of(credential))
+        else resolve_bases(
+            environment,
+            wanted,
+            bases,
+            registry=_registry_of(credential),
+            ref=base_ref,
+            channel=base_channel,
+        )
     )
     dependency_file = environment.spec.build.dependency_file
     if source == "dependencyFile" and dependency_file is not None:
+        if dependency_file.source_format == "conda":
+            # A conda `environment.yml` resolves through its own micromamba
+            # solve into an explicit lock (E3-02), not uv's pip compile.
+            from .resolve_conda import resolve_conda_environment
+
+            return resolve_conda_environment(
+                environment_yml=dependency_file.content,
+                python_version=environment.spec.language.version,
+                resolved_bases=resolved_bases,
+                credential=credential,
+                log=say,
+                runner=conda_runner,
+            )
         if dependency_file.source_format == "pyproject":
             # Verified, not re-resolved (E3-01): the author's own uv.lock is
             # the answer, and this only proves it still matches pyproject.toml.
@@ -1285,11 +1517,7 @@ def resolve_environment(
         registry_auth=_registry_auth(credential),
         bootstrap_uv=(source == "image"),
         # An imported image is not an approved base, and names no channel.
-        apt_snapshot=(
-            ""
-            if source == "image"
-            else channel_snapshot(environment.spec.base.ref, environment.spec.base.channel, bases)
-        ),
+        apt_snapshot=("" if source == "image" else channel_snapshot(base_ref, base_channel, bases)),
     )
     outcome = (runner or BuildkitResolveRunner()).solve(request, say)
     document = lock_document(
@@ -1297,7 +1525,7 @@ def resolve_environment(
         python_version=environment.spec.language.version,
         base_reference=solving_in,
         merged=merged,
-        resolved_at=resolved_at,
+        coverage=DOCKERFILE_COVERAGE if dockerfile is not None else None,
     )
     say(
         f"Locked {document['package_count']} packages"

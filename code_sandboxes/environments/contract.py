@@ -24,26 +24,38 @@ import argparse
 import re
 import shlex
 import sys
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from .bases import is_approved_repository
-from .errors import CAPABILITY_UNSUPPORTED, EnvironmentsError
+from .bases import APPROVED_BASES, ApprovedBase, is_approved_repository
+from .errors import CAPABILITY_UNSUPPORTED, SPEC_INVALID, EnvironmentsError
 
 __all__ = [
     "CONTRACT_V1",
+    "MAX_CONTEXT_FILES",
+    "MAX_CONTEXT_FILE_BYTES",
+    "MAX_CONTEXT_TOTAL_BYTES",
     "SANDBOX_CONTRACT_V1",
     "SUPPORTED_CONTRACTS",
+    "BuildContextEntry",
+    "BuildContextFinding",
     "ContractRow",
+    "DockerfileBase",
     "DockerfileFinding",
     "DockerfileInstruction",
     "SandboxContract",
+    "check_build_context",
     "check_dockerfile",
     "contract_markdown",
+    "dockerfile_base",
+    "dockerfile_findings_for_build",
     "get_contract",
     "parse_dockerfile",
+    "pin_dockerfile_base",
+    "validate_build_context",
     "validate_dockerfile",
 ]
 
@@ -97,7 +109,7 @@ SANDBOX_CONTRACT_V1 = SandboxContract(
     uid=1000,
     gid=100,
     home="/home/datalayer",
-    workdir="/home/datalayer/content",
+    workdir="/home/datalayer",
     reserved_path="/opt/datalayer",
     doctor_path="/opt/datalayer/bin/datalayer-sandbox",
     python_executables=("python3", "pip"),
@@ -129,7 +141,9 @@ SANDBOX_CONTRACT_V1 = SandboxContract(
             area="User",
             requirement=(
                 "Non-root user `datalayer`, uid 1000, gid 100, home `/home/datalayer`, "
-                "working directory `/home/datalayer/content`."
+                "working directory `/home/datalayer` — the home itself, which is "
+                "where a person's folders are mounted and what the file browser "
+                "shows, so `pwd` and the browser agree."
             ),
             reason=(
                 "Runtime pods run as 1000:100 and home folders on the shared filesystem are owned "
@@ -180,7 +194,7 @@ SANDBOX_CONTRACT_V1 = SandboxContract(
         ContractRow(
             area="Filesystem",
             requirement=(
-                "`/opt/datalayer` is reserved and read-only to the user; `/home/datalayer/content` "
+                "`/opt/datalayer` is reserved and read-only to the user; `/home/datalayer` "
                 "is writable; nothing is assumed to persist across restarts."
             ),
             reason="Datalayer's tools live under `/opt/datalayer`; "
@@ -449,6 +463,272 @@ def check_dockerfile(text: str, *, contract: SandboxContract = SANDBOX_CONTRACT_
         raise EnvironmentsError(
             CAPABILITY_UNSUPPORTED,
             f"line {first.line}: {first.message}",
+            detail={"findings": [finding.to_dict() for finding in findings]},
+        )
+
+
+# --- A Dockerfile source's base, and how it is built (E3-03) -----------------------------
+
+
+@dataclass(frozen=True)
+class DockerfileBase:
+    """The approved base a Dockerfile builds on: its channel, and the `FROM` lines naming it."""
+
+    ref: str
+    channel: str
+    lines: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class _ApprovedFrom:
+    line: int
+    image: str
+    ref: str
+    tag: str
+    digest: str
+
+
+def _from_image(instruction: DockerfileInstruction) -> tuple[str, str | None]:
+    """A `FROM`'s image and its stage name, flags skipped."""
+    tokens = _tokens(instruction.arguments)
+    for index, argument in enumerate(tokens):
+        if argument.startswith("--"):
+            continue
+        rest = tokens[index + 1 :]
+        alias = rest[1].lower() if len(rest) >= 2 and rest[0].upper() == "AS" else None
+        return argument, alias
+    return "", None
+
+
+def _approved_froms(text: str, bases: Mapping[str, ApprovedBase]) -> list[_ApprovedFrom]:
+    """Every `FROM` naming an approved base, in order; a stage name is not a base."""
+    stages: set[str] = set()
+    found: list[_ApprovedFrom] = []
+    for instruction in parse_dockerfile(text):
+        if instruction.keyword != "FROM":
+            continue
+        image, alias = _from_image(instruction)
+        if image and image.lower() not in stages and "$" not in image:
+            repository, _, digest = image.partition("@")
+            last = repository.rsplit("/", 1)[-1]
+            name, _, tag = last.partition(":")
+            repository = repository[: len(repository) - len(last)] + name
+            for base in bases.values():
+                if any(
+                    repository == known or repository.endswith("/" + known)
+                    for known in (base.ref, base.repository)
+                ):
+                    found.append(_ApprovedFrom(instruction.line, image, base.ref, tag, digest))
+                    break
+        if alias:
+            stages.add(alias)
+    return found
+
+
+def dockerfile_findings_for_build(
+    text: str, bases: Mapping[str, ApprovedBase] = APPROVED_BASES
+) -> list[DockerfileFinding]:
+    """What a Dockerfile source must also be to be built, beyond what the contract allows.
+
+    - **One base, named by its channel.** Every `FROM` of an approved base
+      names the same base, and its channel as the tag
+      (`datalayer/python-cpu:2026.09`): the build pins that channel to its
+      digest, the way a `packages` source's base is pinned (D-9), and the
+      lock is solved in it. A digest is refused rather than trusted — which
+      channel it belongs to is what the build must know.
+    - **No build context yet.** A `COPY` or `ADD` from the context needs the
+      upload this item also describes, which is not taken yet; without it
+      the file is absent and the build fails halfway. From another stage
+      (`--from=`), from a heredoc, and `ADD` of a URL need none.
+    - **The default escape character.** The build appends its own lines,
+      continued with a backslash.
+    """
+    findings: list[DockerfileFinding] = []
+    for raw in text.splitlines():
+        directive = _DIRECTIVE.match(raw.strip())
+        if not directive:
+            break
+        if directive.group(1).lower() == "escape" and directive.group(2) != "\\":
+            findings.append(
+                DockerfileFinding(
+                    1, "escape", "keep the default escape character: the build appends lines to it"
+                )
+            )
+    named: list[_ApprovedFrom] = []
+    for found in _approved_froms(text, bases):
+        channels = bases[found.ref].channels
+        if found.digest:
+            message = f"name `{found.ref}` by its channel, not a digest: the build pins the channel"
+        elif not found.tag:
+            example = next(iter(channels), "2026.09")
+            message = f"name `{found.ref}`'s channel as its tag, such as `{found.ref}:{example}`"
+        elif found.tag not in channels:
+            message = f"`{found.ref}` has no channel `{found.tag}`; channels: " + (
+                ", ".join(channels) or "none"
+            )
+        else:
+            named.append(found)
+            continue
+        findings.append(DockerfileFinding(found.line, "FROM", message))
+    if len({(found.ref, found.tag) for found in named}) > 1:
+        findings.append(
+            DockerfileFinding(
+                named[1].line,
+                "FROM",
+                "every approved base is the same base and channel: the build pins one",
+            )
+        )
+    for instruction in parse_dockerfile(text):
+        if instruction.keyword not in ("COPY", "ADD"):
+            continue
+        tokens = _tokens(instruction.arguments)
+        if "<<" in instruction.arguments or any(t.startswith("--from=") for t in tokens):
+            continue
+        sources = [t for t in tokens if not t.startswith("--")][:-1]
+        local = [s for s in sources if not re.match(r"^(https?|git)://|^git@", s, re.IGNORECASE)]
+        if local:
+            findings.append(
+                DockerfileFinding(
+                    instruction.line,
+                    instruction.keyword,
+                    f"copies `{local[0]}` from the build context, which this deployment does not "
+                    "take yet: bake it with a `RUN` or a heredoc, or copy it from another stage",
+                )
+            )
+    return sorted(findings, key=lambda finding: finding.line)
+
+
+def dockerfile_base(
+    text: str, bases: Mapping[str, ApprovedBase] = APPROVED_BASES
+) -> DockerfileBase:
+    """The approved base a Dockerfile source is built on, or a refusal naming the line."""
+    refused = [
+        finding
+        for finding in dockerfile_findings_for_build(text, bases)
+        if finding.instruction in ("FROM", "escape")
+    ]
+    if refused:
+        raise EnvironmentsError(
+            SPEC_INVALID,
+            f"line {refused[0].line}: {refused[0].message}",
+            detail={"field": "spec.build.dockerfile", "line": refused[0].line},
+        )
+    found = _approved_froms(text, bases)
+    if not found:
+        raise EnvironmentsError(
+            SPEC_INVALID,
+            "the Dockerfile builds on no approved base",
+            detail={"field": "spec.build.dockerfile"},
+        )
+    return DockerfileBase(
+        ref=found[0].ref,
+        channel=found[0].tag,
+        lines=tuple(item.line for item in found),
+    )
+
+
+def pin_dockerfile_base(
+    text: str, reference: str, bases: Mapping[str, ApprovedBase] = APPROVED_BASES
+) -> str:
+    """The Dockerfile as it is built: each `FROM` of its base pinned to `reference`.
+
+    Only the image of those lines changes; comments, the author's own
+    continuations and the stage names stay as written. The parser directives
+    go, because the build states its own frontend first (`# syntax=`), and a
+    directive anywhere but the very top is only a comment.
+    """
+    images = {found.line: found.image for found in _approved_froms(text, bases)}
+    rewritten: list[str] = []
+    in_directives = True
+    for number, raw in enumerate(text.splitlines(), start=1):
+        if in_directives and _DIRECTIVE.match(raw.strip()):
+            continue
+        in_directives = False
+        image = images.get(number)
+        rewritten.append(raw.replace(image, reference, 1) if image else raw)
+    return "\n".join(rewritten) + "\n"
+
+
+# --- The build context (E3-03) -------------------------------------------------------
+
+#: A `dockerfile` source uploads a build context to object storage. These bound
+#: what Runtimes accepts before it issues a presigned URL, so a context cannot
+#: be a way to smuggle a host file in (a symlink or `..`), or to fill a bucket.
+MAX_CONTEXT_FILES = 2000
+MAX_CONTEXT_FILE_BYTES = 50 * 1024 * 1024
+MAX_CONTEXT_TOTAL_BYTES = 100 * 1024 * 1024
+
+_CONTEXT_SEPARATOR = re.compile(r"[\\/]")
+
+
+@dataclass(frozen=True)
+class BuildContextEntry:
+    """One member of an uploaded build context: its path, size, and whether it is a symlink."""
+
+    path: str
+    size_bytes: int = 0
+    is_symlink: bool = False
+
+
+@dataclass(frozen=True)
+class BuildContextFinding:
+    """Something in a build context that must not be uploaded."""
+
+    path: str
+    message: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {"path": self.path, "message": self.message}
+
+
+def validate_build_context(
+    entries: Sequence[BuildContextEntry],
+) -> list[BuildContextFinding]:
+    """Everything in a build context the upload refuses, in the order given.
+
+    Refused: an absolute path, a `..` that would escape the context, a symlink
+    (which could point at a host file the build then reads), a file over the
+    per-file limit, and — once — a context with too many files or too many
+    bytes in all.
+    """
+    findings: list[BuildContextFinding] = []
+    total = 0
+    for entry in entries:
+        path = entry.path
+        components = _CONTEXT_SEPARATOR.split(path)
+        if not path or all(part in ("", ".") for part in components):
+            findings.append(BuildContextFinding(path, "is not a path inside the context"))
+        elif path.startswith("/") or path.startswith("\\"):
+            findings.append(BuildContextFinding(path, "is an absolute path, not a context path"))
+        elif ".." in components:
+            findings.append(BuildContextFinding(path, "escapes the context with `..`"))
+        if entry.is_symlink:
+            findings.append(BuildContextFinding(path, "is a symlink, which could read a host file"))
+        if entry.size_bytes > MAX_CONTEXT_FILE_BYTES:
+            findings.append(
+                BuildContextFinding(
+                    path, f"is over the {MAX_CONTEXT_FILE_BYTES}-byte per-file limit"
+                )
+            )
+        total += entry.size_bytes
+    if len(entries) > MAX_CONTEXT_FILES:
+        findings.append(BuildContextFinding("", f"has more than {MAX_CONTEXT_FILES} files"))
+    if total > MAX_CONTEXT_TOTAL_BYTES:
+        findings.append(
+            BuildContextFinding("", f"is over the {MAX_CONTEXT_TOTAL_BYTES}-byte total limit")
+        )
+    return findings
+
+
+def check_build_context(entries: Sequence[BuildContextEntry]) -> None:
+    """Refuse a build context the upload does not allow, naming the first fault."""
+    findings = validate_build_context(entries)
+    if findings:
+        first = findings[0]
+        where = f"`{first.path}`: " if first.path else ""
+        raise EnvironmentsError(
+            SPEC_INVALID,
+            f"{where}{first.message}",
             detail={"findings": [finding.to_dict() for finding in findings]},
         )
 

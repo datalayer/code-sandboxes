@@ -49,7 +49,16 @@ from .errors import (
     SCAN_BLOCKED,
     EnvironmentsError,
 )
-from .policy import DEFAULT_POLICY, PolicyDecision, ScanPolicy, decide, findings_of
+from .policy import (
+    DEFAULT_POLICY,
+    UNRESTRICTED_POLICY,
+    EnvironmentsPolicy,
+    PolicyDecision,
+    ScanPolicy,
+    decide,
+    findings_of,
+    refuse_unlicensed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +115,101 @@ def signature_tag(digest: str) -> str:
     return text.replace(":", "-", 1) + ".sig"
 
 
+#: Where a CycloneDX component keeps its licence, in the order they are read.
+_CYCLONEDX_LICENSE_KEYS = ("id", "name")
+#: Where an SPDX package keeps its licence. `licenseConcluded` is what the
+#: tool decided; `licenseDeclared` is what the package claimed. BuildKit
+#: writes SPDX, so this is the one that matters in practice.
+_SPDX_LICENSE_KEYS = ("licenseConcluded", "licenseDeclared")
+#: What SPDX writes when it could not tell, which is not a licence.
+_SPDX_UNKNOWN = frozenset({"NOASSERTION", "NONE", ""})
+
+
+def _spdx_license_pairs(document: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """Every SPDX package with a licence, as `(package, licence)`.
+
+    `licenseConcluded` is what the tool decided and `licenseDeclared` what the
+    package claimed, so the concluded one is read first and the declared one
+    only when it said nothing.
+    """
+    found: list[tuple[str, str]] = []
+    for package in document.get("packages") or ():
+        if not isinstance(package, Mapping):
+            continue
+        name = str(package.get("name") or "").strip()
+        for key in _SPDX_LICENSE_KEYS:
+            value = str(package.get(key) or "").strip()
+            if value and value.upper() not in _SPDX_UNKNOWN:
+                # Kept even with no name: `licenses_of` reads only the licence
+                # half, and dropping an unnamed package's licence there would
+                # be exactly the silent behavior change this refactor must
+                # not make. `licenses_by_package`'s own callers decide what an
+                # empty package name means for them.
+                found.append((name, value))
+                break
+    return found
+
+
+def _cyclonedx_license_pairs(document: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """Every CycloneDX component with a licence, as `(component, licence)`."""
+    found: list[tuple[str, str]] = []
+    for component in document.get("components") or ():
+        if not isinstance(component, Mapping):
+            continue
+        name = str(component.get("name") or "").strip()
+        for entry in component.get("licenses") or ():
+            if not isinstance(entry, Mapping):
+                continue
+            licence = entry.get("license")
+            value = ""
+            if isinstance(licence, Mapping):
+                for key in _CYCLONEDX_LICENSE_KEYS:
+                    value = str(licence.get(key) or "").strip()
+                    if value:
+                        break
+            if not value:
+                value = str(entry.get("expression") or "").strip()
+            if value:
+                # Kept even with no component name; see the SPDX reader's own
+                # note above.
+                found.append((name, value))
+    return found
+
+
+def licenses_by_package(document: Any) -> list[tuple[str, str]]:
+    """Every `(package, licence)` an SBOM names, package first (E3-06).
+
+    The same two shapes `licenses_of` reads, kept attributed rather than
+    flattened: a policy that denies a licence has to name the package that
+    carries it, which `licenses_of`'s own deduplicated set of licence strings
+    alone cannot answer. Insertion order, not sorted — the order the SBOM's
+    own packages/components came in, which is what a refusal naming "the
+    first one" should mean deterministically for the same document.
+    """
+    if not isinstance(document, Mapping):
+        return []
+    return _spdx_license_pairs(document) + _cyclonedx_license_pairs(document)
+
+
+def licenses_of(document: Any) -> list[str]:
+    """Every licence an SBOM names, deduplicated and sorted.
+
+    Reads both shapes the ecosystem writes: SPDX, which is what BuildKit's
+    `attest:sbom=` produces, and CycloneDX. A document in neither shape, or one
+    that names nothing, answers an empty list rather than raising: a
+    publication's licence list is worth having and never worth failing a build
+    over.
+
+    This is what a published version's snapshot carries (D-12, E2-16). Until
+    it did, `licenses` came from the scan summary — and the registry's scanner
+    reports vulnerabilities, not licences, so every publication froze an empty
+    list beside an SBOM reference.
+    """
+    if not isinstance(document, Mapping):
+        return []
+    return sorted({licence for _package, licence in licenses_by_package(document)})
+
+
 @dataclass(frozen=True)
 class AttestationResult:
     """What the workflow stores about an artifact once both gates have passed."""
@@ -117,6 +221,8 @@ class AttestationResult:
     size_bytes: int | None = None
     signed_now: bool = True
     """False when a replay found the signature that was already there."""
+    licenses: tuple[str, ...] = ()
+    """What the SBOM named, frozen onto the artifact for a publication to carry."""
 
     def body(self) -> dict[str, Any]:
         """The mapping `activities_environments.attest` answers."""
@@ -127,6 +233,7 @@ class AttestationResult:
             "signature_ref": self.signature_ref,
             "size_bytes": self.size_bytes,
             "signed_now": self.signed_now,
+            "licenses": list(self.licenses),
         }
 
 
@@ -515,8 +622,23 @@ class Attestor:
         size_bytes: int | None = None,
         sbom_ref: str = "",
         provenance_ref: str = "",
+        sbom: Any = None,
+        environments_policy: EnvironmentsPolicy = UNRESTRICTED_POLICY,
     ) -> AttestationResult:
-        """Scan, then sign: the order the Operator's check depends on (D-11)."""
+        """Scan, then sign: the order the Operator's check depends on (D-11).
+
+        `sbom`, when the caller has the document, is read for the licences a
+        publication carries; the registry's scanner reports vulnerabilities
+        and never licences, so there is nowhere else they come from.
+
+        **Refused before signing, never after (E3-06).** A licence an
+        organization's own policy denies is checked against the same `sbom`,
+        naming the package that carries it, and raised before `sign` runs —
+        an artifact whose licence policy denies it is never signed, the same
+        as one whose scan blocks it: a signature is Datalayer's word that an
+        artifact may run, and this is the second of the two words that go
+        into it.
+        """
         self.can_sign()
         decision = self.scan(repository=repository, digest=digest)
         if not decision.passed:
@@ -530,15 +652,43 @@ class Attestor:
                     "blocking": [finding.id for finding in decision.blocking],
                 },
             )
+        pairs = licenses_by_package(sbom)
+        refuse_unlicensed(pairs, environments_policy)
         signature, signed_now = self.sign(registry=registry, repository=repository, digest=digest)
         return AttestationResult(
             decision=decision,
             signature_ref=signature,
             sbom_ref=sbom_ref or f"{registry}/{repository}@{digest}.sbom",
             provenance_ref=provenance_ref or f"{registry}/{repository}@{digest}.att",
-            size_bytes=size_bytes,
+            size_bytes=size_bytes
+            if size_bytes is not None
+            else self.size_of(repository=repository, digest=digest),
             signed_now=signed_now,
+            licenses=tuple(sorted({licence for _package, licence in pairs})),
         )
+
+    def size_of(self, *, repository: str, digest: str) -> int | None:
+        """What the registry says the artifact weighs, or None.
+
+        Nobody hands the size down: the builder answers a reference, not a
+        weight, so until this asked the registry `size_bytes` was always None
+        — and with it `environments.artifact.bytes`, the series section 14
+        tracks the artifact size in, which had no point in it on 2026-09-16
+        although artifacts had been recorded. The registry has known all
+        along; the scan is read from the same client.
+
+        Never a reason to fail an attestation: a size that could not be read
+        is a missing number on a dashboard, and the artifact is still signed.
+        """
+        try:
+            images = self._client().describe_images(
+                repositoryName=repository, imageIds=[{"imageDigest": digest}]
+            )["imageDetails"]
+        except Exception as error:
+            self._log(f"The artifact's size could not be read: {error}")
+            return None
+        size = (images[0] or {}).get("imageSizeInBytes") if images else None
+        return int(size) if size else None
 
     def _client(self) -> Any:
         if self._ecr is None:
@@ -560,8 +710,10 @@ def attest_artifact(
     artifact: Any,
     credential: Any = None,
     policy: ScanPolicy = DEFAULT_POLICY,
+    environments_policy: EnvironmentsPolicy = UNRESTRICTED_POLICY,
     log: Callable[[str], None] | None = None,
     size_bytes: int | None = None,
+    sbom: Any = None,
     attestor: Attestor | None = None,
 ) -> dict[str, Any]:
     """The `attest` seam of `EnvironmentBuildWorkflow` (E1-08, E1-09).
@@ -569,15 +721,51 @@ def attest_artifact(
     Takes the artifact the builder recorded and the build's credential, and
     answers the mapping the workflow stores: the scan's decision, the
     signature, the SBOM and provenance references, and the size.
+
+    `environments_policy` is the caller's organization's own narrowing of
+    what licence a build may carry (E3-06); `sbom`, when the caller has the
+    document, is what it is checked against — nobody fetches one here. A
+    caller with neither passes nothing through, and nothing is refused: the
+    platform default is unrestricted on licences, the same as every other
+    dimension of this policy until an organization writes one.
     """
+    variant = str(getattr(artifact, "variant", "") or "")
     reference = str(getattr(artifact, "immutable_reference", "") or "")
+    if variant and variant != "datalayer":
+        # D-11 is about the Datalayer artifact: it lives in this platform's
+        # registry, the scanner reads it there, cosign signs that digest, and
+        # the Operator refuses to start what is unsigned. A managed artifact
+        # is none of those things — it lives in the owner's own provider
+        # account (D-8) and is referenced the way that provider names it: a
+        # Daytona snapshot uuid, an E2B build id, a Modal `im-…`. There is no
+        # digest in a repository to scan or sign, and no Operator starting it.
+        #
+        # Attesting one anyway is what the first real Daytona build did, and
+        # it failed *after* the snapshot was built — the work done, the
+        # artifact live at the provider, and the build recorded as failed
+        # (2026-09-17).
+        #
+        # Publishing is not weakened by this: E2-15's gate requires the
+        # **Datalayer** artifact to have passed its scan, and that one is
+        # still attested here.
+        if log:
+            log(f"{variant} artifacts are not attested: {reference} is not a digest in a registry")
+        return {
+            "scan_summary": {},
+            "sbom_ref": "",
+            "provenance_ref": "",
+            "signature_ref": "",
+            "size_bytes": size_bytes,
+            "signed_now": False,
+            "licenses": [],
+        }
     registry, _, rest = reference.partition("/")
     repository, _, digest = rest.partition("@")
     if not (registry and repository and _DIGEST.match(digest)):
         raise EnvironmentsError(
             PROVIDER_ERROR,
             f"`{reference}` is not a digest in a repository, so it cannot be attested",
-            detail={"reference": reference},
+            detail={"reference": reference, "variant": variant},
         )
     use = attestor or Attestor(
         key=str(getattr(credential, "signing_key", "") or ""),
@@ -590,6 +778,8 @@ def attest_artifact(
         repository=repository,
         digest=digest,
         size_bytes=size_bytes,
+        sbom=sbom,
+        environments_policy=environments_policy,
     ).body()
 
 

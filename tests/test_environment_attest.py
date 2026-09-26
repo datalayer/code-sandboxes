@@ -19,14 +19,22 @@ from __future__ import annotations
 
 import json
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
-from code_sandboxes.environments.attest import Attestor, attest_artifact, signature_tag
+from code_sandboxes.environments.attest import (
+    Attestor,
+    attest_artifact,
+    licenses_by_package,
+    licenses_of,
+    signature_tag,
+)
 from code_sandboxes.environments.builders import ArtifactReference
-from code_sandboxes.environments.errors import EnvironmentsError
+from code_sandboxes.environments.errors import PROVIDER_ERROR, EnvironmentsError
 from code_sandboxes.environments.policy import (
     DEFAULT_POLICY,
+    EnvironmentsPolicy,
     Finding,
     ScanPolicy,
     decide,
@@ -80,7 +88,7 @@ def basic(identifier: str, severity: str, *, package: str = "openssl") -> dict:
 
 
 class FakeEcr:
-    """The two ECR calls the attestor makes, and nothing else."""
+    """The three ECR calls the attestor makes, and nothing else."""
 
     def __init__(
         self,
@@ -90,6 +98,7 @@ class FakeEcr:
         enhanced_findings=True,
         manifest: dict | None = None,
         pages: list[list[dict]] | None = None,
+        size_bytes: int | None = 2_147_483_648,
     ) -> None:
         self.statuses = list(statuses)
         self.findings = list(findings)
@@ -99,8 +108,12 @@ class FakeEcr:
         self.pages = pages
         self.enhanced_findings = enhanced_findings
         self.manifest = manifest
+        #: What `describe_images` answers for the digest; None makes it raise
+        #: `ImageNotFoundException`, the way a registry that lost it would.
+        self.size_bytes = size_bytes
         self.asked = 0
         self.scanned: list[str] = []
+        self.sized: list[str] = []
 
     def batch_get_image(self, repositoryName, imageIds, acceptedMediaTypes):  # noqa: N803 - boto3's spelling
         manifest = self.manifest or {
@@ -116,6 +129,14 @@ class FakeEcr:
                 }
             ]
         }
+
+    def describe_images(self, repositoryName, imageIds):  # noqa: N803 - boto3's spelling
+        self.sized.append(imageIds[0]["imageDigest"])
+        if self.size_bytes is None:
+            error = Exception("ImageNotFoundException")
+            error.response = {"Error": {"Code": "ImageNotFoundException"}}
+            raise error
+        return {"imageDetails": [{"imageSizeInBytes": self.size_bytes}]}
 
     def describe_image_scan_findings(self, repositoryName, imageId, nextToken=None):  # noqa: N803 - boto3's spelling
         self.asked += 1
@@ -599,28 +620,68 @@ class TestAttestingAnArtifact:
         assert "CVE-2026-1234" in raised.value.message
         assert cosign.argv == [], "a blocked artifact must not be signed"
 
-    def test_a_reference_that_is_not_a_digest_cannot_be_attested(self) -> None:
-        artifact = ArtifactReference(
-            variant="modal",
-            immutable_reference="im-1234567890",
-            provider_artifact_id="im-1234567890",
-            contract_version="sandbox-contract/v1",
+    def test_a_denied_licence_is_never_signed(self) -> None:
+        """The order is the point, the same as a blocked scan: a signature is
+        Datalayer's word, and this is the second word that goes into it."""
+        cosign = Cosign()
+        sbom = {"packages": [{"name": "gpl-lib", "licenseConcluded": "GPL-3.0"}]}
+        policy = EnvironmentsPolicy(allowed_licenses=("MIT", "Apache-2.0"))
+        with pytest.raises(EnvironmentsError) as raised:
+            attest_artifact(
+                artifact=self.an_artifact(),
+                attestor=an_attestor(run=cosign),
+                sbom=sbom,
+                environments_policy=policy,
+            )
+        assert raised.value.code.code == "DL_ENV_POLICY_DENIED"
+        assert "GPL-3.0" in raised.value.message and "gpl-lib" in raised.value.message
+        assert cosign.argv == [], "a denied licence must not be signed"
+
+    def test_an_allowed_licence_is_signed_as_usual(self) -> None:
+        cosign = Cosign()
+        sbom = {"packages": [{"name": "requests", "licenseConcluded": "Apache-2.0"}]}
+        policy = EnvironmentsPolicy(allowed_licenses=("MIT", "Apache-2.0"))
+        answer = attest_artifact(
+            artifact=self.an_artifact(),
+            attestor=an_attestor(run=cosign),
+            sbom=sbom,
+            environments_policy=policy,
         )
+        assert answer["licenses"] == ["Apache-2.0"]
+        assert cosign.argv, "an allowed licence is signed"
+
+    def test_with_no_organization_policy_nothing_about_licences_is_refused(self) -> None:
+        """The default: no organization has written this section, so a build
+        with any licence at all is unrestricted, the same as every artifact
+        before this box existed."""
+        cosign = Cosign()
+        sbom = {"packages": [{"name": "gpl-lib", "licenseConcluded": "GPL-3.0"}]}
+        answer = attest_artifact(
+            artifact=self.an_artifact(), attestor=an_attestor(run=cosign), sbom=sbom
+        )
+        assert answer["licenses"] == ["GPL-3.0"]
+        assert cosign.argv, "unrestricted by default"
+
+    def test_a_reference_that_is_not_a_digest_cannot_be_attested(self) -> None:
+        """A `datalayer` artifact must be a digest in this platform's registry.
+
+        `attest_artifact` takes `artifact: Any`, so nothing guarantees every
+        caller went through the model validator that would have refused this.
+        """
+        artifact = SimpleNamespace(variant="datalayer", immutable_reference="im-1234567890")
         with pytest.raises(EnvironmentsError) as raised:
             attest_artifact(artifact=artifact, attestor=an_attestor())
         assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
 
     def test_a_malformed_digest_cannot_be_attested_either(self) -> None:
         """`sha256:bad` starts with `sha256:` too: only a whole one is
-        accepted (found on PR #27's Copilot review). `e2b` rather than
-        `datalayer`, whose own model validator already refuses a malformed
-        digest before this function ever sees it — `attest_artifact` takes
-        `artifact: Any`, so nothing guarantees every caller went through it."""
-        artifact = ArtifactReference(
-            variant="e2b",
+        accepted (found on PR #27's Copilot review). Asked of `datalayer`,
+        since that is the variant this check is for — `attest_artifact` takes
+        `artifact: Any`, so nothing guarantees every caller went through the
+        model validator that would have refused it."""
+        artifact = SimpleNamespace(
+            variant="datalayer",
             immutable_reference=f"{REGISTRY}/{REPOSITORY}@sha256:bad",
-            provider_artifact_id="sha256:bad",
-            contract_version="sandbox-contract/v1",
         )
         with pytest.raises(EnvironmentsError) as raised:
             attest_artifact(artifact=artifact, attestor=an_attestor())
@@ -629,6 +690,33 @@ class TestAttestingAnArtifact:
     def test_the_policy_it_was_decided_under_is_part_of_the_record(self) -> None:
         answer = attest_artifact(artifact=self.an_artifact(), attestor=an_attestor())
         assert answer["scan_summary"]["policy"] == DEFAULT_POLICY.body()
+
+    def test_the_size_is_read_from_the_registry_when_nobody_hands_one_down(self) -> None:
+        """Which is every real call: the builder answers a reference, not a
+        weight, so `environments.artifact.bytes` — section 14's artifact size
+        — had no point in it although artifacts had been recorded (E1-25)."""
+        ecr = FakeEcr(size_bytes=2_147_483_648)
+        answer = attest_artifact(artifact=self.an_artifact(), attestor=an_attestor(ecr=ecr))
+        assert answer["size_bytes"] == 2_147_483_648
+        assert ecr.sized == [DIGEST]
+
+    def test_a_size_handed_down_is_kept_and_the_registry_is_not_asked(self) -> None:
+        ecr = FakeEcr()
+        answer = attest_artifact(
+            artifact=self.an_artifact(), size_bytes=116_183_040, attestor=an_attestor(ecr=ecr)
+        )
+        assert answer["size_bytes"] == 116_183_040
+        assert ecr.sized == []
+
+    def test_a_size_that_cannot_be_read_is_not_a_reason_to_refuse(self) -> None:
+        """A missing number on a dashboard, against an artifact nothing can
+        launch: the artifact is signed and the attestation stands."""
+        said: list[str] = []
+        attestor = an_attestor(ecr=FakeEcr(size_bytes=None), log=said.append)
+        answer = attest_artifact(artifact=self.an_artifact(), attestor=attestor)
+        assert answer["size_bytes"] is None
+        assert answer["signature_ref"] == f"{REGISTRY}/{REPOSITORY}@{DIGEST}"
+        assert any("size could not be read" in line for line in said)
 
 
 def test_nothing_reaches_a_registry_when_nothing_could_sign() -> None:
@@ -649,3 +737,138 @@ def test_nothing_reaches_a_registry_when_nothing_could_sign() -> None:
         attest_artifact(artifact=artifact, attestor=an_attestor(ecr=ecr, key=""))
     assert raised.value.detail["missing"] == "DATALAYER_ENVIRONMENTS_KMS_KEY"
     assert ecr.asked == 0, "the registry was asked before anything could have been signed"
+
+
+# -- the licences a publication carries ---------------------------------------------------------
+
+
+class TestLicencesFromTheSbom:
+    """What `licenses_of` reads, and what it refuses to guess.
+
+    A published version's page says it shows the licences its SBOM names
+    (D-12, E2-16). They had nowhere to come from: the snapshot read the scan
+    summary, and the registry's scanner reports vulnerabilities.
+    """
+
+    def test_it_reads_spdx_which_is_what_buildkit_writes(self) -> None:
+        document = {
+            "packages": [
+                {"name": "gdal", "licenseConcluded": "MIT"},
+                {"name": "numpy", "licenseConcluded": "BSD-3-Clause"},
+                {"name": "again", "licenseConcluded": "MIT"},
+            ]
+        }
+        assert licenses_of(document) == ["BSD-3-Clause", "MIT"]
+
+    def test_a_concluded_licence_wins_over_a_declared_one(self) -> None:
+        """`licenseConcluded` is what the tool decided; `licenseDeclared` is the claim."""
+        document = {
+            "packages": [
+                {"licenseConcluded": "Apache-2.0", "licenseDeclared": "MIT"},
+            ]
+        }
+        assert licenses_of(document) == ["Apache-2.0"]
+
+    def test_noassertion_is_not_a_licence_and_falls_through(self) -> None:
+        """SPDX writes NOASSERTION when it could not tell, which must not be shown."""
+        document = {
+            "packages": [
+                {"licenseConcluded": "NOASSERTION", "licenseDeclared": "BSD-3-Clause"},
+                {"licenseConcluded": "NONE", "licenseDeclared": ""},
+            ]
+        }
+        assert licenses_of(document) == ["BSD-3-Clause"]
+
+    def test_it_reads_cyclonedx_by_id_by_name_and_by_expression(self) -> None:
+        document = {
+            "components": [
+                {"licenses": [{"license": {"id": "Apache-2.0"}}]},
+                {"licenses": [{"license": {"name": "Public Domain"}}]},
+                {"licenses": [{"expression": "MIT OR Apache-2.0"}]},
+            ]
+        }
+        assert licenses_of(document) == [
+            "Apache-2.0",
+            "MIT OR Apache-2.0",
+            "Public Domain",
+        ]
+
+    def test_a_document_it_does_not_understand_names_nothing(self) -> None:
+        """Never a reason to fail a build: a licence list is worth having, not dying for."""
+        for document in (None, {}, {"packages": None}, {"components": [1, 2]}, "spdx"):
+            assert licenses_of(document) == []
+
+
+class TestWhatIsAttestedAndWhatIsNot:
+    """D-11 is about the Datalayer artifact, not every artifact.
+
+    It lives in this platform's registry: the scanner reads it there, cosign
+    signs that digest, and the Operator refuses to start what is unsigned. A
+    managed artifact is none of those things — it lives in the owner's own
+    provider account (D-8), named the way that provider names it.
+    """
+
+    def _artifact(self, variant: str, reference: str):
+        return SimpleNamespace(variant=variant, immutable_reference=reference)
+
+    def test_a_daytona_snapshot_is_not_attested(self) -> None:
+        """Its reference is a uuid, and attesting it anyway failed the first
+        real Daytona build *after* the snapshot was already built
+        (2026-09-17)."""
+        answer = attest_artifact(
+            artifact=self._artifact("daytona", "51d10ab0-d98d-4117-bdb5-918e98646c92"),
+            size_bytes=1234,
+        )
+        assert answer["scan_summary"] == {}
+        assert answer["signature_ref"] == ""
+        assert answer["signed_now"] is False
+        # What the provider told us is still recorded.
+        assert answer["size_bytes"] == 1234
+
+    def test_an_e2b_build_id_and_a_modal_image_id_are_not_either(self) -> None:
+        for variant, reference in (("e2b", "bld-123"), ("modal", "im-abc123")):
+            answer = attest_artifact(artifact=self._artifact(variant, reference))
+            assert answer["signed_now"] is False, variant
+            assert answer["scan_summary"] == {}, variant
+
+    def test_a_datalayer_artifact_that_is_not_a_digest_still_fails(self) -> None:
+        """The check that matters is kept where it means something."""
+        with pytest.raises(EnvironmentsError) as raised:
+            attest_artifact(artifact=self._artifact("datalayer", "not-a-digest"))
+        assert raised.value.code is PROVIDER_ERROR
+        assert "cannot be attested" in str(raised.value)
+
+
+class TestLicencesByPackage:
+    """`licenses_by_package`: the attribution `licenses_of` itself throws away
+    (E3-06 needs to name which package carries a denied licence)."""
+
+    def test_it_pairs_each_spdx_package_with_its_licence(self) -> None:
+        document = {
+            "packages": [
+                {"name": "gdal", "licenseConcluded": "MIT"},
+                {"name": "numpy", "licenseConcluded": "BSD-3-Clause"},
+            ]
+        }
+        assert licenses_by_package(document) == [
+            ("gdal", "MIT"),
+            ("numpy", "BSD-3-Clause"),
+        ]
+
+    def test_it_pairs_each_cyclonedx_component_with_its_licence(self) -> None:
+        document = {
+            "components": [
+                {"name": "requests", "licenses": [{"license": {"id": "Apache-2.0"}}]},
+            ]
+        }
+        assert licenses_by_package(document) == [("requests", "Apache-2.0")]
+
+    def test_an_unnamed_package_still_carries_its_licence(self) -> None:
+        """`licenses_of` must not lose a licence just because this test does not name one."""
+        document = {"packages": [{"licenseConcluded": "MIT"}]}
+        assert licenses_by_package(document) == [("", "MIT")]
+        assert licenses_of(document) == ["MIT"]
+
+    def test_a_document_it_does_not_understand_names_nothing(self) -> None:
+        for document in (None, {}, {"packages": None}, {"components": [1, 2]}, "spdx"):
+            assert licenses_by_package(document) == []

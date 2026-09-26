@@ -145,13 +145,31 @@ class _DaytonaCredential:
 
 
 class _ModalCredential:
+    """The shape durable's `_mint_credential` gives a Modal build: it reads
+    `aws_session` (D-18), never `username`/`password` — this used to put the
+    AWS keys there, a shape the worker never produces, so this test passed
+    while the worker's Modal builds failed their base pull.
+
+    In production `aws_session` is always the `modal_base_reader` IAM user's
+    own real key: Modal's own `from_aws_ecr` never reads `AWS_SESSION_TOKEN`
+    anywhere in its SDK, so an assumed session fails the same way a wrong key
+    would ("The security token included in the request is invalid", found
+    live 2026-09-18). This double carries whatever AWS credential the person
+    running the live test has ambient — a session token is passed on if one
+    is present, but a live Modal run only actually succeeds against a real,
+    static key, the same requirement production has.
+    """
+
     def __init__(self) -> None:
         self.provider_secrets = {
             "MODAL_TOKEN_ID": os.environ.get("MODAL_TOKEN_ID", ""),
             "MODAL_TOKEN_SECRET": os.environ.get("MODAL_TOKEN_SECRET", ""),
         }
-        self.username = os.environ.get("AWS_ACCESS_KEY_ID", "")
-        self.password = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+        self.aws_session = {
+            name: os.environ[name]
+            for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
+            if os.environ.get(name)
+        }
 
 
 def _build_request(variant: str, resolved_base: str, lock_text: str) -> BuildRequest:
@@ -225,25 +243,12 @@ class TestDaytona:
 
 
 class TestModal:
-    """`xfail(strict=False)`: checks 5 (imports) and 6 (filesystem) fail —
-    confirmed live, 2026-09-13, the session driver refusing to start
-    against a sandbox that reports itself already shutting down, while 1,
-    2, 3, 4, 7, 8 and 9 all pass. This used to be attributed to the
-    identity gap (checks 1/2 failed too, then) — closed since, live: a
-    contract-built artifact's `ModalSandbox` now drops its driver to
-    `1000:100` (`_start_driver`, gated on `image_id` so a plain
-    `ModalSandbox` is unaffected), and checks 1/2 pass with it. 5/6 turned
-    out to be a separate, still-unexplained issue: a plain, non-Environments
-    `ModalSandbox` runs several sequential snippets with no trouble at all
-    over the same span, so this is specific to a contract-built artifact's
-    image under repeated `exec`. An `XPASS` here means that's closed too."""
+    """No `xfail` since 2026-09-18: a real artifact, built by the production
+    builder and launched by image id, passes all nine checks, check 9 included
+    with a secret to scan for, right after check 8. The break recorded under
+    E2-05 (the exec channel gone after check 8) no longer reproduces; the
+    kernel-restart fix of 1.9.28, check 7's own path, is the likeliest cause."""
 
-    @pytest.mark.xfail(
-        reason="checks 5 and 6 fail on a session driver restart the sandbox refuses, "
-        "specific to a contract-built artifact and not yet root-caused (identity, "
-        "checks 1 and 2, is fixed)",
-        strict=False,
-    )
     def test_build_launch_and_the_core_tier(self, real_lock: tuple[str, str]) -> None:
         _skip_unless_available("modal")
         import modal

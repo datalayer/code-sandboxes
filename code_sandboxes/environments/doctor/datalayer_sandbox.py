@@ -43,7 +43,7 @@ CONTRACT = {
     "uid": 1000,
     "gid": 100,
     "home": "/home/datalayer",
-    "workdir": "/home/datalayer/content",
+    "workdir": "/home/datalayer",
     "reserved_path": "/opt/datalayer",
     "python_executables": ["python3", "pip"],
     "kernel_packages": ["ipykernel", "jupyter_client"],

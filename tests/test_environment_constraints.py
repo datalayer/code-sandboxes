@@ -20,6 +20,7 @@ PROTECTED = {
     "jupyter-client",
     "jupyter-server",
     "jupyter-server-nbmodel",
+    "jupyter-kernels",
     "datalayer",
 }
 

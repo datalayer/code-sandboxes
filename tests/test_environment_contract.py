@@ -16,11 +16,14 @@ from code_sandboxes.environments.conformance import CORE_CHECKS, EXTENDED_CHECKS
 from code_sandboxes.environments.contract import (
     SANDBOX_CONTRACT_V1,
     SUPPORTED_CONTRACTS,
+    BuildContextEntry,
+    check_build_context,
     check_dockerfile,
     contract_markdown,
     get_contract,
     main,
     parse_dockerfile,
+    validate_build_context,
     validate_dockerfile,
 )
 from code_sandboxes.environments.doctor.datalayer_sandbox import ROW_IDS
@@ -35,7 +38,7 @@ def test_the_contract_carries_the_identity_the_owner_took() -> None:
     """PLAN_ENV.md, D-6: gid 100 is the one departure from section 3."""
     contract = SANDBOX_CONTRACT_V1
     assert (contract.user, contract.uid, contract.gid) == ("datalayer", 1000, 100)
-    assert (contract.home, contract.workdir) == ("/home/datalayer", "/home/datalayer/content")
+    assert (contract.home, contract.workdir) == ("/home/datalayer", "/home/datalayer")
     assert contract.reserved_path == "/opt/datalayer"
     assert contract.doctor_path == "/opt/datalayer/bin/datalayer-sandbox"
     assert SUPPORTED_CONTRACTS == ("sandbox-contract/v1",)
@@ -132,6 +135,52 @@ def test_the_parser_joins_continuations_and_skips_comments_inside_them() -> None
     )
     assert [(item.line, item.keyword) for item in instructions] == [(1, "FROM"), (2, "RUN")]
     assert instructions[1].arguments == "apt-get update && apt-get install -y gdal-bin"
+
+
+# -- The build context (E3-03) -------------------------------------------------
+
+
+def test_a_plain_build_context_passes() -> None:
+    entries = [
+        BuildContextEntry("Dockerfile", 200),
+        BuildContextEntry("src/app.py", 1024),
+        BuildContextEntry("data/model.bin", 5 * 1024 * 1024),
+    ]
+    assert validate_build_context(entries) == []
+    check_build_context(entries)
+
+
+@pytest.mark.parametrize(
+    ("entry", "message"),
+    [
+        (BuildContextEntry("/etc/passwd", 10), "is an absolute path, not a context path"),
+        (BuildContextEntry("../secret", 10), "escapes the context with `..`"),
+        (BuildContextEntry("a/../../secret", 10), "escapes the context with `..`"),
+        (BuildContextEntry("link", is_symlink=True), "is a symlink, which could read a host file"),
+        (
+            BuildContextEntry("big.bin", 50 * 1024 * 1024 + 1),
+            "is over the 52428800-byte per-file limit",
+        ),
+    ],
+)
+def test_a_forbidden_context_member_is_refused(entry: BuildContextEntry, message: str) -> None:
+    findings = validate_build_context([entry])
+    assert any(finding.message == message for finding in findings), findings
+    with pytest.raises(EnvironmentsError) as refused:
+        check_build_context([entry])
+    assert refused.value.code is errors.SPEC_INVALID
+
+
+def test_too_many_files_is_refused() -> None:
+    entries = [BuildContextEntry(f"f{index}", 1) for index in range(2001)]
+    findings = validate_build_context(entries)
+    assert any("more than 2000 files" in finding.message for finding in findings)
+
+
+def test_too_many_bytes_in_all_is_refused() -> None:
+    entries = [BuildContextEntry(f"f{index}", 40 * 1024 * 1024) for index in range(3)]
+    findings = validate_build_context(entries)
+    assert any("total limit" in finding.message for finding in findings)
 
 
 @pytest.mark.parametrize(

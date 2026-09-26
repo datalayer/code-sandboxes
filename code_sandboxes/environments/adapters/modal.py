@@ -96,13 +96,20 @@ end and the container exited before that first real exec ever reached it.
 The entrypoint now execs `sleep infinity` when it is given no arguments,
 and `"$@"` when it is — correct either way a caller invokes it.
 
-**A GPU size class is left buildable at `validate()`,** matching an existing
-test (`test_a_gpu_spec_is_buildable_on_modal_and_daytona`), and refused at
-`build()` instead, naming E2-17 — the same reasoning as Daytona's: the CUDA
-base is not published yet, so this cannot be reached in practice, and this
-builder does not know the launch-time `gpu=` argument to hand a size class
-either (D-20 leaves that to a later item; a GPU is Modal's own launch
-option, not an image property, per section 11.4 item 10).
+**And a sandbox with no command is not given no arguments** (found live on
+2026-09-18): Modal keeps the base's own CMD, `start-jupyter.sh`, under the
+new ENTRYPOINT where Docker would reset it, so the main process was a
+Jupyter server, which exits within a minute and ends the sandbox. A smoke
+test's restarted sandbox, started warm, died between checks 8 and 9. The
+artifact now sets its CMD to `sleep infinity`, and `ModalSandbox` names the
+same command when it launches an artifact, which also covers the ones built
+before.
+
+**A GPU is a launch option on Modal, not part of the image** (section 11.4
+item 10, E2-17). A GPU version builds the same image any version does, on the
+CUDA base; the spec's `accelerator` names one of Modal's GPUs, checked at
+`validate`, and the smoke test launches the image on it (`gpu="T4"`,
+`"H100:2"`) and adds check 11 to the core tier.
 
 **A build secret is attached to the `postInstall` steps that name it (E3-05).**
 `run_commands` takes a per-step `secrets=` collection, a mechanism E2B and
@@ -124,7 +131,7 @@ import contextlib
 import io
 import os
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -135,6 +142,7 @@ from ..builders import (
     ArtifactReference,
     BuildRequest,
     CapabilityFinding,
+    ValidationResult,
 )
 from ..contract import SANDBOX_CONTRACT_V1
 from ..errors import (
@@ -147,19 +155,48 @@ from ..errors import (
 from ..files import files_step
 from ..redact import redact
 from ..resolve import WHEELHOUSE_IMAGE_PATH, apt_pins_in
-from ..spec import GPU_SIZE_CLASSES, BuildSecret, Environment, command_names_secret
+from ..resolve_conda import conda_lock_pip_requirements, is_conda_lock
+from ..spec import BuildSecret, Environment, command_names_secret
 from .managed import ManagedBuilder
 
-__all__ = ["UNIMPLEMENTED_INSTRUCTIONS", "Builder"]
+__all__ = ["MODAL_GPUS", "UNIMPLEMENTED_INSTRUCTIONS", "Builder", "modal_gpu"]
 
 #: What Modal's own Dockerfile builder does not implement (§6).
 UNIMPLEMENTED_INSTRUCTIONS = ("ONBUILD", "STOPSIGNAL", "VOLUME")
+
+#: The GPUs a Modal sandbox takes by name (E2-17), as its `gpu=` spells them.
+MODAL_GPUS: tuple[str, ...] = (
+    "T4",
+    "L4",
+    "A10G",
+    "L40S",
+    "A100",
+    "A100-40GB",
+    "A100-80GB",
+    "H100",
+    "H200",
+    "B200",
+)
+
+
+def modal_gpu(accelerator_type: str, count: int = 1) -> str | None:
+    """Modal's `gpu=` for an accelerator, or `None` when Modal has no such GPU.
+
+    `t4` and `a100_80gb` name what Modal calls `T4` and `A100-80GB`, and a
+    count above one is Modal's `"H100:2"`. An `RTX-4090` is Daytona's
+    vocabulary, not Modal's.
+    """
+    name = accelerator_type.strip().upper().replace("_", "-")
+    if name not in MODAL_GPUS:
+        return None
+    return f"{name}:{count}" if count > 1 else name
+
 
 #: `uv`, pinned the same way every other builder's bootstrap is (E1-04/E3-04).
 _UV_VERSION = "0.12.11"
 
 _LOCK_PATH = "/opt/datalayer/lock.txt"
-_CONTENT_DIR = "/home/datalayer/content"
+_CONTENT_DIR = "/home/datalayer"
 
 #: The 2023.12 default fails installing Modal's own runtime deps on Python
 #: 3.13 (E0-04, confirmed live 2026-09-13): see the module docstring.
@@ -178,6 +215,8 @@ _ENTRYPOINT_PATH = "/opt/datalayer/bin/entrypoint.sh"
 #: is given keeps it alive for that; `exec "$@"` still wins when something
 #: is, for a caller that does supply a command directly.
 _ENTRYPOINT_SCRIPT = '#!/bin/sh\nif [ "$#" -eq 0 ]; then exec sleep infinity; fi\nexec "$@"\n'
+#: The artifact's CMD: what a sandbox started with no command of its own runs.
+_KEEP_ALIVE_COMMAND = ("sleep", "infinity")
 
 
 def _modal_sdk() -> Any:
@@ -211,6 +250,28 @@ def _scrubbed(text: str, values: dict[str, str]) -> str:
     return redact(text, values.values()) if values else text
 
 
+def _install_packages(image: Any, lock_text: str) -> Any:
+    """The package layer for this lock: a conda source (E3-02) installs the
+    `@EXPLICIT` lock with Modal's own `micromamba_install` — which brings
+    micromamba itself, so no bootstrap is needed here — and layers the pip
+    layer the solve resolved (the user's pip requirements and the protected
+    pins over them, from the lock's own `# datalayer-pip:` header); a pip
+    source runs `uv pip sync`."""
+    if is_conda_lock(lock_text):
+        image = image.micromamba_install(spec_file=_LOCK_PATH)
+        pip_requirements = conda_lock_pip_requirements(lock_text)
+        if pip_requirements:
+            image = image.pip_install(*pip_requirements, find_links=WHEELHOUSE_IMAGE_PATH)
+        return image
+    return image.run_commands(
+        f'pip install --no-cache-dir "uv=={_UV_VERSION}"',
+        # Packages install as root: every Modal build step already runs as
+        # root regardless of any `USER` line (see the module docstring), so
+        # this is stating what is already true rather than asking for it.
+        f"uv pip sync --system --require-hashes --find-links {WHEELHOUSE_IMAGE_PATH} {_LOCK_PATH}",
+    )
+
+
 def _post_install(
     image: Any, commands: list[str], declared: list[BuildSecret], step_secrets: dict[str, Any]
 ) -> Any:
@@ -221,12 +282,53 @@ def _post_install(
     return image
 
 
+def _intermediates_of(built: Any) -> tuple[str, ...]:
+    """Every layer under a built image, by id, deepest first (E2-05, E2-09).
+
+    Each chained builder call leaves an image of its own, and deleting the
+    artifact does not delete them. Modal offers no call that lists an
+    account's images, so an intermediate nobody wrote down at build time can
+    never be found again — which is why this is recorded rather than
+    discovered. Confirmed live on 2026-09-17: a three-call chain built through
+    `Image.build` hydrates an `object_id` on every image in `deps()`, not only
+    on the last.
+
+    The built image itself is not an intermediate: it is the artifact.
+    """
+    found: list[str] = []
+    seen: set[int] = set()
+
+    def walk(image: Any) -> None:
+        if id(image) in seen:
+            return
+        seen.add(id(image))
+        for dependency in getattr(image, "deps", lambda: ())():
+            if hasattr(dependency, "deps"):
+                walk(dependency)
+        object_id = getattr(image, "object_id", None)
+        # Only images: the build's ECR secret is in `deps()` too, and has an
+        # `st-` id `ImageDelete` refuses ("not a valid Image ID", found live
+        # on 2026-09-18). It is deleted by the build itself, as a secret.
+        if object_id and image is not built and str(object_id).startswith("im-"):
+            found.append(str(object_id))
+
+    try:
+        walk(built)
+    except Exception:
+        return ()
+    return tuple(dict.fromkeys(found))
+
+
 class Builder(ManagedBuilder):
     """Modal: the capability half (E2-06) and the build (E2-05)."""
 
     variant = "modal"
     item = "E2-05"
     title = "Modal"
+    #: A `packages` list and, for conda (E3-02), an `environment.yml`
+    #: dependency file installed with `micromamba_install`.
+    build_sources = ("packages", "dependencyFile", "dockerfile")
+    dependency_formats = ("conda",)
     #: Modal runs GPUs, in the owner's workspace (E2-17). This builder does
     #: not build one yet: see `build`'s own guard.
     gpu = True
@@ -331,6 +433,18 @@ class Builder(ManagedBuilder):
                         field=f"spec.buildSecrets[{index}].mountAs",
                     )
                 )
+        accelerator = environment.spec.resources.accelerator
+        if accelerator != "none" and modal_gpu(accelerator.type) is None:
+            findings.append(
+                CapabilityFinding(
+                    code="DL_ENV_CAPABILITY_UNSUPPORTED",
+                    message=(
+                        f"Modal has no GPU called `{accelerator.type}`; it offers "
+                        + ", ".join(MODAL_GPUS)
+                    ),
+                    field="spec.resources.accelerator.type",
+                )
+            )
         return findings
 
     # -- Building -------------------------------------------------------------
@@ -344,18 +458,6 @@ class Builder(ManagedBuilder):
         launch, not here, for the same reason.
         """
         spec = request.environment.spec
-        if request.size_class in GPU_SIZE_CLASSES:
-            # `validate` leaves a GPU class buildable (`gpu = True`, D-20):
-            # the CUDA base E2-17 has not published yet, so this cannot be
-            # reached in practice — refused plainly here rather than
-            # guessing at the launch-time `gpu=` argument this class needs
-            # (section 11.4 item 10 is a launch concern, not a build one).
-            raise EnvironmentsError(
-                CAPABILITY_UNSUPPORTED,
-                f"Modal runs `{request.size_class}` on its own GPUs, but the CUDA base this "
-                "needs is E2-17's, not built yet",
-                detail={"variant": self.variant, "missing": "E2-17"},
-            )
         # Resolved before Modal is touched: a secret IAM will not give stops
         # the build with nothing to clean up in the owner's workspace.
         declared, values = self._resolved_secrets(request)
@@ -403,19 +505,23 @@ class Builder(ManagedBuilder):
                 image = image.add_local_file(
                     str(entrypoint_file), _ENTRYPOINT_PATH, copy=True
                 ).run_commands(f"chmod +x {_ENTRYPOINT_PATH}")
-                image = image.run_commands(
-                    f'pip install --no-cache-dir "uv=={_UV_VERSION}"',
-                    # Packages install as root: every Modal build step
-                    # already runs as root regardless of any `USER` line
-                    # (see the module docstring), so this is stating what
-                    # is already true rather than asking for it.
-                    "uv pip sync --system --require-hashes "
-                    f"--find-links {WHEELHOUSE_IMAGE_PATH} {_LOCK_PATH}",
-                )
+                image = _install_packages(image, request.lock_text)
                 for command in files_step(request.environment, variant=self.variant):
                     image = image.run_commands(command)
                 image = _post_install(image, spec.commands.post_install, declared, step_secrets)
-                image = image.workdir(_CONTENT_DIR).entrypoint([_ENTRYPOINT_PATH])
+                # The base's own CMD is `start-jupyter.sh`, and Modal keeps
+                # it under a new ENTRYPOINT where Docker would reset it: a
+                # sandbox started with no command ran a Jupyter server as its
+                # main process, which exits within a minute and takes the
+                # sandbox with it (found live on 2026-09-18, the restarted
+                # sandbox of a smoke test dying mid-tier). What holds the
+                # container is `sleep`; Jupyter is started by exec, when
+                # asked (`ModalSandbox.prepare_jupyter_server`).
+                image = (
+                    image.workdir(_CONTENT_DIR)
+                    .entrypoint([_ENTRYPOINT_PATH])
+                    .cmd(list(_KEEP_ALIVE_COMMAND))
+                )
 
                 logged: list[str] = []
                 buffer = io.StringIO()
@@ -459,6 +565,7 @@ class Builder(ManagedBuilder):
             mutable_alias=name,
             provider_account=provider_account(self.variant, self._provider_secrets()) or None,
             contract_version=spec.contract or SANDBOX_CONTRACT_V1.version,
+            intermediates=_intermediates_of(built),
         )
 
     def _resolved_secrets(self, request: BuildRequest) -> tuple[list[BuildSecret], dict[str, str]]:
@@ -481,23 +588,31 @@ class Builder(ManagedBuilder):
         return declared, values
 
     def _ecr_secret(self, sdk: Any, client: Any) -> Any | None:
-        """A Modal Secret carrying this build's own base-reader credential (D-17, D-18).
+        """A Modal Secret carrying this build's base-reader session (D-17, D-18).
 
-        `None` when the credential carries no registry login: the base is
-        then whatever the ambient workspace can already reach, the same
-        fallback `_client` takes with no owner token.
+        `from_aws_ecr` wants the IAM session itself — keys, token and region —
+        not the docker-login `AWS`/token pair Daytona and E2B take, which is
+        what the credential's `username`/`password` hold. So it reads
+        `aws_session`. Reading the login pair as IAM keys is what this did
+        until 2026-09-18: the worker minted `AWS`/<ECR token>, this wrote it
+        as `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, and AWS answered "The
+        security token included in the request is invalid" on the base pull,
+        so no Modal build through the worker could ever succeed.
+
+        `None` when the credential carries no session: the base is then
+        whatever the ambient workspace can already reach, the same fallback
+        `_client` takes with no owner token.
         """
-        username = str(getattr(self._credential, "username", "") or "")
-        password = str(getattr(self._credential, "password", "") or "")
-        if not (username and password):
+        session = dict(getattr(self._credential, "aws_session", None) or {})
+        if not (session.get("AWS_ACCESS_KEY_ID") and session.get("AWS_SECRET_ACCESS_KEY")):
             return None
-        # `from_aws_ecr` wants IAM-shaped credentials, not the docker-login
-        # `AWS`/token pair Daytona and E2B take (found live, 2026-09-13):
-        # the same D-17 session, read differently.
         secret = sdk.Secret.from_dict(
             {
-                "AWS_ACCESS_KEY_ID": username,
-                "AWS_SECRET_ACCESS_KEY": password,
+                **{
+                    name: str(session[name])
+                    for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
+                    if session.get(name)
+                },
                 "AWS_REGION": self._region,
             }
         )
@@ -610,6 +725,144 @@ class Builder(ManagedBuilder):
         except Exception as error:
             raise self._provider_error("ask whether the image exists", error) from error
         return True
+
+    def smoke_test(
+        self,
+        artifact: ArtifactReference,
+        *,
+        environment: Any = None,
+        lock_text: str | None = None,
+        secret_values: Sequence[str] = (),
+    ) -> ValidationResult:
+        """Launch the image and run Appendix B's core tier in it (E2-05).
+
+        This box's own `Done when` asks for exactly this — "the live test
+        launches by image id and passes the core tier" — and it refused
+        through `ManagedBuilder`, so **no Modal build could reach
+        `succeeded`**: the image was built in the owner's workspace and the
+        build recorded failed at this step, the same state Daytona was in
+        until 2026-09-17.
+
+        **Launched by image id, never by name**: a published name is mutable
+        by design (§6), so only the id says which artifact ran. Launched
+        through `ModalSandbox` — the same class a person's launch uses —
+        rather than a hand-rolled `Sandbox.create`, because a hand-rolled
+        launch is exactly what hid, on 2026-09-13, that every image this
+        builder made died the instant it was launched for real.
+
+        **As the owner** (D-8): the sandbox is created with the same client
+        the build used, so it runs in the workspace the image is in.
+
+        **Restarted by replacing the sandbox.** Modal has no in-place
+        restart, so check 7's restart stops this sandbox and starts another
+        from the same image, which is the stronger form of the question.
+
+        The sandbox is terminated whether the tier passed or not.
+        """
+        if environment is None:
+            raise EnvironmentsError(
+                CAPABILITY_UNSUPPORTED,
+                "A Modal smoke test needs the version's spec: the core tier "
+                "asks for the Python version it declared and the packages its "
+                "lock pinned, and an artifact carries neither",
+                detail={"variant": self.variant},
+            )
+        from ...modal_sandbox import ModalSandbox
+        from ...models import SandboxConfig
+        from ..conformance import expected_packages, run_accelerator_check, run_core_tier
+
+        sdk = self._modal_sdk()
+        accelerator = environment.spec.resources.accelerator
+        gpu = None if accelerator == "none" else modal_gpu(accelerator.type, accelerator.count)
+        sandbox = ModalSandbox(
+            config=SandboxConfig(name=f"smoke-{artifact.provider_artifact_id}", gpu=gpu),
+            app_name=f"dl-{environment.metadata.name}",
+            image_id=artifact.provider_artifact_id,
+            client=self._client(sdk),
+        )
+        self._log(f"Launching {artifact.provider_artifact_id} to smoke-test it")
+        try:
+            sandbox.start()
+            result = run_core_tier(
+                sandbox,
+                python_version=environment.spec.language.version,
+                expected_packages=expected_packages(environment, lock_text or ""),
+                secret_values=tuple(secret_values),
+                restart=lambda: self._restart(sandbox),
+            )
+            if gpu is not None:
+                # The core tier passes on a machine with no GPU: a GPU version
+                # is the version its spec describes only when its GPUs are
+                # visible and its CUDA is the spec's (check 11, E2-17).
+                result.checks.append(
+                    run_accelerator_check(sandbox, cuda=accelerator.cuda, count=accelerator.count)
+                )
+            return result
+        except EnvironmentsError:
+            raise
+        except Exception as error:
+            raise self._provider_error("smoke-test the image", error) from error
+        finally:
+            try:
+                sandbox.stop()
+            except Exception as error:
+                self._log(f"The smoke-test sandbox could not be stopped: {error}")
+
+    @staticmethod
+    def _restart(sandbox: Any) -> None:
+        """Check 7's restart, as Modal can do it: a new sandbox from the same image."""
+        sandbox.stop()
+        sandbox.start()
+
+    def delete(self, artifact: ArtifactReference) -> None:
+        """Delete the image, and every intermediate layer this build recorded (E2-05, E2-09).
+
+        Deleting the artifact does not delete the layers under it, and Modal
+        offers no call that lists an account's images, so what is removed is
+        what `build` wrote down — an intermediate nobody recorded can never be
+        found again.
+
+        Two answers are outcomes rather than failures, both found live on
+        2026-09-17:
+
+        * **Already gone** is success. A replay of a collection must delete the
+          same set again with no harm, the same way the Datalayer collector
+          treats an artifact that is not there.
+        * **Not ours to delete.** The bottom of a chain can be an image the
+          workspace does not own — Modal's own `debian_slim` answers
+          `PermissionDenied` — and an image somebody else owns was never this
+          artifact's to collect. It is logged and stepped over, not raised.
+        """
+        sdk = self._modal_sdk()
+        client = self._client(sdk)
+        synchronizer, api_pb2 = self._modal_internals()
+
+        async def _delete(image_id: str) -> None:
+            await client.stub.ImageDelete(api_pb2.ImageDeleteRequest(image_id=image_id))
+
+        # The artifact last: an intermediate is only reachable while the
+        # record naming it survives, so a half-done collection that has
+        # dropped the image would strand them.
+        for image_id in (*artifact.intermediates, artifact.provider_artifact_id):
+            if not image_id:
+                continue
+            try:
+                # A bare coroutine on Modal's stub silently does nothing, so
+                # this runs on the SDK's own loop — see `_delete_secret`.
+                synchronizer.wrap(_delete)(image_id)
+            except sdk.exception.NotFoundError:
+                continue
+            except Exception as error:
+                if "permission" in str(error).lower():
+                    self._log(
+                        f"The Modal image {image_id} is not this account's to delete: {error}"
+                    )
+                    continue
+                if image_id == artifact.provider_artifact_id:
+                    raise self._provider_error("delete the image", error) from error
+                # One layer's refusal does not strand the rest, nor the
+                # artifact this was called to collect.
+                self._log(f"The Modal intermediate {image_id} could not be deleted: {error}")
 
     def _provider_error(self, what: str, error: BaseException) -> EnvironmentsError:
         return EnvironmentsError(

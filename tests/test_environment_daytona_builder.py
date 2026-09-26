@@ -17,13 +17,14 @@ build's own base pull needs, made and torn down around it.
 
 from __future__ import annotations
 
+import enum
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
 
-from code_sandboxes.environments.adapters.daytona import Builder
+from code_sandboxes.environments.adapters.daytona import DAYTONA_GPUS, Builder, daytona_gpu
 from code_sandboxes.environments.builders import ArtifactReference, BuildRequest
 from code_sandboxes.environments.errors import (
     ARTIFACT_MISSING,
@@ -44,6 +45,25 @@ LOCK = (
 )
 APT_LOCK = LOCK + "# datalayer-apt: gdal-bin=3.8.4+dfsg-3build2\n"
 LOCK_DIGEST = "sha256:" + "dd" * 32
+
+#: A conda explicit lock (E3-02) and its `dependencyFile` source.
+CONDA_LOCK = (
+    "# Resolved by Datalayer (PLAN_ENV.md D-9). Do not edit: a change makes a new version.\n"
+    "# python: 3.13\n"
+    "# platform: linux-64\n"
+    "# datalayer-pip: ipykernel==7.3.0\n"
+    "@EXPLICIT\n"
+    "https://conda.anaconda.org/conda-forge/linux-64/gdal-3.8.4-py313.conda#" + "ab" * 32 + "\n"
+)
+CONDA_SPEC = {
+    "build": {
+        "source": "dependencyFile",
+        "dependencyFile": {
+            "sourceFormat": "conda",
+            "content": "name: geo\nchannels: [conda-forge]\ndependencies: [python=3.13, gdal]\n",
+        },
+    },
+}
 
 
 class Credential:
@@ -95,6 +115,11 @@ class FakeImage:
     def base(cls, ref: str) -> FakeImage:
         return cls([Call("base", (ref,))])
 
+    @classmethod
+    def from_dockerfile(cls, path: str) -> FakeImage:
+        """The text is read now: the builder's scratch file is gone by the time a test looks."""
+        return cls([Call("from_dockerfile", (path,), {"content": Path(path).read_text()})])
+
     def env(self, env_vars: dict[str, str]) -> FakeImage:
         self.calls.append(Call("env", (env_vars,)))
         return self
@@ -136,6 +161,10 @@ class FakeResources:
         self.disk = disk
         self.gpu = gpu
         self.gpu_type = gpu_type
+
+
+#: The SDK's `GpuType`, by value, as the builder asks for one.
+FakeGpuType = enum.Enum("GpuType", {name.replace("-", "_"): name for name in DAYTONA_GPUS})
 
 
 class FakeCreateSnapshotParams:
@@ -189,9 +218,12 @@ class FakeSnapshotService:
         create_error: Exception | None = None,
         get_results: dict[str, FakeSnapshot] | None = None,
         get_errors: dict[str, Exception] | None = None,
+        delete_errors: dict[str, Exception] | None = None,
     ) -> None:
         self.create_calls: list[Call] = []
         self.get_calls: list[Call] = []
+        self.delete_calls: list[Call] = []
+        self._delete_errors = delete_errors or {}
         self._create_result = create_result
         self._create_error = create_error
         self._get_results = get_results or {}
@@ -216,6 +248,15 @@ class FakeSnapshotService:
         if name_or_id in self._get_results:
             return self._get_results[name_or_id]
         raise FakeDaytonaNotFoundError(f"no such snapshot {name_or_id}")
+
+    def delete(self, snapshot: Any) -> None:
+        """As the SDK's: an id or a name, and a missing one is not found."""
+        self.delete_calls.append(Call("delete", (snapshot,)))
+        if snapshot in self._delete_errors:
+            raise self._delete_errors[snapshot]
+        if snapshot not in self._get_results:
+            raise FakeDaytonaNotFoundError(f"no such snapshot {snapshot}")
+        del self._get_results[snapshot]
 
 
 class FakeDaytonaClient:
@@ -247,6 +288,7 @@ class FakeDaytonaModule:
         self.DaytonaNotFoundError = FakeDaytonaNotFoundError
         self.Image = FakeImage
         self.Resources = FakeResources
+        self.GpuType = FakeGpuType
         self.CreateSnapshotParams = FakeCreateSnapshotParams
         self.DaytonaConfig = FakeDaytonaConfig
         self.Daytona = _DaytonaFactory(self)
@@ -459,6 +501,24 @@ class TestBuildingASnapshot:
         assert "--require-hashes" in sync.args[0]
         assert "--find-links /opt/datalayer/wheelhouse" in sync.args[0]
 
+    def test_a_conda_lock_installs_with_micromamba_and_then_the_pip_pins(self) -> None:
+        """A conda source (E3-02): micromamba is bootstrapped, `micromamba
+        install --file` reads the `@EXPLICIT` lock, and the pip layer the solve
+        resolved follows — never the pip-lock `uv pip sync`."""
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request(lock_text=CONDA_LOCK, spec=CONDA_SPEC))
+        image = daytona.client.snapshot.create_calls[0].args[0].image
+        runs = calls_named(image, "run_commands")
+        bootstrap = next(i for i, call in enumerate(runs) if "micro.mamba.pm" in call.args[0])
+        micromamba = next(i for i, call in enumerate(runs) if "micromamba install" in call.args[0])
+        pip = next(i for i, call in enumerate(runs) if "ipykernel==7.3.0" in call.args[0])
+        assert bootstrap < micromamba < pip
+        assert not any("uv pip sync" in call.args[0] for call in runs)
+        # The interpreter a sandbox runs, not a new `base` under the content
+        # home (2026-09-18): the same command the Datalayer builder emits.
+        assert "--root-prefix /opt/conda --prefix /opt/conda" in runs[micromamba].args[0]
+        assert "--name base" not in runs[micromamba].args[0]
+
     def test_user_root_brackets_the_install_steps(self) -> None:
         """Daytona honours the base's `USER`, unlike E2B (E0-04): no synthetic
         account, just `USER root` around what needs it."""
@@ -513,7 +573,7 @@ class TestBuildingASnapshot:
         a_builder(daytona=daytona).build(a_request())
         image = daytona.client.snapshot.create_calls[0].args[0].image
         assert image.calls[-1].name == "workdir"
-        assert image.calls[-1].args[0] == "/home/datalayer/content"
+        assert image.calls[-1].args[0] == "/home/datalayer"
 
     def test_the_entrypoint_is_always_set(self) -> None:
         """Daytona's own default, unset, is `sleep infinity` with no PID 1 (§11.3
@@ -535,11 +595,27 @@ class TestBuildingASnapshot:
         resources = daytona.client.snapshot.create_calls[0].args[0].resources
         assert (resources.cpu, resources.memory, resources.disk) == (cpu, memory, disk)
 
-    def test_the_region_is_passed_through(self) -> None:
+    def test_the_region_sent_is_daytonas_own_not_this_platforms(self) -> None:
+        """`request.region` is Datalayer's — `r1` — and Daytona answered
+        "Region not found" for it on the first real build (2026-09-17).
+
+        The owner names a Daytona region in `compatibility.regions`; that is
+        the one that scopes the snapshot.
+        """
         daytona = FakeDaytonaModule()
-        a_builder(daytona=daytona).build(a_request(region="eu"))
+        a_builder(daytona=daytona).build(
+            a_request(region="r1", spec={"compatibility": {"regions": ["eu"]}})
+        )
         params = daytona.client.snapshot.create_calls[0].args[0]
         assert params.region_id == "eu"
+
+    def test_with_no_region_named_the_account_default_decides(self) -> None:
+        """The field is left out rather than filled with something Daytona
+        does not know — which is what every snapshot in a real account has."""
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(a_request(region="r1"))
+        params = daytona.client.snapshot.create_calls[0].args[0]
+        assert params.region_id is None
 
     def test_the_snapshot_is_named_after_the_environment_and_version(self) -> None:
         daytona = FakeDaytonaModule()
@@ -651,18 +727,68 @@ class TestTheBuildsOwnRegistryEntry:
         assert any("Could not delete the Daytona registry entry" in line for line in logged)
 
 
-class TestWhatDaytonaCannotBuildYet:
-    def test_a_gpu_size_class_is_refused_at_build_time_naming_e2_17(self) -> None:
-        daytona = FakeDaytonaModule()
-        registry = FakeRegistrySdk()
-        with pytest.raises(EnvironmentsError) as raised:
-            a_builder(daytona=daytona, registry=registry).build(a_request(size_class="gpu-large"))
-        assert raised.value.code.code == CAPABILITY_UNSUPPORTED.code
-        assert raised.value.detail["missing"] == "E2-17"
-        # Refused before any provider is touched: no registry, no snapshot.
-        assert registry.client.create_calls == []
-        assert daytona.client.snapshot.create_calls == []
+class TestAGpuSnapshot:
+    """E2-17: the spec's GPU is baked into the snapshot with its other resources."""
 
+    GPU: ClassVar[dict[str, Any]] = {
+        "sizeClass": "gpu-large",
+        "accelerator": {"type": "h100", "count": 2, "cuda": "12.8"},
+    }
+
+    def gpu_request(self, **resources: Any) -> BuildRequest:
+        return a_request(
+            spec={
+                "base": {"ref": "datalayer/python-cuda", "channel": "2026.09"},
+                "resources": {**self.GPU, **resources},
+            },
+            size_class="gpu-large",
+        )
+
+    def test_the_gpu_type_and_count_are_the_specs(self) -> None:
+        daytona = FakeDaytonaModule()
+        a_builder(daytona=daytona).build(self.gpu_request())
+        resources = daytona.client.snapshot.create_calls[0].args[0].resources
+        assert (resources.gpu, resources.gpu_type) == (2, FakeGpuType("H100"))
+        # D-4 gives a GPU class no CPU or memory: Daytona sizes the machine
+        # for the GPU, and the disk holds the CUDA base.
+        assert (resources.cpu, resources.memory, resources.disk) == (None, None, 50)
+
+    def test_the_hints_size_the_rest_of_the_machine(self) -> None:
+        daytona = FakeDaytonaModule()
+        request = self.gpu_request(hints={"cpu": 8, "memoryGi": 64, "diskGi": 120})
+        a_builder(daytona=daytona).build(request)
+        resources = daytona.client.snapshot.create_calls[0].args[0].resources
+        assert (resources.cpu, resources.memory, resources.disk, resources.gpu) == (8, 64, 120, 2)
+
+    def test_a_gpu_daytona_does_not_offer_is_refused_before_any_build(self) -> None:
+        request = a_request(
+            spec={
+                "base": {"ref": "datalayer/python-cuda", "channel": "2026.09"},
+                "resources": {"sizeClass": "gpu-large", "accelerator": {"type": "A100-80GB"}},
+            }
+        )
+        report = a_builder().validate(request.environment)
+        assert report.supported is False
+        [finding] = [item for item in report.findings if "A100-80GB" in item.message]
+        assert finding.field == "spec.resources.accelerator.type"
+        assert all(name in finding.message for name in DAYTONA_GPUS)
+
+    def test_a_name_is_read_the_way_people_write_it(self) -> None:
+        assert [daytona_gpu(name) for name in ("h100", "RTX_4090", " rtx-pro-6000 ", "T4")] == [
+            "H100",
+            "RTX-4090",
+            "RTX-PRO-6000",
+            None,
+        ]
+
+    def test_the_names_are_the_sdks(self) -> None:
+        """Spelled out because `validate` runs where the SDK may not be; held to it here."""
+        sdk = pytest.importorskip("daytona")
+        offered = {g.value for g in sdk.GpuType if not g.value.lower().startswith("unknown")}
+        assert set(DAYTONA_GPUS) == offered
+
+
+class TestWhatDaytonaCannotBuildYet:
     def test_a_build_secret_is_refused_before_anything_is_queued(self) -> None:
         """Daytona has no per-step secret mechanism E0-04 could find (found
         in review: this chain consumed no build secret at all, and nothing
@@ -784,3 +910,252 @@ class TestReadingTheRegistry:
         builder.build(a_request())
         builder.exists(an_artifact(provider_artifact_id="snp-999"))
         assert len(daytona.daytona_calls) == 1
+
+
+class TestCancellingABuild:
+    """E2-18: the build step lets a cancelled build's thread finish unheard, so
+    a snapshot Daytona goes on building would be recorded by nobody. Found by
+    E2-14's drill on 2026-09-18: `dl-backfill-drill-v2-…` kept building after
+    its build was cancelled."""
+
+    NAME = "dl-geospatial-analysis-v3-bld-1"
+
+    def test_a_snapshot_being_made_is_deleted_by_id(self) -> None:
+        service = FakeSnapshotService(
+            get_results={
+                self.NAME: FakeSnapshot(id="snp-9", name=self.NAME),
+                "snp-9": FakeSnapshot(id="snp-9", name=self.NAME),
+            }
+        )
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        builder.cancel(a_request())
+        assert [call.args for call in service.get_calls] == [(self.NAME,)]
+        assert [call.args for call in service.delete_calls] == [("snp-9",)]
+
+    def test_one_made_after_the_cancel_is_deleted_by_the_build(self) -> None:
+        """Not made yet when the cancel came: the build deletes it the moment
+        Daytona hands it back, and does not answer with it."""
+        made = FakeSnapshot(id="snp-late", name=self.NAME)
+        service = FakeSnapshotService(create_result=made, get_results={"snp-late": made})
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        builder.cancel(a_request())
+        assert service.delete_calls == []
+        with pytest.raises(EnvironmentsError) as raised:
+            builder.build(a_request())
+        assert raised.value.code.code == BUILD_FAILED.code
+        assert "cancelled" in raised.value.message
+        assert [call.args for call in service.delete_calls] == [("snp-late",)]
+
+    def test_a_snapshot_daytona_refused_is_deleted_by_the_build(self) -> None:
+        """Daytona keeps a failed snapshot, in `error`, under the build's name:
+        one over its 20 GB limit was left there (E2-17, 2026-09-18)."""
+        failed = FakeSnapshot(id="snp-err", name=self.NAME, state="error")
+        service = FakeSnapshotService(
+            create_error=RuntimeError(
+                "Snapshot size (28.66GB) exceeds maximum allowed size of 20GB"
+            ),
+            get_results={self.NAME: failed, "snp-err": failed},
+        )
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            builder.build(a_request())
+        assert raised.value.code.code == BUILD_FAILED.code
+        assert "20GB" in raised.value.message
+        assert [call.args for call in service.delete_calls] == [("snp-err",)]
+
+    def test_another_build_of_the_same_builder_is_not_touched(self) -> None:
+        builder = a_builder()
+        builder.cancel(a_request(build_uid="bld-other"))
+        assert builder.build(a_request()).provider_artifact_id
+
+
+class TestDeletingASnapshot:
+    """E2-18: retention and a failed build both need a snapshot to go."""
+
+    def test_exists_is_false_after_delete(self) -> None:
+        service = FakeSnapshotService(get_results={"snp-123": FakeSnapshot(id="snp-123")})
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        artifact = an_artifact(provider_artifact_id="snp-123")
+        assert builder.exists(artifact) is True
+        builder.delete(artifact)
+        assert builder.exists(artifact) is False
+
+    def test_it_deletes_by_id_never_by_the_name(self) -> None:
+        """A name is reused once its snapshot is deleted (E0-04), so deleting
+        by name could remove a later build's snapshot that inherited it."""
+        service = FakeSnapshotService(get_results={"snp-123": FakeSnapshot(id="snp-123")})
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        builder.delete(an_artifact(provider_artifact_id="snp-123", mutable_alias="dl-geo-v3"))
+        assert [call.args for call in service.delete_calls] == [("snp-123",)]
+
+    def test_deleting_what_is_already_gone_is_a_success(self) -> None:
+        """The collector deletes first and marks second (E1-17): a sweep
+        that died in between deletes again, and must not be refused for it."""
+        service = FakeSnapshotService(get_results={"snp-123": FakeSnapshot(id="snp-123")})
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        artifact = an_artifact(provider_artifact_id="snp-123")
+        builder.delete(artifact)
+        builder.delete(artifact)
+        assert len(service.delete_calls) == 2
+
+    def test_any_other_failure_is_a_provider_error_and_not_a_success(self) -> None:
+        service = FakeSnapshotService(
+            get_results={"snp-123": FakeSnapshot(id="snp-123")},
+            delete_errors={"snp-123": RuntimeError("the snapshot is in use")},
+        )
+        builder = a_builder(
+            daytona=FakeDaytonaModule(client=FakeDaytonaClient(snapshot_service=service))
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            builder.delete(an_artifact(provider_artifact_id="snp-123"))
+        assert raised.value.code.code == PROVIDER_ERROR.code
+        assert "in use" in raised.value.message
+
+
+class TestSmokeTestingASnapshot:
+    """E2-04's own `Done when`: a sandbox launched from its id passes the core tier.
+
+    It refused through `ManagedBuilder` until 2026-09-17, and the build
+    workflow calls this step — so no Daytona build could reach `succeeded`:
+    the snapshot was built and live at the provider, and the build was
+    recorded failed.
+    """
+
+    def _environment(self):
+        return parse_environment(a_request().environment.model_dump(by_alias=True))
+
+    def test_it_launches_by_id_and_runs_the_core_tier(self, monkeypatch) -> None:
+        """A Daytona sandbox record keeps the snapshot's *name*, and a name is
+        republished, so only the id says which artifact ran (E0-04)."""
+        made: dict = {}
+        ran: dict = {}
+
+        class FakeSandbox:
+            def __init__(self, **kwargs):
+                made.update(kwargs)
+                self.events: list[str] = []
+
+            def start(self):
+                self.events.append("start")
+
+            def stop(self):
+                self.events.append("stop")
+
+        builder = a_builder()
+        monkeypatch.setattr(
+            "code_sandboxes.daytona_sandbox.DaytonaSandbox", FakeSandbox, raising=False
+        )
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_core_tier",
+            lambda sandbox, **kwargs: ran.update(kwargs) or "the-result",
+        )
+
+        answer = builder.smoke_test(
+            an_artifact(
+                variant="daytona",
+                immutable_reference="snap-1",
+                provider_artifact_id="snap-1",
+            ),
+            environment=self._environment(),
+            lock_text="",
+        )
+        assert answer == "the-result"
+        assert made["snapshot"] == "snap-1"
+        # A smoke test that leaves a sandbox running bills the owner for a check.
+        assert made["delete_on_stop"] is True
+        assert "restart" in ran and ran["python_version"]
+
+    def test_a_gpu_version_also_passes_check_eleven(self, monkeypatch) -> None:
+        """E2-17: the core tier alone passes on a machine with no GPU, so a GPU
+        version's smoke test adds check 11, gating, with the spec's CUDA and count."""
+        from code_sandboxes.environments.builders import CheckResult, ValidationResult
+
+        asked: dict = {}
+
+        class FakeSandbox:
+            def __init__(self, **_kwargs):
+                pass
+
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+        monkeypatch.setattr(
+            "code_sandboxes.daytona_sandbox.DaytonaSandbox", FakeSandbox, raising=False
+        )
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_core_tier",
+            lambda sandbox, **kwargs: ValidationResult(contract_version="sandbox-contract/v1"),
+        )
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_accelerator_check",
+            lambda sandbox, **kwargs: asked.update(kwargs)
+            or CheckResult(id="conformance:11", name="gpu", passed=False, gating=True),
+        )
+        request = TestAGpuSnapshot().gpu_request()
+        answer = a_builder().smoke_test(
+            an_artifact(
+                variant="daytona", immutable_reference="snap-gpu", provider_artifact_id="snap-gpu"
+            ),
+            environment=request.environment,
+            lock_text="",
+        )
+        assert asked == {"cuda": "12.8", "count": 2}
+        assert [check.id for check in answer.checks] == ["conformance:11"]
+        assert answer.passed is False
+
+    def test_the_sandbox_is_deleted_even_when_the_tier_raises(self, monkeypatch) -> None:
+        events: list[str] = []
+
+        class FakeSandbox:
+            def __init__(self, **_kwargs):
+                pass
+
+            def start(self):
+                events.append("start")
+
+            def stop(self):
+                events.append("stop")
+
+        monkeypatch.setattr(
+            "code_sandboxes.daytona_sandbox.DaytonaSandbox", FakeSandbox, raising=False
+        )
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_core_tier",
+            lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("the tier blew up")),
+        )
+        with pytest.raises(EnvironmentsError):
+            a_builder().smoke_test(
+                an_artifact(
+                    variant="daytona", immutable_reference="snap-1", provider_artifact_id="snap-1"
+                ),
+                environment=self._environment(),
+                lock_text="",
+            )
+        assert events == ["start", "stop"]
+
+    def test_without_a_spec_it_says_what_it_needs(self) -> None:
+        """The core tier asks for the Python version and the pinned packages,
+        and an artifact carries neither."""
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder().smoke_test(
+                an_artifact(
+                    variant="daytona", immutable_reference="snap-1", provider_artifact_id="snap-1"
+                )
+            )
+        assert raised.value.code is CAPABILITY_UNSUPPORTED
+        assert "needs the version's spec" in str(raised.value)

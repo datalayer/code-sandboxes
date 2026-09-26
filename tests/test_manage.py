@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from code_sandboxes import cli as sandbox_cli
 from code_sandboxes.manage import (
+    DaytonaSandboxManager,
     DockerSandboxManager,
     KaggleSandboxManager,
     SandboxManagementError,
@@ -260,3 +261,70 @@ def test_cli_list_of_a_failing_variant_exits_nonzero(monkeypatch):
     result = CliRunner().invoke(sandbox_cli.app, ["list", "-v", "docker"])
     assert result.exit_code == 1
     assert "no backend today" in result.output
+
+
+class TestCreateOptionsReachTheSandbox:
+    """`--environment` and `--name` configure the sandbox, or are refused.
+
+    A `Sandbox` reads both from its `SandboxConfig`. Passed as bare keywords
+    they land in its `**kwargs` and are dropped there in silence, so `create`
+    answers `running` for a default sandbox under a generated name.
+
+    Found on 2026-09-17 against a real Daytona account:
+    `sandboxes create daytona -e eric/daytona-drift -n envs-drill-launch`
+    launched `daytonaio/sandbox:0.8.0` with a blank name, and so did
+    `-e this-environment-does-not-exist-at-all`.
+    """
+
+    def test_a_name_reaches_the_config(self):
+        manager = DaytonaSandboxManager()
+        kwargs = {"name": "a-named-sandbox"}
+        manager._configure(kwargs)
+        assert kwargs["config"].name == "a-named-sandbox"
+        assert "name" not in kwargs, "the bare keyword would be dropped downstream"
+
+    def test_an_environment_the_provider_ships_reaches_the_config(self):
+        manager = DaytonaSandboxManager()
+        kwargs = {"environment": "daytona-gpu"}
+        environment = manager._configure(kwargs)
+        assert environment is not None and environment.name == "daytona-gpu"
+        assert kwargs["config"].environment == "daytona-gpu"
+        # The card the environment names, which is what the adapter's own
+        # resource shaping reads.
+        assert kwargs["config"].gpu == "H100"
+
+    def test_the_spot_environment_differs_from_the_plain_gpu_one(self):
+        """`daytona-gpu-spot` differs from `daytona-gpu` by a Daytona argument.
+
+        Nothing the config carries says preemptible, so a manager that only
+        set the config would make the two names mean the same machine.
+        """
+        manager = DaytonaSandboxManager()
+        kwargs = {"environment": "daytona-gpu-spot"}
+        environment = manager._configure(kwargs)
+        assert (environment.metadata or {}).get("spot") is True
+
+    def test_an_environment_the_provider_does_not_ship_is_refused(self):
+        """Rather than handing back a default sandbox and saying `running`."""
+        manager = DaytonaSandboxManager()
+        with pytest.raises(SandboxManagementError) as refused:
+            manager._configure({"environment": "eric/daytona-drift"})
+        message = str(refused.value)
+        assert "eric/daytona-drift" in message
+        # The refusal says what there is instead, so it is actionable.
+        assert "daytona-gpu" in message
+
+    def test_the_option_leaves_the_keywords(self):
+        """It has to: left bare it reaches the sandbox's `**kwargs` and is dropped."""
+        manager = DaytonaSandboxManager()
+        kwargs = {"environment": "daytona-default"}
+        manager._configure(kwargs)
+        assert "environment" not in kwargs
+        assert kwargs["config"].environment == "daytona-default"
+
+    def test_nothing_asked_for_changes_nothing(self):
+        """A create with no options still builds no config of its own."""
+        manager = DaytonaSandboxManager()
+        kwargs = {"spot": True}
+        assert manager._configure(kwargs) is None
+        assert kwargs == {"spot": True}

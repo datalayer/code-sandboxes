@@ -23,7 +23,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-from code_sandboxes.environments.adapters.modal import Builder
+from code_sandboxes.environments.adapters.modal import MODAL_GPUS, Builder, modal_gpu
 from code_sandboxes.environments.builders import ArtifactReference, BuildRequest
 from code_sandboxes.environments.errors import (
     ARTIFACT_MISSING,
@@ -46,16 +46,52 @@ LOCK = (
 APT_LOCK = LOCK + "# datalayer-apt: gdal-bin=3.8.4+dfsg-3build2\n"
 LOCK_DIGEST = "sha256:" + "dd" * 32
 
+#: A conda explicit lock (E3-02) and its `dependencyFile` source.
+CONDA_LOCK = (
+    "# Resolved by Datalayer (PLAN_ENV.md D-9). Do not edit: a change makes a new version.\n"
+    "# python: 3.13\n"
+    "# platform: linux-64\n"
+    "# datalayer-pip: ipykernel==7.3.0\n"
+    "@EXPLICIT\n"
+    "https://conda.anaconda.org/conda-forge/linux-64/gdal-3.8.4-py313.conda#" + "ab" * 32 + "\n"
+)
+CONDA_SPEC = {
+    "build": {
+        "source": "dependencyFile",
+        "dependencyFile": {
+            "sourceFormat": "conda",
+            "content": "name: geo\nchannels: [conda-forge]\ndependencies: [python=3.13, gdal]\n",
+        },
+    },
+}
+
 
 class Credential:
-    """The build's owner secrets, as the workflow mints them (D-8, D-17, E2-01)."""
+    """The build's credential in exactly the shape durable's `_mint_credential`
+    returns for Modal (D-8, D-17, D-18, E2-01).
+
+    `aws_session` is a *real* IAM user's key — `modal_base_reader`'s own,
+    read-only on the bases — never an assumed session's: Modal's own
+    `from_aws_ecr` never reads `AWS_SESSION_TOKEN` anywhere in its SDK, so a
+    session handed to it the way E2B and Daytona happily take one is exactly
+    "The security token included in the request is invalid" (found live,
+    2026-09-18, after this double's own first version put IAM keys in
+    `username`/`password` instead and hid the same defect a first time).
+    `username`/`password` are unrelated here — the ECR login pair minted
+    from that same static key, which only E2B/Daytona and the resolver's own
+    pull read; the Modal adapter never touches them.
+    """
 
     provider_secrets: ClassVar[dict[str, str]] = {
         "MODAL_TOKEN_ID": "owners-modal-token-id",
         "MODAL_TOKEN_SECRET": "owners-modal-token-secret",
     }
-    username: ClassVar[str] = "AKIA-owners-access-key"
-    password: ClassVar[str] = "owners-secret-key"
+    username: ClassVar[str] = "AWS"
+    password: ClassVar[str] = "ecr-login-token-from-the-static-key"
+    aws_session: ClassVar[dict[str, str]] = {
+        "AWS_ACCESS_KEY_ID": "AKIA-modal-base-reader",
+        "AWS_SECRET_ACCESS_KEY": "modal-base-reader-secret",
+    }
 
 
 class NoRegistryCredential:
@@ -114,12 +150,24 @@ class FakeImage:
         self.calls.append(Call("run_commands", commands, kwargs))
         return self
 
+    def micromamba_install(self, *, spec_file: str) -> FakeImage:
+        self.calls.append(Call("micromamba_install", (), {"spec_file": spec_file}))
+        return self
+
+    def pip_install(self, *packages: str, find_links: str | None = None) -> FakeImage:
+        self.calls.append(Call("pip_install", packages, {"find_links": find_links}))
+        return self
+
     def workdir(self, path: str) -> FakeImage:
         self.calls.append(Call("workdir", (path,)))
         return self
 
     def entrypoint(self, commands: list[str]) -> FakeImage:
         self.calls.append(Call("entrypoint", (commands,)))
+        return self
+
+    def cmd(self, command: list[str]) -> FakeImage:
+        self.calls.append(Call("cmd", (command,)))
         return self
 
     def build(self, app: Any) -> FakeImage:
@@ -210,20 +258,41 @@ class FakeStub:
     `def`-ined, the same way `test_environment_daytona_builder.py` handles
     the same clash for `DockerRegistryApi`."""
 
-    def __init__(self, *, delete_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        delete_error: Exception | None = None,
+        image_delete_errors: dict[str, Exception] | None = None,
+    ) -> None:
         self.secret_delete_calls: list[Any] = []
         self._delete_error = delete_error
         self.SecretDelete = self._secret_delete
+        #: Every image this stub was asked to delete, in order.
+        self.image_delete_calls: list[str] = []
+        self._image_delete_errors = dict(image_delete_errors or {})
+        self.ImageDelete = self._image_delete
 
     async def _secret_delete(self, request: Any) -> None:
         self.secret_delete_calls.append(request)
         if self._delete_error:
             raise self._delete_error
 
+    async def _image_delete(self, request: Any) -> None:
+        image_id = request.kwargs["image_id"]
+        self.image_delete_calls.append(image_id)
+        error = self._image_delete_errors.get(image_id)
+        if error:
+            raise error
+
 
 class FakeClient:
-    def __init__(self, *, delete_error: Exception | None = None) -> None:
-        self.stub = FakeStub(delete_error=delete_error)
+    def __init__(
+        self,
+        *,
+        delete_error: Exception | None = None,
+        image_delete_errors: dict[str, Exception] | None = None,
+    ) -> None:
+        self.stub = FakeStub(delete_error=delete_error, image_delete_errors=image_delete_errors)
 
 
 class FakeClientFactory:
@@ -311,9 +380,13 @@ class FakeApiPb2:
 
     def __init__(self) -> None:
         self.SecretDeleteRequest = self._secret_delete_request
+        self.ImageDeleteRequest = self._image_delete_request
 
     def _secret_delete_request(self, *, secret_id: str) -> Call:
         return Call("SecretDeleteRequest", (), {"secret_id": secret_id})
+
+    def _image_delete_request(self, *, image_id: str) -> Call:
+        return Call("ImageDeleteRequest", (), {"image_id": image_id})
 
 
 class FakeSynchronizer:
@@ -413,13 +486,25 @@ class TestBuildingAnImage:
         [call] = modal.Image.from_aws_ecr_calls
         assert call.args[0] == BASE
 
-    def test_the_ecr_secret_carries_the_credential(self) -> None:
+    def test_the_ecr_secret_carries_the_base_reader_session(self) -> None:
+        """Modal takes the session itself — keys, token, region (D-18).
+
+        Not the ECR login pair: `from_aws_ecr` calls AWS with what the secret
+        holds, and `AWS`/<token> as IAM keys is "The security token included
+        in the request is invalid" on the base pull. This test asserted that
+        exact mapping until 2026-09-18.
+        """
         modal = FakeModalModule()
         a_builder(modal=modal).build(a_request())
         [secret] = modal.Secret.from_dict_calls
-        assert secret.env_dict["AWS_ACCESS_KEY_ID"] == Credential.username
-        assert secret.env_dict["AWS_SECRET_ACCESS_KEY"] == Credential.password
-        assert secret.env_dict["AWS_REGION"] == "us-east-1"
+        assert secret.env_dict == {
+            "AWS_ACCESS_KEY_ID": Credential.aws_session["AWS_ACCESS_KEY_ID"],
+            "AWS_SECRET_ACCESS_KEY": Credential.aws_session["AWS_SECRET_ACCESS_KEY"],
+            "AWS_REGION": "us-east-1",
+        }
+        # No session token: this is a real key, not one it could carry.
+        assert "AWS_SESSION_TOKEN" not in secret.env_dict
+        assert Credential.password not in secret.env_dict.values()
 
     def test_no_secret_with_no_pull_credential(self) -> None:
         modal = FakeModalModule()
@@ -488,6 +573,22 @@ class TestBuildingAnImage:
         assert "--require-hashes" in sync
         assert "--find-links /opt/datalayer/wheelhouse" in sync
 
+    def test_a_conda_lock_installs_with_micromamba_and_then_the_pip_pins(self) -> None:
+        """A conda source (E3-02): Modal's own `micromamba_install` reads the
+        `@EXPLICIT` lock, and `pip_install` layers the pip layer the solve
+        resolved — never the pip-lock `uv pip sync`."""
+        modal = FakeModalModule()
+        a_builder(modal=modal).build(a_request(lock_text=CONDA_LOCK, spec=CONDA_SPEC))
+        [image] = modal.Image.created
+        [mamba] = calls_named(image, "micromamba_install")
+        assert mamba.kwargs["spec_file"] == "/opt/datalayer/lock.txt"
+        [pip] = calls_named(image, "pip_install")
+        assert "ipykernel==7.3.0" in pip.args
+        mamba_at = image.calls.index(mamba)
+        pip_at = image.calls.index(pip)
+        assert mamba_at < pip_at
+        assert not run_commands_containing(image, "uv pip sync")
+
     def test_no_user_line_is_ever_emitted(self) -> None:
         """Modal ignores `USER` entirely (found live): writing one would be
         dead code, so this builder never calls `dockerfile_commands` at all."""
@@ -504,14 +605,24 @@ class TestBuildingAnImage:
         [image] = modal.Image.created
         assert not any("doctor" in call.args[0] for call in calls_named(image, "run_commands"))
 
-    def test_the_chain_ends_with_workdir_then_entrypoint(self) -> None:
+    def test_the_chain_ends_with_workdir_entrypoint_and_cmd(self) -> None:
         modal = FakeModalModule()
         a_builder(modal=modal).build(a_request())
         [image] = modal.Image.created
-        # `build` is appended by `FakeImage.build` itself; the two before it
-        # are the chain's own last words.
+        # `build` is appended by `FakeImage.build` itself; the three before
+        # it are the chain's own last words.
         names = [call.name for call in image.calls]
-        assert names[-3:] == ["workdir", "entrypoint", "build"]
+        assert names[-4:] == ["workdir", "entrypoint", "cmd", "build"]
+
+    def test_the_bases_jupyter_cmd_is_replaced_by_sleep(self) -> None:
+        """Modal keeps the base's `start-jupyter.sh` under a new ENTRYPOINT,
+        and a Jupyter server as the main process exits and ends the sandbox
+        (found live on 2026-09-18). The artifact says what holds it."""
+        modal = FakeModalModule()
+        a_builder(modal=modal).build(a_request())
+        [image] = modal.Image.created
+        [cmd_call] = calls_named(image, "cmd")
+        assert cmd_call.args[0] == ["sleep", "infinity"]
 
     def test_the_entrypoint_execs_its_arguments(self) -> None:
         """A bare script path, nothing for `entrypoint()`'s own Dockerfile
@@ -651,16 +762,84 @@ class TestTheEcrSecretIsCleanedUp:
         assert deleted.kwargs["secret_id"] == secret.object_id
 
 
-class TestWhatModalCannotBuildYet:
-    def test_a_gpu_size_class_is_refused_at_build_time_naming_e2_17(self) -> None:
+class TestAGpuVersion:
+    """E2-17: on Modal a GPU is a launch option, not part of the image."""
+
+    GPU: ClassVar[dict[str, Any]] = {
+        "base": {"ref": "datalayer/python-cuda", "channel": "2026.09"},
+        "resources": {
+            "sizeClass": "gpu-small",
+            "accelerator": {"type": "l4", "count": 2, "cuda": "12.8"},
+        },
+    }
+
+    def test_it_builds_the_image_any_version_builds(self) -> None:
         modal = FakeModalModule()
-        with pytest.raises(EnvironmentsError) as raised:
-            a_builder(modal=modal).build(a_request(size_class="gpu-large"))
-        assert raised.value.code.code == CAPABILITY_UNSUPPORTED.code
-        assert raised.value.detail["missing"] == "E2-17"
-        # Refused before any provider is touched.
-        assert modal.Secret.from_dict_calls == []
-        assert modal.Image.from_aws_ecr_calls == []
+        artifact = a_builder(modal=modal).build(a_request(spec=self.GPU, size_class="gpu-small"))
+        assert artifact.provider_artifact_id.startswith("im-")
+        assert modal.Image.from_aws_ecr_calls, "built from the CUDA base like any image"
+
+    def test_a_gpu_modal_does_not_offer_is_refused_before_any_build(self) -> None:
+        spec = {
+            **self.GPU,
+            "resources": {"sizeClass": "gpu-small", "accelerator": {"type": "RTX-4090"}},
+        }
+        report = a_builder().validate(a_request(spec=spec).environment)
+        assert report.supported is False
+        [finding] = [item for item in report.findings if "RTX-4090" in item.message]
+        assert finding.field == "spec.resources.accelerator.type"
+        assert all(name in finding.message for name in MODAL_GPUS)
+
+    def test_a_name_is_modal_s_gpu_argument(self) -> None:
+        assert [
+            modal_gpu("t4"),
+            modal_gpu("a100_80gb"),
+            modal_gpu("H100", 2),
+            modal_gpu("RTX-4090"),
+        ] == [
+            "T4",
+            "A100-80GB",
+            "H100:2",
+            None,
+        ]
+
+    def test_the_smoke_test_runs_on_the_gpu_and_adds_check_eleven(self, monkeypatch) -> None:
+        from code_sandboxes.environments.builders import CheckResult, ValidationResult
+
+        made: dict = {}
+        asked: dict = {}
+
+        class FakeSandbox:
+            def __init__(self, **kwargs):
+                made.update(kwargs)
+
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+        monkeypatch.setattr("code_sandboxes.modal_sandbox.ModalSandbox", FakeSandbox)
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_core_tier",
+            lambda sandbox, **kwargs: ValidationResult(contract_version="sandbox-contract/v1"),
+        )
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_accelerator_check",
+            lambda sandbox, **kwargs: asked.update(kwargs)
+            or CheckResult(id="conformance:11", name="gpu", passed=True, gating=True),
+        )
+        environment = a_request(spec=self.GPU, size_class="gpu-small").environment
+        artifact = ArtifactReference(
+            variant="modal",
+            immutable_reference="im-1",
+            provider_artifact_id="im-1",
+            contract_version="sandbox-contract/v1",
+        )
+        answer = a_builder().smoke_test(artifact, environment=environment, lock_text=LOCK)
+        assert made["config"].gpu == "L4:2"
+        assert asked == {"cuda": "12.8", "count": 2}
+        assert [check.id for check in answer.checks] == ["conformance:11"]
 
 
 class TestABuildSecret:
@@ -811,3 +990,215 @@ class TestReadingTheRegistry:
         with pytest.raises(EnvironmentsError) as raised:
             a_builder(modal=modal).exists(an_artifact(provider_artifact_id="im-abc123"))
         assert raised.value.code.code == PROVIDER_ERROR.code
+
+
+class _Layer:
+    """One image in a chain, as `_intermediates_of` reads it."""
+
+    def __init__(self, *, object_id: Any = None, deps: Any = None) -> None:
+        self.object_id = object_id
+        self.deps = deps if deps is not None else (lambda: ())
+
+
+def _builder_with_client(
+    *, image_delete_errors: dict[str, Exception] | None = None
+) -> tuple[Builder, FakeClient]:
+    """A builder whose client this test can read the delete calls back from."""
+    client = FakeClient(image_delete_errors=image_delete_errors)
+    modal = FakeModalModule()
+    modal.Client = type(
+        "_C",
+        (),
+        {
+            "from_credentials": staticmethod(lambda *_: client),
+            "from_env": staticmethod(lambda: client),
+        },
+    )()
+    return a_builder(modal=modal), client
+
+
+# -- the layers a build leaves behind -----------------------------------------------------------
+
+
+class TestTheIntermediateLayers:
+    """What `build` records and `delete` collects (E2-05, E2-09).
+
+    Each chained builder call leaves an image with an id of its own, and
+    deleting the artifact does not delete them. Modal offers no call that
+    lists an account's images — `ImageGetOrCreate`, `ImageFromId`,
+    `ImageGetByTag`, `ImageListTags`, `ImageTagRevisions`, `ImagePublish` and
+    `ImageDelete`, and nothing that enumerates — so an intermediate nobody
+    wrote down at build time can never be found again.
+    """
+
+    def test_every_layer_under_the_artifact_is_recorded_deepest_first(self) -> None:
+        from code_sandboxes.environments.adapters.modal import _intermediates_of
+
+        base = _Layer(object_id="im-base", deps=lambda: ())
+        middle = _Layer(object_id="im-middle", deps=lambda: (base,))
+        built = _Layer(object_id="im-built", deps=lambda: (middle,))
+        # The built image is the artifact, not an intermediate.
+        assert _intermediates_of(built) == ("im-base", "im-middle")
+
+    def test_the_builds_ecr_secret_is_not_an_intermediate(self) -> None:
+        """It sits in `deps()` beside the layers, with an `st-` id `ImageDelete`
+        refuses as "not a valid Image ID" (found live, 2026-09-18)."""
+        from code_sandboxes.environments.adapters.modal import _intermediates_of
+
+        secret = _Layer(object_id="st-ecr", deps=lambda: ())
+        base = _Layer(object_id="im-base", deps=lambda: (secret,))
+        built = _Layer(object_id="im-built", deps=lambda: (base,))
+        assert _intermediates_of(built) == ("im-base",)
+
+    def test_a_layer_with_no_id_is_not_recorded(self) -> None:
+        """Only a hydrated layer has an id worth writing down."""
+        from code_sandboxes.environments.adapters.modal import _intermediates_of
+
+        unbuilt = _Layer(object_id=None, deps=lambda: ())
+        built = _Layer(object_id="im-built", deps=lambda: (unbuilt,))
+        assert _intermediates_of(built) == ()
+
+    def test_a_chain_that_cannot_be_walked_is_no_layers_not_a_failure(self) -> None:
+        """A layer list is never worth failing a build over."""
+        from code_sandboxes.environments.adapters.modal import _intermediates_of
+
+        def _explode() -> Any:
+            raise RuntimeError("the SDK changed shape")
+
+        assert _intermediates_of(_Layer(object_id="im-1", deps=_explode)) == ()
+
+    def test_delete_removes_the_intermediates_then_the_artifact(self) -> None:
+        """The artifact last: an intermediate is only reachable while the
+        record naming it survives."""
+        builder, client = _builder_with_client()
+        builder.delete(
+            an_artifact(
+                intermediates=("im-base", "im-middle"),
+                provider_artifact_id="im-built",
+                immutable_reference="im-built",
+            )
+        )
+        assert client.stub.image_delete_calls == ["im-base", "im-middle", "im-built"]
+
+    def test_a_layer_already_gone_is_success(self) -> None:
+        """A replay of a collection deletes the same set again with no harm."""
+        builder, client = _builder_with_client(
+            image_delete_errors={"im-base": FakeNotFoundError("gone")}
+        )
+        builder.delete(
+            an_artifact(
+                intermediates=("im-base", "im-middle"),
+                provider_artifact_id="im-built",
+                immutable_reference="im-built",
+            )
+        )
+        assert client.stub.image_delete_calls == ["im-base", "im-middle", "im-built"]
+
+    def test_a_layer_that_is_not_ours_is_stepped_over(self) -> None:
+        """Modal's own `debian_slim` answers PermissionDenied, live on
+        2026-09-17: an image somebody else owns was never ours to collect."""
+        builder, client = _builder_with_client(
+            image_delete_errors={
+                "im-base": RuntimeError("You don't have permission to modify Image 'im-base'")
+            }
+        )
+        builder.delete(
+            an_artifact(
+                intermediates=("im-base",),
+                provider_artifact_id="im-built",
+                immutable_reference="im-built",
+            )
+        )
+        assert client.stub.image_delete_calls == ["im-base", "im-built"]
+
+    def test_the_artifacts_own_refusal_is_raised(self) -> None:
+        """A layer's refusal is survivable; the artifact's is the whole point."""
+        builder, _ = _builder_with_client(
+            image_delete_errors={"im-built": RuntimeError("modal is away")}
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            builder.delete(
+                an_artifact(provider_artifact_id="im-built", immutable_reference="im-built")
+            )
+        assert raised.value.code is PROVIDER_ERROR
+
+
+class TestSmokeTestingAnImage:
+    """E2-05's own `Done when`: "the live test launches by image id and
+    passes the core tier". It refused through `ManagedBuilder`, and the
+    build workflow calls this step — so no Modal build could reach
+    `succeeded`, the state Daytona was in until 2026-09-17."""
+
+    def _environment(self):
+        return parse_environment(a_request().environment.model_dump(by_alias=True))
+
+    def _artifact(self) -> ArtifactReference:
+        return ArtifactReference(
+            variant="modal",
+            immutable_reference="im-1",
+            provider_artifact_id="im-1",
+            contract_version="sandbox-contract/v1",
+        )
+
+    def test_it_launches_by_image_id_as_the_owner_and_runs_the_core_tier(self, monkeypatch) -> None:
+        """By id, since a published name is mutable by design; and with the
+        owner's own client, so the sandbox runs in the workspace the image
+        is in (D-8) — not whatever token the worker happens to hold."""
+        made: dict = {}
+        ran: dict = {}
+        modal = FakeModalModule()
+
+        class FakeSandbox:
+            def __init__(self, **kwargs):
+                made.update(kwargs)
+
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+        monkeypatch.setattr("code_sandboxes.modal_sandbox.ModalSandbox", FakeSandbox)
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_core_tier",
+            lambda sandbox, **kwargs: ran.update(kwargs) or "the-result",
+        )
+        answer = a_builder(modal=modal).smoke_test(
+            self._artifact(), environment=self._environment(), lock_text=LOCK
+        )
+        assert answer == "the-result"
+        assert made["image_id"] == "im-1"
+        assert made["client"] is modal.client
+        assert modal.Client.from_credentials_calls, "the owner's token, not the ambient one"
+        assert made["app_name"] == "dl-geospatial-analysis"
+        assert ran["python_version"] == "3.13" and "restart" in ran
+
+    def test_the_sandbox_is_stopped_even_when_the_tier_raises(self, monkeypatch) -> None:
+        """A smoke test that leaves a sandbox running bills the owner for a check."""
+        events: list[str] = []
+
+        class FakeSandbox:
+            def __init__(self, **_kwargs):
+                pass
+
+            def start(self):
+                events.append("start")
+
+            def stop(self):
+                events.append("stop")
+
+        monkeypatch.setattr("code_sandboxes.modal_sandbox.ModalSandbox", FakeSandbox)
+        monkeypatch.setattr(
+            "code_sandboxes.environments.conformance.run_core_tier",
+            lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("the tier blew up")),
+        )
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder().smoke_test(self._artifact(), environment=self._environment())
+        assert raised.value.code is PROVIDER_ERROR
+        assert events == ["start", "stop"]
+
+    def test_without_a_spec_it_says_what_it_needs(self) -> None:
+        with pytest.raises(EnvironmentsError) as raised:
+            a_builder().smoke_test(self._artifact())
+        assert raised.value.code is CAPABILITY_UNSUPPORTED
+        assert "needs the version's spec" in str(raised.value)

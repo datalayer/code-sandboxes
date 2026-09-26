@@ -13,7 +13,6 @@ paraphrase of them that cannot go out of date.
 from __future__ import annotations
 
 import subprocess
-from datetime import datetime, timezone
 
 import httpx
 import pytest
@@ -141,10 +140,12 @@ class TestTheProtectedPins:
             "jupyter-client",
             "jupyter-server",
             "jupyter-server-nbmodel",
+            "jupyter-kernels",
             "datalayer",
         }
         assert all(pin.version for pin in pins.values())
         assert pins["jupyter-server"].version == "2.21.0+datalayer.1"
+        assert pins["jupyter-kernels"].version == "1.2.23"
 
     def test_a_requirement_that_agrees_with_a_pin_is_dropped_for_it(self) -> None:
         # The fork satisfies `>=2.19`, which is what jupyterlab asks for, so
@@ -264,7 +265,6 @@ class TestTheLock:
             python_version="3.13",
             base_reference="environments/base/python-cpu@sha256:" + "11" * 32,
             merged=merge_requirements(["geopandas==1.1.1"]),
-            resolved_at=datetime(2026, 9, 12, 8, 30, tzinfo=timezone.utc),
         )
         assert document["format"] == LOCK_FORMAT
         assert document["digest"].startswith("sha256:")
@@ -273,7 +273,6 @@ class TestTheLock:
         content = document["content"]
         assert f"{APT_PIN_PREFIX}gdal-bin=3.8.4+dfsg-3build2" in content
         assert "# datalayer-protected: ipykernel==7.3.0" in content
-        assert "# resolved-at: 2026-09-12T08:30:00+00:00" in content
         # The snapshot the pins came from, which the builder installs from.
         from code_sandboxes.environments.resolve import apt_pins_in, apt_snapshot_in
 
@@ -287,15 +286,24 @@ class TestTheLock:
         }
 
     def test_the_same_lock_digests_the_same_and_a_changed_one_does_not(self) -> None:
+        """And nothing here may pin a clock to make it true.
+
+        The header carried a `# resolved-at:` line until 2026-09-16, and this
+        test passed only because it froze the moment. Resolving the same spec
+        twice on r1 produced two digests differing in that one line out of
+        5,388, and section 5's cache key is over the lock digest — so D-12's
+        build cache had never hit, 12 lookups out of 12.
+        """
         arguments = {
             "python_version": "3.13",
             "base_reference": "environments/base/python-cpu@sha256:" + "11" * 32,
             "merged": MergedRequirements((), (), ()),
-            "resolved_at": datetime(2026, 9, 12, tzinfo=timezone.utc),
         }
         first = lock_document(A_LOCK, **arguments)
         again = lock_document(A_LOCK, **arguments)
         assert first["digest"] == again["digest"]
+        assert first["content"] == again["content"]
+        assert "resolved-at" not in first["content"]
         moved = lock_document(
             ResolveOutcome(lock_text=A_LOCK.lock_text.replace("1.1.1", "1.1.2")), **arguments
         )
@@ -432,17 +440,6 @@ class TestResolvingAVersion:
             resolve_environment(spec=a_spec(), variants=["datalayer"], runner=runner, bases=BASES)
         assert raised.value.code.code == "DL_ENV_RESOLVE_CONFLICT"
 
-    def test_a_form_that_is_not_packages_is_refused_by_name(self) -> None:
-        with pytest.raises(EnvironmentsError) as raised:
-            resolve_environment(
-                spec=a_spec(build={"source": "dockerfile"}),
-                variants=["datalayer"],
-                runner=RecordedRunner(A_LOCK),
-                bases=BASES,
-            )
-        assert raised.value.code.code == "DL_ENV_CAPABILITY_UNSUPPORTED"
-        assert raised.value.detail["source"] == "dockerfile"
-
     def test_conda_waits_for_its_own_solver(self) -> None:
         spec = a_spec(
             packages={"python": {"manager": "conda", "dependencies": ["geopandas=1.1.1"]}}
@@ -453,6 +450,54 @@ class TestResolvingAVersion:
             )
         assert raised.value.code.code == "DL_ENV_CAPABILITY_UNSUPPORTED"
         assert raised.value.detail["manager"] == "conda"
+
+    def test_a_conda_dependency_file_uses_the_conda_runner_it_is_given(self) -> None:
+        """The main API forwards its `conda_runner` to the conda solve, so a
+        local or test solver reaches it the same way `runner` reaches pip."""
+        from code_sandboxes.environments.resolve_conda import (
+            CondaResolveOutcome,
+            CondaResolveRequest,
+        )
+
+        class RecordedConda:
+            name = "recorded-conda"
+
+            def __init__(self, outcome: CondaResolveOutcome) -> None:
+                self._outcome = outcome
+                self.request: CondaResolveRequest | None = None
+
+            def solve(self, request, log=None):  # type: ignore[no-untyped-def]
+                self.request = request
+                return self._outcome
+
+        conda_runner = RecordedConda(
+            CondaResolveOutcome(
+                lock_text=(
+                    "# platform: linux-64\n@EXPLICIT\n"
+                    "https://conda.anaconda.org/conda-forge/linux-64/gdal-3.9.2.conda#"
+                    + "bb" * 32
+                    + "\n"
+                )
+            )
+        )
+        spec = a_spec(
+            packages={},
+            build={
+                "source": "dependencyFile",
+                "dependencyFile": {
+                    "sourceFormat": "conda",
+                    "content": "channels:\n  - conda-forge\ndependencies:\n  - gdal=3.9\n",
+                },
+            },
+        )
+        resolve_environment(
+            spec=spec,
+            variants=["datalayer"],
+            conda_runner=conda_runner,
+            bases=BASES,
+        )
+        assert conda_runner.request is not None
+        assert "gdal=3.9" in conda_runner.request.environment_yml
 
     def test_the_credentials_registry_auth_reaches_the_runner(self) -> None:
         class Credential:
@@ -546,6 +591,19 @@ class TestARequirementsFile:
         assert from_packages["content"] == from_file["content"]
         assert from_packages["digest"] == from_file["digest"]
 
+    def test_check_five_is_handed_what_the_file_names(self) -> None:
+        """Read from `packages.python`, which a file source leaves empty, it
+        was handed nothing and check 5 passed for having nothing to check
+        (found live on 2026-09-18, E3-08)."""
+        from code_sandboxes.environments.conformance import expected_packages
+        from code_sandboxes.environments.spec import validate_environment
+
+        environment = validate_environment(
+            a_dependency_file_spec(content="geopandas==1.1.1  # inline\n-r other.txt\nsix>=1\n")
+        )
+        lock = "geopandas==1.1.1\nsix==1.16.0\nshapely==2.1.2\n"
+        assert expected_packages(environment, lock) == {"geopandas": "1.1.1", "six": "1.16.0"}
+
 
 # -- A pyproject.toml and its uv.lock (E3-01) ----------------------------------
 
@@ -561,9 +619,11 @@ class FakeUv:
     def __init__(self, *answers: tuple[int, str, str]) -> None:
         self.answers = list(answers)
         self.calls: list[list[str]] = []
+        self.environments: list[dict[str, str]] = []
 
-    def __call__(self, argv, **_kwargs):
+    def __call__(self, argv, **kwargs):
         self.calls.append(list(argv))
+        self.environments.append(dict(kwargs.get("env") or {}))
         code, out, err = self.answers[min(len(self.calls), len(self.answers)) - 1]
         return subprocess.CompletedProcess(list(argv), code, out, err)
 
@@ -595,7 +655,15 @@ EXPORTED = (
     "jupyter-client==8.9.1 \\\n    --hash=sha256:" + "cc" * 32 + "\n"
     "jupyter-server==2.21.0+datalayer.1 \\\n    --hash=sha256:" + "dd" * 32 + "\n"
     "jupyter-server-nbmodel==0.2.8 \\\n    --hash=sha256:" + "ee" * 32 + "\n"
+    "jupyter-kernels==1.2.23 \\\n    --hash=sha256:" + "a7" * 32 + "\n"
     "datalayer==1.7.4 \\\n    --hash=sha256:" + "ff" * 32 + "\n"
+)
+
+
+#: Where a `pyproject` author locks Datalayer's `jupyter-server` fork from.
+FORK_WHEEL_URL = (
+    "https://github.com/datalayer-externals/jupyter-server/releases/download/"
+    "v2.21.0-datalayer.1/jupyter_server-2.21.0%2Bdatalayer.1-py3-none-any.whl"
 )
 
 
@@ -610,7 +678,7 @@ class TestAPyprojectFile:
             pyproject_run=uv,
         )
         assert answer["content"] == EXPORTED
-        assert answer["package_count"] == 6
+        assert answer["package_count"] == 7
         assert answer["python_version"] == "3.13"
         assert uv.calls[0][:2] == ["/usr/bin/uv", "lock"]
         assert uv.calls[1][:2] == ["/usr/bin/uv", "export"]
@@ -744,6 +812,70 @@ class TestAPyprojectFile:
                 pyproject_run=hangs,
             )
         assert raised.value.code.code == "DL_ENV_PROVIDER_ERROR"
+
+    def test_check_five_is_handed_the_projects_own_dependencies(self) -> None:
+        """`[project].dependencies`, not every package the export pins: most of
+        a lock is transitive, and check 5 imports what it is handed."""
+        from code_sandboxes.environments.conformance import expected_packages
+        from code_sandboxes.environments.spec import validate_environment
+
+        environment = validate_environment(a_pyproject_spec())
+        assert expected_packages(environment, EXPORTED) == {"six": "1.16.0"}
+
+    def test_the_fork_brought_by_url_is_a_locked_protected_pin(self) -> None:
+        """No index serves `2.21.0+datalayer.1`, and `uv` hashes a wheel only
+        when it fetched it by URL: so a real author's export names the fork
+        `jupyter-server @ https://…whl`, with no `==` (E3-08). Its version is
+        in the wheel's name, and that is what the pin is checked against."""
+        by_url = EXPORTED.replace(
+            "jupyter-server==2.21.0+datalayer.1 \\\n",
+            f"jupyter-server @ {FORK_WHEEL_URL} \\\n",
+        )
+        uv = FakeUv((0, "", "Resolved 7 packages in 1ms\n"), (0, by_url, ""))
+        answer = resolve_environment(
+            spec=a_pyproject_spec(),
+            variants=["datalayer"],
+            bases=BASES,
+            uv="/usr/bin/uv",
+            pyproject_run=uv,
+        )
+        assert answer["content"] == by_url
+        assert locked_versions(by_url)["jupyter-server"] == "2.21.0+datalayer.1"
+
+    def test_uv_keeps_its_cache_in_the_scratch_directory_and_downloads_no_python(self) -> None:
+        """The durable worker's user has no home: `uv`'s default cache could not
+        be made, nor the interpreter it would download (E3-08)."""
+        uv = FakeUv((0, "", "Resolved 7 packages in 1ms\n"), (0, EXPORTED, ""))
+        resolve_environment(
+            spec=a_pyproject_spec(),
+            variants=["datalayer"],
+            bases=BASES,
+            uv="/usr/bin/uv",
+            pyproject_run=uv,
+        )
+        assert len(uv.environments) == 2
+        for environment in uv.environments:
+            assert environment["UV_PYTHON_DOWNLOADS"] == "never"
+            assert environment["UV_CACHE_DIR"].endswith("/.uv-cache")
+            assert "/dl-pyproject-" in environment["UV_CACHE_DIR"]
+            assert environment["PATH"]
+
+    def test_a_url_that_is_not_that_distributions_wheel_pins_nothing(self) -> None:
+        assert (
+            locked_versions(
+                "jupyter-server @ https://example.org/jupyter_server-2.21.0.tar.gz\n"
+                f"ipykernel @ {FORK_WHEEL_URL}\n"
+                "six @ https://example.org/not-a-wheel-name.whl\n"
+            )
+            == {}
+        )
+
+    def test_a_pyproject_check_five_cannot_read_hands_it_nothing(self) -> None:
+        from code_sandboxes.environments.conformance import expected_packages
+        from code_sandboxes.environments.spec import validate_environment
+
+        environment = validate_environment(a_pyproject_spec(content="[project\n"))
+        assert expected_packages(environment, EXPORTED) == {}
 
 
 # -- An imported image (E3-04) -------------------------------------------------
@@ -947,8 +1079,12 @@ def test_the_solve_is_asked_to_pin_apt_at_the_base_channels_snapshot() -> None:
     runner = RecordedRunner(A_LOCK)
     resolve_environment(spec=a_spec(), variants=["datalayer"], runner=runner)
     assert runner.request is not None
+    # What this test is about: the solve is pinned at *the channel's* snapshot,
+    # whatever that is. The id itself is pinned once, in
+    # `test_environment_bases.py`, where it moves with the channel — repeating
+    # it here only meant a base release left two tests red instead of one.
     assert runner.request.apt_snapshot == channel_snapshot("datalayer/python-cpu", "2026.09")
-    assert runner.request.apt_snapshot == "20260914T150000Z"
+    assert runner.request.apt_snapshot
 
 
 class TestTheBuildkitRunner:
@@ -1178,6 +1314,34 @@ class TestTheBuildkitRunner:
                 )
             )
         assert not any(arg.startswith("--tls") for arg in seen["argv"])
+
+    def test_the_solve_goes_through_the_pools_proxy(self, monkeypatch) -> None:
+        """The solve reaches the index the way a build does, through the
+        build pool's proxy (E1-06)."""
+        import subprocess as subprocess_module
+
+        from code_sandboxes.environments import resolve as resolve_module
+        from code_sandboxes.environments.resolve import BuildkitResolveRunner
+
+        seen: dict[str, list[str]] = {}
+
+        def fake_run(command, **kwargs):
+            seen["argv"] = list(command)
+            return subprocess_module.CompletedProcess(command, 1, "", "boom")
+
+        monkeypatch.setattr(resolve_module.subprocess, "run", fake_run)
+        with pytest.raises(EnvironmentsError):
+            BuildkitResolveRunner(buildctl="/usr/bin/true", proxy="http://127.0.0.1:3128").solve(
+                ResolveRequest(
+                    python_version="3.13",
+                    requirements=("ipykernel==7.3.0",),
+                    constraints=(),
+                    indexes=(),
+                    base_reference="environments/base/python-cpu@sha256:" + "11" * 32,
+                )
+            )
+        assert "build-arg:HTTPS_PROXY=http://127.0.0.1:3128" in seen["argv"]
+        assert "build-arg:https_proxy=http://127.0.0.1:3128" in seen["argv"]
 
     def test_it_refuses_a_base_that_is_not_pinned_by_digest(self) -> None:
         from code_sandboxes.environments.resolve import BuildkitResolveRunner
