@@ -4,6 +4,16 @@
 
 """A Marimo sandbox: a Jupyter kernel with Marimo's reactivity in it.
 
+Reactivity crosses the Jupyter-shaped API too (code-sandboxes#37). A caller
+that only knows `run_code` / `CodeSandboxClient.execute` names the cell it is
+running through the execution context (`Context(id="cell-a")`) and gets, on
+the result, the cell it ran as (`cell_id`) and every cell re-run because of
+it (`reactions`, each with its own result). `run_code_streaming` yields the
+reactions' events after the cell's own, each event tagged with the cell it
+came from (`marimo_cell_id`), so a stream consumer can route outputs to the
+right cell. Nothing on the wire changes: the graph is still driven through
+ordinary execute requests and answers on stdout.
+
 Marimo notebooks are reactive — running a cell re-runs every cell that depends
 on what it defined — and Marimo works that out from the cells' source, not from
 running them (code-sandboxes#34). So a Marimo sandbox is a Jupyter server
@@ -26,6 +36,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -43,6 +54,7 @@ from .models import (
     ExecutionResult,
     OutputHandler,
     OutputMessage,
+    Reaction,
     Result,
     SandboxEnvironment,
 )
@@ -231,6 +243,7 @@ class MarimoSandbox(JupyterServerSandbox):
                 registration=registration,
             )
         result = self._plain_run(code, timeout=timeout, **handlers)
+        result.cell_id = cell_id
         run = MarimoRun(cell_id=cell_id, result=result, registration=registration)
         if not react or not run.ok:
             return run
@@ -243,8 +256,14 @@ class MarimoSandbox(JupyterServerSandbox):
             if self._interrupt_requested.is_set():
                 break
             dependent_result = self._plain_run(dependent_code, timeout=timeout, **handlers)
+            dependent_result.cell_id = dependent
             run.reactions.append(
                 CellRun(cell_id=dependent, code=dependent_code, result=dependent_result)
+            )
+            # The result the caller holds says what else ran: a Jupyter
+            # protocol consumer learns the reactions from it.
+            result.reactions.append(
+                Reaction(cell_id=dependent, code=dependent_code, result=dependent_result)
             )
             if dependent_result.code_error is not None:
                 break
@@ -263,10 +282,12 @@ class MarimoSandbox(JupyterServerSandbox):
         envs: dict[str, str] | None = None,
         timeout: float | None = None,
     ) -> ExecutionResult:
-        """Run code as a cell of its own, reactively; answers that cell's result.
+        """Run code as a cell, reactively; answers that cell's result.
 
-        The cells it made re-run are on the result's ``marimo_reactions``
-        (cell ids), so a caller that wants them can ask `cells` for their code.
+        The cell is the context's id when the caller gave one — the same id
+        again replaces the cell rather than adding a second — and a cell of
+        its own otherwise. The cells it made re-run are on the result's
+        ``reactions``, each with its code and its own result.
 
         The execution window is open for the whole run; each cell inside it
         is a parent `run_code`, which closes the window on its way out and
@@ -279,9 +300,14 @@ class MarimoSandbox(JupyterServerSandbox):
         if envs:
             env_code = "\n".join(f"import os; os.environ[{k!r}] = {v!r}" for k, v in envs.items())
             self._plain_run(env_code)
-        self._anonymous += 1
+        cell_id = (
+            context.id if context is not None and context.id and context.id != "default" else None
+        )
+        if cell_id is None:
+            self._anonymous += 1
+            cell_id = f"cell-{self._anonymous}"
         run = self.run_cell(
-            f"cell-{self._anonymous}",
+            cell_id,
             code,
             on_stdout=on_stdout,
             on_stderr=on_stderr,
@@ -289,15 +315,47 @@ class MarimoSandbox(JupyterServerSandbox):
             on_error=on_error,
             timeout=timeout,
         )
-        result = run.result
-        if run.reactions:
-            # `ExecutionResult` allows extra fields; the ids are enough to
-            # find the cells again, and their results are the reactions'.
-            try:
-                result.marimo_reactions = [reaction.cell_id for reaction in run.reactions]  # type: ignore[attr-defined]
-            except (AttributeError, ValueError):
-                pass
-        return result
+        return run.result
+
+    def run_code_streaming(  # type: ignore[override]
+        self,
+        code: str,
+        language: str = "python",
+        context: Context | None = None,
+        envs: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> Iterator[OutputMessage | Result | CodeError]:
+        """Stream the cell's events, then each reaction's, every event tagged.
+
+        Every yielded item carries ``marimo_cell_id`` (the cell it came from)
+        and ``marimo_reaction`` (False for the cell that was run, True for a
+        cell re-run because of it), so a consumer that reads the stream as a
+        Jupyter client does can still tell the cells apart.
+        """
+        execution = self.run_code(
+            code, language=language, context=context, envs=envs, timeout=timeout
+        )
+        for cell_id, reaction, result in [
+            (execution.cell_id, False, execution),
+            *((r.cell_id, True, r.result) for r in execution.reactions),
+        ]:
+            for item in self._events_of(result):
+                item.marimo_cell_id = cell_id  # type: ignore[attr-defined]
+                item.marimo_reaction = reaction  # type: ignore[attr-defined]
+                yield item
+
+    @staticmethod
+    def _events_of(execution: ExecutionResult) -> Iterator[OutputMessage | Result | CodeError]:
+        """One result's events, in the order the base streaming yields them."""
+        yield from execution.logs.stdout
+        yield from execution.logs.stderr
+        yield from execution.results
+        if not execution.execution_ok and execution.execution_error:
+            yield CodeError(
+                name="SandboxExecutionError", value=execution.execution_error, traceback=""
+            )
+        if execution.code_error:
+            yield execution.code_error
 
     def __repr__(self) -> str:
         return f"MarimoSandbox(cells={len(self._cells)}, helper={HELPER_NAME!r})"

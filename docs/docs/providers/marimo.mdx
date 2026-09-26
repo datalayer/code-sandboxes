@@ -45,10 +45,50 @@ running it, `remove_cell` takes it out, `plan(cell_id)` lists what would
 re-run, `graph()` snapshots every cell's names, neighbours, conflicts and
 cycles, and `cells` is the registered source by id.
 
-`run_code` keeps working as on every sandbox — each call is a cell of its own,
-so an agent that never heard of cells still gets a consistent state: what it
-ran earlier and that depends on what it just ran is run again. The ids of the
-cells that re-ran are on the result as `marimo_reactions`.
+## Through the Jupyter-shaped API
+
+`run_code` keeps working as on every sandbox, and it is reactive too. Name the
+cell through the execution context — `Context(id="a")` — and the same id again
+replaces that cell rather than adding a second; leave it out and each call is a
+cell of its own, so an agent that never heard of cells still gets a consistent
+state: what it ran earlier and that depends on what it just ran is run again.
+
+The result says what happened: `cell_id` is the cell it ran as, and
+`reactions` lists every cell re-run because of it, in the order they ran, each
+a `Reaction` with the cell's `code` and its own `ExecutionResult`. A reaction
+that fails stops the chain and is reported, not hidden.
+
+`CodeSandboxClient` carries the same through the Jupyter protocol, so a
+consumer that only reads replies and streams loses nothing:
+
+```python
+from code_sandboxes import CodeSandboxClient
+
+client = CodeSandboxClient.create(variant="marimo")
+client.execute("n = 1", cell_id="a")
+client.execute("print(n * 3)", cell_id="b")
+reply = client.execute("n = 4", cell_id="a")
+reply["marimo"]["cell_id"]                       # "a"
+reply["marimo"]["reactions"][0]["cell_id"]       # "b"
+reply["marimo"]["reactions"][0]["outputs"]       # [{"output_type": "stream", ..., "text": "12\n"}]
+```
+
+- `execute`, `execute_code` and `execute_code_streaming` take `cell_id`; a
+  reply with reactions carries them under `marimo`, each with its own
+  Jupyter-shaped `outputs`, `status` and `execution_count`.
+- `execute_interactive` emits the reactions' outputs after the cell's own,
+  every message tagged `metadata.marimo = {cell_id, reaction}` — the way a
+  kernel's IOPub messages carry their parent — so a client routes each output
+  to the cell it belongs to.
+- the stream from `execute_code_streaming` yields the reactions' events after
+  the cell's, each tagged `marimo_cell_id` and `marimo_reaction`.
+- `client.reactive` says whether the sandbox keeps a graph, and `run_cell`,
+  `register_cell`, `remove_cell`, `plan`, `graph` and `cells` pass through to
+  it; on any other variant they raise `TypeError`.
+
+Nothing changes on the wire: the graph is driven through ordinary execute
+requests and answers on stdout, which is what keeps `jupyter-kernel-client`
+the client API.
 
 The concrete implementation is available from a top-level module:
 

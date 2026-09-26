@@ -60,6 +60,7 @@ from .contents import (
 from .filesystem import FileInfo, SandboxFilesystem
 from .models import (
     CodeError,
+    Context,
     ExecutionResult,
     OutputMessage,
     Result,
@@ -114,11 +115,29 @@ def execution_result_to_reply(execution: ExecutionResult) -> dict[str, Any]:
             }
         )
 
-    return {
+    reply: dict[str, Any] = {
         "execution_count": execution.execution_count,
         "outputs": outputs,
         "status": "ok" if execution.success else "error",
     }
+    if execution.cell_id is not None or execution.reactions:
+        # A reactive sandbox (Marimo): which cell this was, and what else
+        # ran because of it, each with its own Jupyter-shaped outputs — so a
+        # caller that only reads replies still sees every changed cell.
+        reply["marimo"] = {
+            "cell_id": execution.cell_id,
+            "reactions": [
+                {
+                    "cell_id": reaction.cell_id,
+                    "code": reaction.code,
+                    "status": "error" if reaction.result.code_error is not None else "ok",
+                    "execution_count": reaction.result.execution_count,
+                    "outputs": execution_result_to_reply(reaction.result)["outputs"],
+                }
+                for reaction in execution.reactions
+            ],
+        }
+    return reply
 
 
 @dataclass
@@ -405,19 +424,33 @@ class CodeSandboxClient:
         else:
             self.close()
 
+    def _cell_kwargs(self, cell_id: str | None) -> dict[str, Any]:
+        """The execution context that names a cell, only when one was named.
+
+        Passed as a keyword only then: a sandbox with no notion of cells —
+        every variant but Marimo, and any subclass someone wrote against the
+        older signatures — is called exactly as before.
+        """
+        return {"context": Context(id=cell_id)} if cell_id else {}
+
     def execute_code(
         self,
         code: str,
         language: str = "python",
         timeout: float | None = None,
         envs: dict[str, str] | None = None,
+        cell_id: str | None = None,
     ) -> CodeExecutionOutcome:
         """Execute code and return a normalized outcome.
 
-        The sandbox is started automatically if needed.
+        The sandbox is started automatically if needed. ``cell_id`` names the
+        cell on a reactive sandbox (Marimo): the same id again replaces the
+        cell, and the cells depending on it re-run.
         """
         self.start()
-        execution = self._sandbox.run_code(code, language=language, timeout=timeout, envs=envs)
+        execution = self._sandbox.run_code(
+            code, language=language, timeout=timeout, envs=envs, **self._cell_kwargs(cell_id)
+        )
         return CodeExecutionOutcome.from_execution_result(execution)
 
     def execute(
@@ -425,12 +458,17 @@ class CodeSandboxClient:
         code: str,
         silent: bool = False,
         timeout: float | None = None,
+        cell_id: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Execute code and return a backend-neutral Jupyter-shaped reply."""
+        """Execute code and return a backend-neutral Jupyter-shaped reply.
+
+        On a reactive sandbox the reply also carries ``marimo``: the cell this
+        ran as and the reactions, each with its own outputs.
+        """
         del silent, kwargs
         self.start()
-        execution = self._sandbox.run_code(code, timeout=timeout)
+        execution = self._sandbox.run_code(code, timeout=timeout, **self._cell_kwargs(cell_id))
         return execution_result_to_reply(execution)
 
     def execute_interactive(
@@ -457,20 +495,74 @@ class CodeSandboxClient:
         """
         reply = self.execute(code, silent=silent, timeout=timeout, **kwargs)
         if output_hook is not None:
-            for output in reply["outputs"]:
-                msg_type = output.get("output_type", "display_data")
-                output_hook(
-                    {
+            marimo = reply.get("marimo") or {}
+            # The cell's own outputs, then each reaction's: every message
+            # says which cell it belongs to, the way a kernel's IOPub
+            # messages carry their parent header.
+            batches = [(marimo.get("cell_id"), False, reply["outputs"])] + [
+                (reaction["cell_id"], True, reaction["outputs"])
+                for reaction in marimo.get("reactions", [])
+            ]
+            for cell_id, is_reaction, outputs in batches:
+                for output in outputs:
+                    msg_type = output.get("output_type", "display_data")
+                    message: dict[str, Any] = {
                         "header": {"msg_type": msg_type},
                         "msg_type": msg_type,
                         "content": output,
                     }
-                )
+                    if cell_id is not None:
+                        message["metadata"] = {
+                            "marimo": {"cell_id": cell_id, "reaction": is_reaction}
+                        }
+                    output_hook(message)
         reply["content"] = {
             "status": reply.get("status", "ok"),
             "execution_count": reply.get("execution_count"),
         }
         return reply
+
+    # -- reactivity (the Marimo variant) ------------------------------------
+
+    @property
+    def reactive(self) -> bool:
+        """Whether the sandbox keeps a cell graph and re-runs dependents."""
+        return hasattr(self._sandbox, "run_cell")
+
+    def _reactive_sandbox(self) -> Any:
+        if not self.reactive:
+            raise TypeError(
+                f"The {self.variant or 'current'} sandbox is not reactive; "
+                "cells and reactions are the marimo variant's."
+            )
+        self.start()
+        return self._sandbox
+
+    def run_cell(
+        self, cell_id: str, code: str, *, react: bool = True, timeout: float | None = None
+    ) -> Any:
+        """Run one named cell, then the cells that depend on it (`MarimoRun`)."""
+        return self._reactive_sandbox().run_cell(cell_id, code, react=react, timeout=timeout)
+
+    def register_cell(self, cell_id: str, code: str) -> dict[str, Any]:
+        """Put a cell in the graph without running it; answers its names."""
+        return self._reactive_sandbox().register_cell(cell_id, code)
+
+    def remove_cell(self, cell_id: str) -> None:
+        self._reactive_sandbox().remove_cell(cell_id)
+
+    def plan(self, cell_id: str) -> list[str]:
+        """The cells that re-run after `cell_id`, in dependency order."""
+        return self._reactive_sandbox().plan(cell_id)
+
+    def graph(self) -> dict[str, Any]:
+        """Every cell's names and neighbours, the conflicts and the cycles."""
+        return self._reactive_sandbox().graph()
+
+    @property
+    def cells(self) -> dict[str, str]:
+        """The registered cells' source, by id."""
+        return dict(self._reactive_sandbox().cells)
 
     def get_variable(self, name: str) -> Any:
         """Read a variable through the wrapped sandbox."""
@@ -546,18 +638,17 @@ class CodeSandboxClient:
         language: str = "python",
         timeout: float | None = None,
         envs: dict[str, str] | None = None,
+        cell_id: str | None = None,
     ) -> Iterator[StreamingItem]:
         """Execute code and stream output events.
 
         This is a thin variant-agnostic wrapper over
-        ``Sandbox.run_code_streaming``.
+        ``Sandbox.run_code_streaming``. On a reactive sandbox the reactions'
+        events follow the cell's own, each tagged with ``marimo_cell_id``.
         """
         self.start()
         yield from self._sandbox.run_code_streaming(
-            code,
-            language=language,
-            timeout=timeout,
-            envs=envs,
+            code, language=language, timeout=timeout, envs=envs, **self._cell_kwargs(cell_id)
         )
 
     async def execute_code_streaming_async(

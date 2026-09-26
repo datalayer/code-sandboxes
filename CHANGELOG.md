@@ -8,6 +8,22 @@
 
 ## Unreleased
 
+## 1.9.39
+
+- **Marimo reactivity through the Jupyter-shaped API** (#37). `run_code`
+  names its cell through the execution context (`Context(id=...)`; the same
+  id replaces the cell) and the result says what happened: `cell_id`, and
+  `reactions` — every cell re-run because of it, each a `Reaction` with its
+  code and its own `ExecutionResult`. `CodeSandboxClient.execute`,
+  `execute_code` and `execute_code_streaming` take `cell_id`; a reply carries
+  the reactions under `marimo` with their own Jupyter-shaped outputs;
+  `execute_interactive` emits them after the cell's own, each message tagged
+  `metadata.marimo = {cell_id, reaction}`; the stream tags every event with
+  `marimo_cell_id`. The client passes `run_cell`, `register_cell`,
+  `remove_cell`, `plan`, `graph` and `cells` through to a reactive sandbox and
+  says so with `reactive`. The `marimo_reactions` extra attribute is replaced
+  by the typed `reactions` field. Nothing changes on the wire.
+
 ## 1.9.38
 
 - **The environments line and main are one branch again**: everything

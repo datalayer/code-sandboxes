@@ -397,6 +397,22 @@ class Context(BaseModel):
         return f"Context(id={self.id!r}, language={self.language!r})"
 
 
+class Reaction(BaseModel):
+    """One cell re-run because the cell that just ran changed what it reads.
+
+    A reactive sandbox (the Marimo variant) runs, after every execution, the
+    cells that depend on it, in dependency order. Each of those runs is a
+    reaction: the cell, its code, and the result it produced, so a caller who
+    only speaks the Jupyter protocol still learns what else changed.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    cell_id: str
+    code: str
+    result: "ExecutionResult"
+
+
 class ExecutionResult(BaseModel):
     """Complete result of a code execution.
 
@@ -470,6 +486,15 @@ class ExecutionResult(BaseModel):
             "Exit code when code calls sys.exit() or script terminates. "
             "None means no explicit exit."
         ),
+    )
+    # Reactivity (the Marimo variant; empty everywhere else)
+    cell_id: Optional[str] = Field(
+        default=None,
+        description="The cell this execution ran as, on a sandbox that keeps a cell graph",
+    )
+    reactions: list[Reaction] = Field(
+        default_factory=list,
+        description="The cells re-run because they depend on this one, in the order they ran",
     )
 
     @property
@@ -706,3 +731,6 @@ class JupyterServerOptions(BaseModel):
     token: Optional[str] = Field(default=None, repr=False)
     install_if_missing: bool = True
     install_timeout: float = 180.0
+
+
+Reaction.model_rebuild()
