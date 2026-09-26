@@ -84,6 +84,11 @@ class _MarimoReactive:
     def code(self, cell_id):
         return self._code.get(cell_id)
 
+    def codes(self):
+        """Every registered cell's source, by id: what a second driver on
+        the same kernel reads back."""
+        return dict(self._code)
+
     # -- what to run -----------------------------------------------------
 
     def plan(self, cell_id):

@@ -296,3 +296,22 @@ def test_the_client_offers_the_graph_to_a_reactive_sandbox_only(sandbox):
     assert plain.reactive is False
     with pytest.raises(TypeError, match="not reactive"):
         plain.plan("a")
+
+
+def test_a_refused_cell_is_still_named_and_a_stopped_reaction_is_not_ok(sandbox):
+    from code_sandboxes import CodeSandboxClient, Reaction
+    from code_sandboxes.models import Context
+
+    refused = sandbox.run_code("def broken(:", context=Context(id="a"))
+    assert refused.cell_id == "a" and refused.code_error is not None
+    events = list(sandbox.run_code_streaming("def broken(:", context=Context(id="a")))
+    assert [e.marimo_cell_id for e in events] == ["a"]
+
+    client = CodeSandboxClient(sandbox)
+    client.execute("n = 1", cell_id="p")
+    client.execute("n\nraise SystemExit(3)", cell_id="q")  # reads n: a dependent
+    client.execute("print('r')", cell_id="r")  # depends on nothing
+    reply = client.execute("n = 2", cell_id="p")
+    (reaction,) = reply["marimo"]["reactions"]
+    assert reaction["cell_id"] == "q" and reaction["status"] == "error"
+    assert isinstance(Reaction, type)

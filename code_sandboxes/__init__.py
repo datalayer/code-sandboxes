@@ -157,6 +157,7 @@ from .manage import (
     get_manager,
     manageable_variants,
 )
+from .marimo_cells import CellReply, CellsRun, MarimoCells
 from .marimo_sandbox import CellRun, MarimoRun, MarimoSandbox
 from .modal_sandbox import ModalSandbox
 from .models import (
@@ -170,6 +171,7 @@ from .models import (
     MIMEType,
     OutputHandler,
     OutputMessage,
+    Reaction,
     ResourceConfig,
     Result,
     SandboxConfig,
@@ -204,7 +206,9 @@ __all__ = [
     "RUNTIMES_API_PREFIX",
     "BuildEntry",
     "BuiltArtifact",
+    "CellReply",
     "CellRun",
+    "CellsRun",
     "CloudflareSandbox",
     "CodeError",
     "CodeExecutionOutcome",
@@ -243,6 +247,7 @@ __all__ = [
     "Logs",
     "MIMEType",
     "ManifestLocation",
+    "MarimoCells",
     "MarimoRun",
     "MarimoSandbox",
     "MaterializeEntry",
@@ -253,6 +258,7 @@ __all__ = [
     "PreparedAttachment",
     "ProcessHandle",
     "ProviderRequirement",
+    "Reaction",
     "ResourceConfig",
     "Result",
     "Sandbox",

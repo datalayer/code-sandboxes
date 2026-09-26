@@ -130,7 +130,10 @@ def execution_result_to_reply(execution: ExecutionResult) -> dict[str, Any]:
                 {
                     "cell_id": reaction.cell_id,
                     "code": reaction.code,
-                    "status": "error" if reaction.result.code_error is not None else "ok",
+                    # The same predicate as the reply's own status: a reaction
+                    # that was interrupted, failed in the infrastructure or
+                    # exited non-zero is not "ok" either.
+                    "status": "ok" if reaction.result.success else "error",
                     "execution_count": reaction.result.execution_count,
                     "outputs": execution_result_to_reply(reaction.result)["outputs"],
                 }

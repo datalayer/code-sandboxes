@@ -239,6 +239,9 @@ class MarimoSandbox(JupyterServerSandbox):
                     started_at=time.time(),
                     completed_at=time.time(),
                     context_id="default",
+                    # Named, even though it never ran: a stream consumer tags
+                    # the refusal to the cell that was asked for.
+                    cell_id=cell_id,
                 ),
                 registration=registration,
             )
@@ -265,7 +268,10 @@ class MarimoSandbox(JupyterServerSandbox):
             result.reactions.append(
                 Reaction(cell_id=dependent, code=dependent_code, result=dependent_result)
             )
-            if dependent_result.code_error is not None:
+            # Stopped by any failure — a raise, an interrupt, a sandbox
+            # error, a non-zero exit — not only by a raise: nothing
+            # downstream runs on a state a failed cell left half-made.
+            if not dependent_result.success:
                 break
         return run
 
