@@ -4,7 +4,6 @@
 
 """Provider-independent Jupyter ingress preparation and credentials."""
 
-
 from types import SimpleNamespace
 
 from code_sandboxes import JupyterServerOptions

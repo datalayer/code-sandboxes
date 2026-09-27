@@ -39,7 +39,6 @@ def test_the_old_path_is_the_new_module(old, new):
 
 def test_from_import_on_the_old_path():
     from code_sandboxes.datalayer_sandbox import DatalayerSandbox
-
     from code_sandboxes.sandboxes.datalayer import DatalayerSandbox as Moved
 
     assert DatalayerSandbox is Moved

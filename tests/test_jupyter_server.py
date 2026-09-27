@@ -555,9 +555,7 @@ class TestRestartingTheKernelRatherThanTheConnection:
             asked["params"] = params
             return _Response()
 
-        monkeypatch.setattr(
-            _POST, _post
-        )
+        monkeypatch.setattr(_POST, _post)
         try:
             assert sandbox.restart_kernel() is True
             assert asked["url"].endswith("/api/kernels/kernel-1/restart")
@@ -614,9 +612,7 @@ class TestRestartingTheKernelRatherThanTheConnection:
         def _explode(*args, **kwargs):
             raise OSError("no route to host")
 
-        monkeypatch.setattr(
-            _POST, _explode
-        )
+        monkeypatch.setattr(_POST, _explode)
         try:
             assert sandbox.restart_kernel() is False
         finally:
@@ -628,9 +624,7 @@ class TestRestartingTheKernelRatherThanTheConnection:
         def _should_not_be_called(*args, **kwargs):
             raise AssertionError("the server must not be asked without a kernel id")
 
-        monkeypatch.setattr(
-            _POST, _should_not_be_called
-        )
+        monkeypatch.setattr(_POST, _should_not_be_called)
         try:
             assert sandbox.restart_kernel() is False
         finally:
