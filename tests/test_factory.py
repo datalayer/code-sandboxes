@@ -9,15 +9,15 @@ import warnings
 import pytest
 
 from code_sandboxes.base import Sandbox, SandboxVariant
-from code_sandboxes.datalayer_sandbox import DatalayerSandbox
-from code_sandboxes.docker_sandbox import DockerSandbox
-from code_sandboxes.eval_sandbox import EvalSandbox
-from code_sandboxes.google_colab_sandbox import GoogleColabSandbox
-from code_sandboxes.jupyter_server_sandbox import JupyterServerSandbox
-from code_sandboxes.kaggle_sandbox import KaggleSandbox
-from code_sandboxes.modal_sandbox import ModalSandbox
 from code_sandboxes.models import SandboxConfig
-from code_sandboxes.monty_sandbox import MontySandbox
+from code_sandboxes.sandboxes.datalayer import DatalayerSandbox
+from code_sandboxes.sandboxes.docker import DockerSandbox
+from code_sandboxes.sandboxes.eval import EvalSandbox
+from code_sandboxes.sandboxes.google_colab import GoogleColabSandbox
+from code_sandboxes.sandboxes.jupyter_server import JupyterServerSandbox
+from code_sandboxes.sandboxes.kaggle import KaggleSandbox
+from code_sandboxes.sandboxes.modal import ModalSandbox
+from code_sandboxes.sandboxes.monty import MontySandbox
 
 
 class TestSandboxFactory:

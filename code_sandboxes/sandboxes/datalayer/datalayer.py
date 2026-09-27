@@ -15,10 +15,10 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
-    from .filesystem import SandboxFileHandle
+    from ...filesystem import SandboxFileHandle
 
-from .base import Sandbox, marks_execution
-from .contents import (
+from ...base import Sandbox, marks_execution
+from ...contents import (
     FILESYSTEM_PRIMITIVES,
     LOCAL_BRIDGE_MOUNT,
     MOUNT_MISSING,
@@ -32,14 +32,14 @@ from .contents import (
     path_is_mountpoint,
     ready,
 )
-from .exceptions import (
+from ...exceptions import (
     SandboxConfigurationError,
     SandboxConnectionError,
     SandboxNotFoundError,
     SandboxNotStartedError,
     SandboxSnapshotError,
 )
-from .models import (
+from ...models import (
     CodeError,
     Context,
     ExecutionResult,
@@ -1118,6 +1118,6 @@ class DatalayerSandbox(Sandbox):
         Returns:
             SandboxFileHandle for file operations.
         """
-        from .filesystem import SandboxFileHandle
+        from ...filesystem import SandboxFileHandle
 
         return SandboxFileHandle(self, path, mode)

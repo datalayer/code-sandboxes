@@ -21,16 +21,16 @@ from types import SimpleNamespace
 import pytest
 
 from code_sandboxes.base import Sandbox
-from code_sandboxes.coreweave_sandbox import (
+from code_sandboxes.exceptions import SandboxConfigurationError
+from code_sandboxes.manage import get_manager, manageable_variants
+from code_sandboxes.models import SandboxConfig, SandboxVariant
+from code_sandboxes.providers import get_provider
+from code_sandboxes.sandboxes.coreweave.coreweave import (
     _DRIVER_SOURCE,
     DEFAULT_CONTAINER_IMAGE,
     CoreWeaveSandbox,
     _with_envs,
 )
-from code_sandboxes.exceptions import SandboxConfigurationError
-from code_sandboxes.manage import get_manager, manageable_variants
-from code_sandboxes.models import SandboxConfig, SandboxVariant
-from code_sandboxes.providers import get_provider
 
 
 class _FakeStdin:

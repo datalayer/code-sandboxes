@@ -1055,7 +1055,7 @@ class TestSmokeTestingASnapshot:
 
         builder = a_builder()
         monkeypatch.setattr(
-            "code_sandboxes.daytona_sandbox.DaytonaSandbox", FakeSandbox, raising=False
+            "code_sandboxes.sandboxes.daytona.DaytonaSandbox", FakeSandbox, raising=False
         )
         monkeypatch.setattr(
             "code_sandboxes.environments.conformance.run_core_tier",
@@ -1095,7 +1095,7 @@ class TestSmokeTestingASnapshot:
                 pass
 
         monkeypatch.setattr(
-            "code_sandboxes.daytona_sandbox.DaytonaSandbox", FakeSandbox, raising=False
+            "code_sandboxes.sandboxes.daytona.DaytonaSandbox", FakeSandbox, raising=False
         )
         monkeypatch.setattr(
             "code_sandboxes.environments.conformance.run_core_tier",
@@ -1132,7 +1132,7 @@ class TestSmokeTestingASnapshot:
                 events.append("stop")
 
         monkeypatch.setattr(
-            "code_sandboxes.daytona_sandbox.DaytonaSandbox", FakeSandbox, raising=False
+            "code_sandboxes.sandboxes.daytona.DaytonaSandbox", FakeSandbox, raising=False
         )
         monkeypatch.setattr(
             "code_sandboxes.environments.conformance.run_core_tier",

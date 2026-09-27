@@ -30,7 +30,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from .marimo_reactive import (
+from code_sandboxes.sandboxes.marimo.reactive import (
     HELPER_NAME,
     KERNEL_HELPER_SOURCE,
     decode_answer,

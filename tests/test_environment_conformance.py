@@ -372,7 +372,7 @@ def test_the_probes_run_for_real_in_a_local_sandbox(
 
     from code_sandboxes.environments.contract import SANDBOX_CONTRACT_V1
     from code_sandboxes.environments.doctor.build import build_zipapp
-    from code_sandboxes.eval_sandbox import EvalSandbox
+    from code_sandboxes.sandboxes.eval import EvalSandbox
 
     if os.geteuid() == 0:
         pytest.skip("a read-only directory is writable by root")

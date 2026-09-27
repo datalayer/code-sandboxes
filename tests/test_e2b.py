@@ -22,11 +22,11 @@ from types import SimpleNamespace
 import pytest
 
 from code_sandboxes.base import Sandbox
-from code_sandboxes.e2b_sandbox import E2BSandbox, _result_data, _timestamp
 from code_sandboxes.exceptions import SandboxConfigurationError
 from code_sandboxes.manage import get_manager, manageable_variants
 from code_sandboxes.models import SandboxConfig, SandboxVariant
 from code_sandboxes.providers import get_provider
+from code_sandboxes.sandboxes.e2b.e2b import E2BSandbox, _result_data, _timestamp
 
 
 class _FakeResult:

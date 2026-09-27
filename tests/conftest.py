@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from code_sandboxes.eval_sandbox import EvalSandbox
 from code_sandboxes.models import SandboxConfig
+from code_sandboxes.sandboxes.eval import EvalSandbox
 
 
 @pytest.fixture

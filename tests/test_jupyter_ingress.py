@@ -4,15 +4,14 @@
 
 """Provider-independent Jupyter ingress preparation and credentials."""
 
-# ruff: noqa: S106
 
 from types import SimpleNamespace
 
 from code_sandboxes import JupyterServerOptions
-from code_sandboxes.daytona_sandbox import DaytonaSandbox
-from code_sandboxes.e2b_sandbox import E2BSandbox
 from code_sandboxes.jupyter_ingress import preparation_command
-from code_sandboxes.modal_sandbox import ModalSandbox
+from code_sandboxes.sandboxes.daytona import DaytonaSandbox
+from code_sandboxes.sandboxes.e2b import E2BSandbox
+from code_sandboxes.sandboxes.modal import ModalSandbox
 
 
 class _Result:

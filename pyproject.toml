@@ -174,11 +174,12 @@ ignore = [
 "tests/test_sandboxes.py" = ["F821"]
 "examples/*" = ["S108", "T201"]
 "code_sandboxes/base.py" = ["UP007"]
-"code_sandboxes/datalayer_sandbox.py" = ["C901", "S110"]
-"code_sandboxes/docker_sandbox.py" = ["C901", "S110", "UP007"]
-"code_sandboxes/eval_sandbox.py" = ["C901", "S102", "S307"]
-"code_sandboxes/jupyter_sandbox.py" = ["C901", "S110", "S603", "UP007"]
-"code_sandboxes/e2b_sandbox.py" = ["C901"]
+"code_sandboxes/sandboxes/datalayer/datalayer.py" = ["C901", "S110"]
+"code_sandboxes/sandboxes/docker/docker.py" = ["C901", "S110", "UP007"]
+"code_sandboxes/sandboxes/eval/eval.py" = ["C901", "S102", "S307"]
+"code_sandboxes/sandboxes/e2b/e2b.py" = ["C901"]
+# The module the kernel executes: its answers ARE stdout (T201), by design.
+"code_sandboxes/sandboxes/marimo/reactive_kernel.py" = ["T201"]
 # A serializer, the Dockerfile parser and the spec's rules read top to bottom;
 # splitting them to please a complexity count would hide the rules.
 "code_sandboxes/environments/canonical.py" = ["C901"]

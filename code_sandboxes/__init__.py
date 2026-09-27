@@ -73,7 +73,6 @@ from .builds import (
     installed_environment_contents,
 )
 from .client import CodeExecutionOutcome, CodeSandboxClient, execution_result_to_reply
-from .cloudflare_sandbox import CloudflareSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .console import (
     EXIT_COMMANDS,
@@ -95,12 +94,6 @@ from .contents import (
     MaterializeEntry,
     PreparedAttachment,
 )
-from .coreweave_sandbox import CoreWeaveSandbox
-from .datalayer_sandbox import DatalayerSandbox
-from .daytona_sandbox import DaytonaSandbox
-from .docker_sandbox import DockerSandbox
-from .e2b_sandbox import E2BSandbox
-from .eval_sandbox import EvalSandbox
 from .exceptions import (
     ContextNotFoundError,
     SandboxAuthenticationError,
@@ -124,16 +117,7 @@ from .filesystem import (
     SandboxFileHandle,
     SandboxFilesystem,
 )
-from .google_colab import (
-    GoogleColabKernelClient,
-    parse_google_colab_channels_url,
-)
-from .google_colab_sandbox import GoogleColabSandbox
 from .interfaces import ISandboxClient
-from .jupyter_server_sandbox import JupyterServerSandbox
-from .kaggle import KAGGLE_API_TOKEN_ENV, KaggleKernelClient, parse_kaggle_channels_url
-from .kaggle_execute import KaggleExecutionResult, KaggleKernelExecutor
-from .kaggle_sandbox import KaggleSandbox
 from .lifecycle import (
     INSTANCE_OPERATIONS,
     LIFECYCLE_OPERATIONS,
@@ -157,9 +141,6 @@ from .manage import (
     get_manager,
     manageable_variants,
 )
-from .marimo_cells import CellReply, CellsRun, MarimoCells
-from .marimo_sandbox import CellRun, MarimoRun, MarimoSandbox
-from .modal_sandbox import ModalSandbox
 from .models import (
     CodeError,
     Context,
@@ -183,7 +164,6 @@ from .models import (
     TunnelInfo,
     normalize_variant,
 )
-from .monty_sandbox import MontySandbox
 from .provider_ingress import provider_ingress_execution
 from .providers import (
     PROVIDERS,
@@ -192,6 +172,30 @@ from .providers import (
     available_providers,
     get_provider,
 )
+from .sandboxes.cloudflare import CloudflareSandbox
+from .sandboxes.coreweave import CoreWeaveSandbox
+from .sandboxes.datalayer import DatalayerSandbox
+from .sandboxes.daytona import DaytonaSandbox
+from .sandboxes.docker import DockerSandbox
+from .sandboxes.e2b import E2BSandbox
+from .sandboxes.eval import EvalSandbox
+from .sandboxes.google_colab import GoogleColabSandbox
+from .sandboxes.google_colab.client import (
+    GoogleColabKernelClient,
+    parse_google_colab_channels_url,
+)
+from .sandboxes.jupyter_server import JupyterServerSandbox
+from .sandboxes.kaggle import KaggleSandbox
+from .sandboxes.kaggle.client import (
+    KAGGLE_API_TOKEN_ENV,
+    KaggleKernelClient,
+    parse_kaggle_channels_url,
+)
+from .sandboxes.kaggle.execute import KaggleExecutionResult, KaggleKernelExecutor
+from .sandboxes.marimo import CellRun, MarimoRun, MarimoSandbox
+from .sandboxes.marimo.cells import CellReply, CellsRun, MarimoCells
+from .sandboxes.modal import ModalSandbox
+from .sandboxes.monty import MontySandbox
 
 #: Everything this package exports, in one sorted list — the groups it
 #: used to be split into stopped matching what they sat above.
@@ -318,3 +322,48 @@ __all__ = [
     "show_result",
     "unsupported",
 ]
+
+
+# -- The flat module paths of 1.9.x, kept as aliases -------------------------
+#
+# 1.10.0 moved every provider into `code_sandboxes.sandboxes.<provider>`.
+# Released consumers import the old paths — `code_sandboxes.datalayer_sandbox`
+# in jupyter-mcp-sandboxes 0.2.6, which the MCP gateway image installs from
+# PyPI — and a fresh install would break them until each is re-released. So
+# each old dotted path names the *same module object* as its new home:
+# `import code_sandboxes.datalayer_sandbox`, `from code_sandboxes.kaggle
+# import …` and `patch("code_sandboxes.datalayer_sandbox.X")` keep working and
+# act on the real module. Deprecated: new code imports from `code_sandboxes`
+# or the new paths, and the aliases go in 2.0.
+def _alias_the_flat_paths() -> None:
+    import importlib
+    import sys
+
+    for old, new in {
+        "cloudflare_sandbox": "sandboxes.cloudflare.cloudflare",
+        "coreweave_sandbox": "sandboxes.coreweave.coreweave",
+        "datalayer_sandbox": "sandboxes.datalayer.datalayer",
+        "daytona_sandbox": "sandboxes.daytona.daytona",
+        "docker_sandbox": "sandboxes.docker.docker",
+        "e2b_sandbox": "sandboxes.e2b.e2b",
+        "eval_sandbox": "sandboxes.eval.eval",
+        "google_colab": "sandboxes.google_colab.client",
+        "google_colab_sandbox": "sandboxes.google_colab.google_colab",
+        "jupyter_server_sandbox": "sandboxes.jupyter_server.jupyter_server",
+        "kaggle": "sandboxes.kaggle.client",
+        "kaggle_execute": "sandboxes.kaggle.execute",
+        "kaggle_live": "sandboxes.kaggle.live",
+        "kaggle_sandbox": "sandboxes.kaggle.kaggle",
+        "marimo_cells": "sandboxes.marimo.cells",
+        "marimo_reactive": "sandboxes.marimo.reactive",
+        "marimo_sandbox": "sandboxes.marimo.marimo",
+        "modal_sandbox": "sandboxes.modal.modal",
+        "monty_sandbox": "sandboxes.monty.monty",
+    }.items():
+        module = importlib.import_module(f"{__name__}.{new}")
+        sys.modules.setdefault(f"{__name__}.{old}", module)
+        globals().setdefault(old, module)
+
+
+_alias_the_flat_paths()
+del _alias_the_flat_paths

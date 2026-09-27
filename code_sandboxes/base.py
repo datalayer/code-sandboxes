@@ -598,7 +598,7 @@ class Sandbox(ABC):
             # it, and silently dropping them would be the surprising reading.
             config = config.model_copy(update={"examples": list(examples)})
 
-        from .eval_sandbox import EvalSandbox
+        from .sandboxes.eval import EvalSandbox
 
         variant_value = normalize_variant(variant)
 
@@ -617,51 +617,51 @@ class Sandbox(ABC):
             sandbox = EvalSandbox(config=config, **kwargs)
         elif variant_value == "docker":
             # Import here to avoid circular imports
-            from .docker_sandbox import DockerSandbox
+            from .sandboxes.docker import DockerSandbox
 
             sandbox = DockerSandbox(config=config, **kwargs)
         elif variant_value == "jupyter-server":
-            from .jupyter_server_sandbox import JupyterServerSandbox
+            from .sandboxes.jupyter_server import JupyterServerSandbox
 
             sandbox = JupyterServerSandbox(config=config, **kwargs)
         elif variant_value == "marimo":
-            from .marimo_sandbox import MarimoSandbox
+            from .sandboxes.marimo import MarimoSandbox
 
             sandbox = MarimoSandbox(config=config, **kwargs)
         elif variant_value == "datalayer":
-            from .datalayer_sandbox import DatalayerSandbox
+            from .sandboxes.datalayer import DatalayerSandbox
 
             sandbox = DatalayerSandbox(config=config, **kwargs)
         elif variant_value == "google-colab":
-            from .google_colab_sandbox import GoogleColabSandbox
+            from .sandboxes.google_colab import GoogleColabSandbox
 
             sandbox = GoogleColabSandbox(config=config, **kwargs)
         elif variant_value == "kaggle":
-            from .kaggle_sandbox import KaggleSandbox
+            from .sandboxes.kaggle import KaggleSandbox
 
             sandbox = KaggleSandbox(config=config, **kwargs)
         elif variant_value == "monty":
-            from .monty_sandbox import MontySandbox
+            from .sandboxes.monty import MontySandbox
 
             sandbox = MontySandbox(config=config, **kwargs)
         elif variant_value == "modal":
-            from .modal_sandbox import ModalSandbox
+            from .sandboxes.modal import ModalSandbox
 
             sandbox = ModalSandbox(config=config, **kwargs)
         elif variant_value == "daytona":
-            from .daytona_sandbox import DaytonaSandbox
+            from .sandboxes.daytona import DaytonaSandbox
 
             sandbox = DaytonaSandbox(config=config, **kwargs)
         elif variant_value == "e2b":
-            from .e2b_sandbox import E2BSandbox
+            from .sandboxes.e2b import E2BSandbox
 
             sandbox = E2BSandbox(config=config, **kwargs)
         elif variant_value == "coreweave":
-            from .coreweave_sandbox import CoreWeaveSandbox
+            from .sandboxes.coreweave import CoreWeaveSandbox
 
             sandbox = CoreWeaveSandbox(config=config, **kwargs)
         elif variant_value == "cloudflare":
-            from .cloudflare_sandbox import CloudflareSandbox
+            from .sandboxes.cloudflare import CloudflareSandbox
 
             sandbox = CloudflareSandbox(config=config, **kwargs)
         else:
@@ -693,7 +693,7 @@ class Sandbox(ABC):
             SandboxNotFoundError: If no sandbox with the given ID exists.
         """
         # This is primarily for datalayer
-        from .datalayer_sandbox import DatalayerSandbox
+        from .sandboxes.datalayer import DatalayerSandbox
 
         return DatalayerSandbox.from_id(sandbox_id, **kwargs)
 
@@ -715,55 +715,55 @@ class Sandbox(ABC):
         variant_value = normalize_variant(variant)
 
         if variant_value == "eval":
-            from .eval_sandbox import EvalSandbox
+            from .sandboxes.eval import EvalSandbox
 
             return EvalSandbox.list_environments()
         if variant_value == "docker":
-            from .docker_sandbox import DockerSandbox
+            from .sandboxes.docker import DockerSandbox
 
             return DockerSandbox.list_environments()
         if variant_value == "jupyter-server":
-            from .jupyter_server_sandbox import JupyterServerSandbox
+            from .sandboxes.jupyter_server import JupyterServerSandbox
 
             return JupyterServerSandbox.list_environments()
         if variant_value == "marimo":
-            from .marimo_sandbox import MarimoSandbox
+            from .sandboxes.marimo import MarimoSandbox
 
             return MarimoSandbox.list_environments()
         if variant_value == "monty":
-            from .monty_sandbox import MontySandbox
+            from .sandboxes.monty import MontySandbox
 
             return MontySandbox.list_environments()
         if variant_value == "modal":
-            from .modal_sandbox import ModalSandbox
+            from .sandboxes.modal import ModalSandbox
 
             return ModalSandbox.list_environments()
         if variant_value == "daytona":
-            from .daytona_sandbox import DaytonaSandbox
+            from .sandboxes.daytona import DaytonaSandbox
 
             return DaytonaSandbox.list_environments()
         if variant_value == "e2b":
-            from .e2b_sandbox import E2BSandbox
+            from .sandboxes.e2b import E2BSandbox
 
             return E2BSandbox.list_environments()
         if variant_value == "coreweave":
-            from .coreweave_sandbox import CoreWeaveSandbox
+            from .sandboxes.coreweave import CoreWeaveSandbox
 
             return CoreWeaveSandbox.list_environments()
         if variant_value == "cloudflare":
-            from .cloudflare_sandbox import CloudflareSandbox
+            from .sandboxes.cloudflare import CloudflareSandbox
 
             return CloudflareSandbox.list_environments()
         if variant_value == "kaggle":
-            from .kaggle_sandbox import KaggleSandbox
+            from .sandboxes.kaggle import KaggleSandbox
 
             return KaggleSandbox.list_environments()
         if variant_value == "google-colab":
-            from .google_colab_sandbox import GoogleColabSandbox
+            from .sandboxes.google_colab import GoogleColabSandbox
 
             return GoogleColabSandbox.list_environments()
         if variant_value == "datalayer":
-            from .datalayer_sandbox import DatalayerSandbox
+            from .sandboxes.datalayer import DatalayerSandbox
 
             return DatalayerSandbox.list_environments(**kwargs)
         raise ValueError(
@@ -788,7 +788,7 @@ class Sandbox(ABC):
         Yields:
             Sandbox instances.
         """
-        from .datalayer_sandbox import DatalayerSandbox
+        from .sandboxes.datalayer import DatalayerSandbox
 
         yield from DatalayerSandbox.list_all(tags=tags, **kwargs)
 

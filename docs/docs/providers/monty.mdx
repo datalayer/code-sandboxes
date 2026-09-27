@@ -37,7 +37,7 @@ with Sandbox.create(variant="monty") as sandbox:
 You can expose host callables to the sandboxed code and enable type checking:
 
 ```python
-from code_sandboxes.monty_sandbox import MontySandbox
+from code_sandboxes.sandboxes.monty import MontySandbox
 
 sandbox = MontySandbox(
     type_check=True,

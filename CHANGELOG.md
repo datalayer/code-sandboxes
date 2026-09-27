@@ -8,6 +8,29 @@
 
 ## Unreleased
 
+## 1.10.0
+
+- **One subpackage per provider.** Every sandbox moved under
+  `code_sandboxes.sandboxes.<provider>` — the implementation in
+  `<provider>/<provider>.py`, re-exported by the package's `__init__`, and the
+  modules only it needs beside it (Kaggle's kernel client,
+  executors and live session; Marimo's reactive graph and cells driver;
+  Google Colab's kernel client). The public names are unchanged: import them
+  from `code_sandboxes` as before. The old flat module paths
+  (`code_sandboxes.datalayer_sandbox`, `code_sandboxes.marimo_sandbox`, …)
+  still resolve — each is an alias of the very same module in its new home,
+  so released consumers keep working — but they are deprecated and go in
+  2.0; import from `code_sandboxes` or the new paths.
+- **The Marimo kernel helper is real code.** `sandboxes/marimo/reactive_kernel.py`
+  is a typed, importable, self-contained module; what a sandbox sends to the
+  kernel is that file's own text (`reactive.KERNEL_HELPER_SOURCE` reads it
+  from the installed package). The type-checker and a new test suite
+  (`tests/test_marimo_reactive_kernel.py`) now read exactly what the kernel
+  runs: replacement, conflicts, cycles, plans, removal, re-execution keeping
+  the graph, and the stdout wire encoding.
+- Docs: every provider page imports from its subpackage; the Marimo page
+  describes the real-code helper and points at the hosted `marimo` toolset.
+
 ## 1.9.39
 
 - The GitHub workflow files are all `.yaml` now (`build`, `py-tests`,

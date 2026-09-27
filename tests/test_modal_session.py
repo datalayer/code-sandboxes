@@ -122,8 +122,8 @@ def _modal_with_drivers():
     """A ModalSandbox whose `exec` hands out one fresh driver per call."""
     from types import SimpleNamespace
 
-    from code_sandboxes.modal_sandbox import ModalSandbox
     from code_sandboxes.models import SandboxConfig
+    from code_sandboxes.sandboxes.modal import ModalSandbox
 
     drivers: list[_Driver] = []
 

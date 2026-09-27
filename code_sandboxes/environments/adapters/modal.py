@@ -42,7 +42,7 @@ step here runs as root (see above), so `doctor --json` baked into the image
 would report `uid: 0`, not the `1000:100` the contract asks for. Section
 11.4 item 6 says a live launch is where this gets fixed — "every exec
 re-asserts the user" — and, since 2026-09-13, it does:
-`code_sandboxes.modal_sandbox.ModalSandbox._start_driver` sets
+`code_sandboxes.sandboxes.modal.ModalSandbox._start_driver` sets
 `os.setgid(100)`/`os.setuid(1000)` inside the driver it starts, in place of
 the `setpriv` wrapper section 11.4 names, but only when `self._image_id` is
 set — that is, only when the sandbox was launched from a built Environments
@@ -86,7 +86,7 @@ into several arguments instead of one (found in review). Fixed with a real
 script file, not an inline one-liner: `/opt/datalayer/bin/entrypoint.sh`,
 baked in with `exec "$@"` as real file *content*, needs no Dockerfile-string
 escaping, and forwards correctly. But **the actual launcher,
-`code_sandboxes.modal_sandbox.ModalSandbox.start()`, creates the sandbox
+`code_sandboxes.sandboxes.modal.ModalSandbox.start()`, creates the sandbox
 with no command args at all** — it execs into the running container
 separately, after creation (found live, 2026-09-13, running this exact
 builder's own artifact through it, not a hand-rolled `Sandbox.create` call
@@ -206,7 +206,7 @@ _IMAGE_BUILDER_VERSION = "2025.06"
 #: module docstring for why. `entrypoint()` is given this one bare path,
 #: nothing in it needing a Dockerfile-string escape.
 _ENTRYPOINT_PATH = "/opt/datalayer/bin/entrypoint.sh"
-#: `code_sandboxes.modal_sandbox.ModalSandbox.start()` — the actual launcher
+#: `code_sandboxes.sandboxes.modal.ModalSandbox.start()` — the actual launcher
 #: — creates the sandbox with no command args at all, and execs into it
 #: separately afterward (found live, 2026-09-13: `exec "$@"` with nothing to
 #: expand is a no-op in `sh`, so the container's own PID 1 fell straight

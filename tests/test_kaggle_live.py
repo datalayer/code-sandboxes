@@ -7,7 +7,7 @@ import ast
 import json
 from pathlib import Path
 
-from code_sandboxes.kaggle_live import KaggleLiveSession, build_agent_code
+from code_sandboxes.sandboxes.kaggle.live import KaggleLiveSession, build_agent_code
 
 
 class FakeApi:

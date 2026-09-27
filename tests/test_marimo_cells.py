@@ -20,7 +20,7 @@ import pytest
 
 marimo = pytest.importorskip("marimo")
 
-from code_sandboxes.marimo_cells import MarimoCells  # noqa: E402
+from code_sandboxes.sandboxes.marimo.cells import MarimoCells  # noqa: E402
 
 
 class ReplyingClient:

@@ -5,7 +5,7 @@
 """Kaggle sandbox implementation.
 
 This sandbox connects to a Kaggle interactive notebook runtime and executes code
-in its kernel using :class:`code_sandboxes.kaggle.KaggleKernelClient`.
+in its kernel using :class:`code_sandboxes.sandboxes.kaggle.client.KaggleKernelClient`.
 
 When runtime connection details are not provided, it transparently falls back to
 Kaggle's batch execution API via ``KaggleKernelExecutor``. This mode is useful
@@ -33,13 +33,14 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
-from .base import Sandbox, marks_execution
-from .exceptions import SandboxConfigurationError, SandboxNotStartedError
-from .interfaces import ISandboxClient
-from .jupyter_ingress import interrupt_kernel_client
-from .kaggle import KaggleKernelClient, parse_kaggle_channels_url
-from .kaggle_execute import KaggleKernelExecutor
-from .models import (
+from code_sandboxes.sandboxes.kaggle.client import KaggleKernelClient, parse_kaggle_channels_url
+from code_sandboxes.sandboxes.kaggle.execute import KaggleKernelExecutor
+
+from ...base import Sandbox, marks_execution
+from ...exceptions import SandboxConfigurationError, SandboxNotStartedError
+from ...interfaces import ISandboxClient
+from ...jupyter_ingress import interrupt_kernel_client
+from ...models import (
     CodeError,
     Context,
     ExecutionResult,
@@ -141,7 +142,7 @@ class KaggleSandbox(Sandbox):
         # the code travels over the account's own datasets — one persistent
         # kernel, no replay, no external service. See `kaggle_live`.
         if self._extra_kwargs.get("live") and not self._server_url and not self._channels_url:
-            from .kaggle_live import KaggleLiveSession
+            from code_sandboxes.sandboxes.kaggle.live import KaggleLiveSession
 
             executor = KaggleKernelExecutor(
                 username=self._extra_kwargs.get("username"),

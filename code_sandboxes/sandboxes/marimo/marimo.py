@@ -40,15 +40,16 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from .base import marks_execution
-from .jupyter_server_sandbox import JupyterServerSandbox
-from .marimo_reactive import (
+from code_sandboxes.sandboxes.jupyter_server import JupyterServerSandbox
+from code_sandboxes.sandboxes.marimo.reactive import (
     HELPER_NAME,
     KERNEL_HELPER_SOURCE,
     decode_answer,
     question,
 )
-from .models import (
+
+from ...base import marks_execution
+from ...models import (
     CodeError,
     Context,
     ExecutionResult,

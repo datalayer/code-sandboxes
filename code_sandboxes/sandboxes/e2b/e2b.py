@@ -28,8 +28,8 @@ import logging
 import time
 from typing import Any
 
-from .base import Sandbox, marks_execution
-from .contents import (
+from ...base import Sandbox, marks_execution
+from ...contents import (
     FILESYSTEM_PRIMITIVES,
     ContentAttachmentSpec,
     ContentCapabilities,
@@ -41,14 +41,14 @@ from .contents import (
     prepare_local_bridge,
     stop_bridge_mount,
 )
-from .exceptions import (
+from ...exceptions import (
     SandboxConfigurationError,
     SandboxExecutionError,
     SandboxNotStartedError,
     VariableNotFoundError,
 )
-from .jupyter_ingress import preparation_command, resolved_options, websocket_url
-from .models import (
+from ...jupyter_ingress import preparation_command, resolved_options, websocket_url
+from ...models import (
     CodeError,
     Context,
     ExecutionResult,

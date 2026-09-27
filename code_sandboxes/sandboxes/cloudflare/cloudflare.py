@@ -43,15 +43,15 @@ from collections.abc import Iterator
 from typing import Any
 from urllib.parse import quote
 
-from .base import Sandbox, marks_execution
-from .exceptions import (
+from ...base import Sandbox, marks_execution
+from ...exceptions import (
     SandboxConfigurationError,
     SandboxConnectionError,
     SandboxExecutionError,
     SandboxNotStartedError,
 )
-from .filesystem import SandboxFilesystem
-from .models import (
+from ...filesystem import SandboxFilesystem
+from ...models import (
     CodeError,
     Context,
     ExecutionResult,

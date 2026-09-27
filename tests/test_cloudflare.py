@@ -21,14 +21,6 @@ import sys
 import pytest
 
 from code_sandboxes.base import Sandbox
-from code_sandboxes.cloudflare_sandbox import (
-    _RUNNER_SOURCE,
-    API_KEY_ENV_VAR,
-    API_URL_ENV_VAR,
-    CloudflareSandbox,
-    _reply_of,
-    _sse_events,
-)
 from code_sandboxes.exceptions import (
     SandboxConfigurationError,
     SandboxConnectionError,
@@ -36,6 +28,14 @@ from code_sandboxes.exceptions import (
 from code_sandboxes.manage import get_manager, manageable_variants
 from code_sandboxes.models import SandboxConfig, SandboxVariant
 from code_sandboxes.providers import get_provider
+from code_sandboxes.sandboxes.cloudflare.cloudflare import (
+    _RUNNER_SOURCE,
+    API_KEY_ENV_VAR,
+    API_URL_ENV_VAR,
+    CloudflareSandbox,
+    _reply_of,
+    _sse_events,
+)
 
 BRIDGE_URL = "https://bridge.example.workers.dev"
 

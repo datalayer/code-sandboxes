@@ -21,17 +21,17 @@ from types import SimpleNamespace
 import pytest
 
 from code_sandboxes.base import Sandbox
-from code_sandboxes.daytona_sandbox import (
+from code_sandboxes.exceptions import SandboxConfigurationError
+from code_sandboxes.manage import get_manager, manageable_variants
+from code_sandboxes.models import SandboxConfig, SandboxVariant
+from code_sandboxes.providers import get_provider
+from code_sandboxes.sandboxes.daytona.daytona import (
     _VALUE_MARKER,
     DaytonaSandbox,
     _capture_trailing_value,
     _Lines,
     _split_marker,
 )
-from code_sandboxes.exceptions import SandboxConfigurationError
-from code_sandboxes.manage import get_manager, manageable_variants
-from code_sandboxes.models import SandboxConfig, SandboxVariant
-from code_sandboxes.providers import get_provider
 
 
 def _chunks(text: str, size: int = 7) -> list[str]:
@@ -463,7 +463,7 @@ def test_the_name_travels_as_a_label_not_as_daytonas_name():
 
 def test_a_gpu_daytona_does_not_have_is_refused_by_name():
     daytona = pytest.importorskip("daytona")
-    from code_sandboxes.daytona_sandbox import _gpu_types
+    from code_sandboxes.sandboxes.daytona.daytona import _gpu_types
 
     with pytest.raises(SandboxConfigurationError, match="no GPU called 'T4'"):
         _gpu_types("T4", daytona)
@@ -474,7 +474,7 @@ def test_a_gpu_daytona_does_not_have_is_refused_by_name():
 def test_several_gpus_are_an_ordered_list_of_preferences():
     """Daytona takes the first of them it can find, which is the point."""
     daytona = pytest.importorskip("daytona")
-    from code_sandboxes.daytona_sandbox import _gpu_types
+    from code_sandboxes.sandboxes.daytona.daytona import _gpu_types
 
     assert _gpu_types("H100, rtx_4090 ,H200", daytona) == [
         daytona.GpuType.H100,

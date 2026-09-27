@@ -5,7 +5,7 @@
 """Google Colab sandbox implementation.
 
 This sandbox connects to an existing Google Colab runtime and executes code in
-its kernel using :class:`code_sandboxes.google_colab.GoogleColabKernelClient`.
+its kernel using :class:`code_sandboxes.sandboxes.google_colab.client.GoogleColabKernelClient`.
 
 Unlike the Jupyter/Docker sandboxes, this sandbox does **not** provision a
 runtime: a Colab runtime must already be running in a browser session. Reuse it
@@ -19,12 +19,16 @@ import logging
 import time
 import uuid
 
-from .base import Sandbox, marks_execution
-from .exceptions import SandboxConfigurationError, SandboxNotStartedError
-from .google_colab import GoogleColabKernelClient, parse_google_colab_channels_url
-from .interfaces import ISandboxClient
-from .jupyter_ingress import interrupt_kernel_client
-from .models import (
+from code_sandboxes.sandboxes.google_colab.client import (
+    GoogleColabKernelClient,
+    parse_google_colab_channels_url,
+)
+
+from ...base import Sandbox, marks_execution
+from ...exceptions import SandboxConfigurationError, SandboxNotStartedError
+from ...interfaces import ISandboxClient
+from ...jupyter_ingress import interrupt_kernel_client
+from ...models import (
     CodeError,
     Context,
     ExecutionResult,

@@ -24,9 +24,9 @@ import uuid
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from typing import Any, Optional
 
-from .base import Sandbox, marks_execution
-from .exceptions import SandboxNotStartedError
-from .models import (
+from ...base import Sandbox, marks_execution
+from ...exceptions import SandboxNotStartedError
+from ...models import (
     CodeError,
     Context,
     ExecutionResult,
@@ -469,13 +469,13 @@ async def __user_code__():
         """
         ctx = context or self._default_context
         if ctx.id not in self._namespaces:
-            from .exceptions import VariableNotFoundError
+            from ...exceptions import VariableNotFoundError
 
             raise VariableNotFoundError(name)
 
         namespace = self._namespaces[ctx.id]
         if name not in namespace:
-            from .exceptions import VariableNotFoundError
+            from ...exceptions import VariableNotFoundError
 
             raise VariableNotFoundError(name)
 

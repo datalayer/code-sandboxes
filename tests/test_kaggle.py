@@ -8,7 +8,7 @@ import logging
 
 import pytest
 
-from code_sandboxes.kaggle import (
+from code_sandboxes.sandboxes.kaggle.client import (
     KaggleKernelClient,
     parse_kaggle_channels_url,
 )
@@ -46,7 +46,8 @@ def test_kaggle_kernel_client_uses_explicit_token(monkeypatch):
 
     monkeypatch.delenv("KAGGLE_API_TOKEN", raising=False)
     monkeypatch.setattr(
-        "code_sandboxes.kaggle.JupyterKernelClient.__init__", fake_kernel_client_init
+        "code_sandboxes.sandboxes.kaggle.client.JupyterKernelClient.__init__",
+        fake_kernel_client_init,
     )
 
     KaggleKernelClient(
@@ -69,7 +70,8 @@ def test_kaggle_kernel_client_reads_token_from_env(monkeypatch):
 
     monkeypatch.setenv("KAGGLE_API_TOKEN", "env-token")
     monkeypatch.setattr(
-        "code_sandboxes.kaggle.JupyterKernelClient.__init__", fake_kernel_client_init
+        "code_sandboxes.sandboxes.kaggle.client.JupyterKernelClient.__init__",
+        fake_kernel_client_init,
     )
 
     KaggleKernelClient(server_url=SERVER_URL)
@@ -85,7 +87,8 @@ def test_kaggle_kernel_client_token_none_without_env(monkeypatch):
 
     monkeypatch.delenv("KAGGLE_API_TOKEN", raising=False)
     monkeypatch.setattr(
-        "code_sandboxes.kaggle.JupyterKernelClient.__init__", fake_kernel_client_init
+        "code_sandboxes.sandboxes.kaggle.client.JupyterKernelClient.__init__",
+        fake_kernel_client_init,
     )
 
     KaggleKernelClient(server_url=SERVER_URL)
@@ -101,7 +104,8 @@ def test_kaggle_kernel_client_from_channels_url(monkeypatch):
 
     monkeypatch.delenv("KAGGLE_API_TOKEN", raising=False)
     monkeypatch.setattr(
-        "code_sandboxes.kaggle.JupyterKernelClient.__init__", fake_kernel_client_init
+        "code_sandboxes.sandboxes.kaggle.client.JupyterKernelClient.__init__",
+        fake_kernel_client_init,
     )
 
     KaggleKernelClient.from_channels_url(CHANNELS_URL)
@@ -118,7 +122,8 @@ def test_kaggle_kernel_client_allows_missing_kernel_id_for_new_kernel(monkeypatc
 
     monkeypatch.setenv("KAGGLE_API_TOKEN", "env-token")
     monkeypatch.setattr(
-        "code_sandboxes.kaggle.JupyterKernelClient.__init__", fake_kernel_client_init
+        "code_sandboxes.sandboxes.kaggle.client.JupyterKernelClient.__init__",
+        fake_kernel_client_init,
     )
 
     KaggleKernelClient(server_url=SERVER_URL)

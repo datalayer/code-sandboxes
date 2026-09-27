@@ -819,7 +819,7 @@ class TestAGpuVersion:
             def stop(self):
                 pass
 
-        monkeypatch.setattr("code_sandboxes.modal_sandbox.ModalSandbox", FakeSandbox)
+        monkeypatch.setattr("code_sandboxes.sandboxes.modal.ModalSandbox", FakeSandbox)
         monkeypatch.setattr(
             "code_sandboxes.environments.conformance.run_core_tier",
             lambda sandbox, **kwargs: ValidationResult(contract_version="sandbox-contract/v1"),
@@ -1158,7 +1158,7 @@ class TestSmokeTestingAnImage:
             def stop(self):
                 pass
 
-        monkeypatch.setattr("code_sandboxes.modal_sandbox.ModalSandbox", FakeSandbox)
+        monkeypatch.setattr("code_sandboxes.sandboxes.modal.ModalSandbox", FakeSandbox)
         monkeypatch.setattr(
             "code_sandboxes.environments.conformance.run_core_tier",
             lambda sandbox, **kwargs: ran.update(kwargs) or "the-result",
@@ -1187,7 +1187,7 @@ class TestSmokeTestingAnImage:
             def stop(self):
                 events.append("stop")
 
-        monkeypatch.setattr("code_sandboxes.modal_sandbox.ModalSandbox", FakeSandbox)
+        monkeypatch.setattr("code_sandboxes.sandboxes.modal.ModalSandbox", FakeSandbox)
         monkeypatch.setattr(
             "code_sandboxes.environments.conformance.run_core_tier",
             lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("the tier blew up")),

@@ -54,10 +54,10 @@ class TestVariants:
     @pytest.mark.parametrize(
         "module_name, class_name",
         [
-            ("code_sandboxes.eval_sandbox", "EvalSandbox"),
-            ("code_sandboxes.docker_sandbox", "DockerSandbox"),
-            ("code_sandboxes.datalayer_sandbox", "DatalayerSandbox"),
-            ("code_sandboxes.jupyter_server_sandbox", "JupyterServerSandbox"),
+            ("code_sandboxes.sandboxes.eval", "EvalSandbox"),
+            ("code_sandboxes.sandboxes.docker", "DockerSandbox"),
+            ("code_sandboxes.sandboxes.datalayer", "DatalayerSandbox"),
+            ("code_sandboxes.sandboxes.jupyter_server", "JupyterServerSandbox"),
         ],
     )
     def test_every_variant_conforms(self, module_name: str, class_name: str) -> None:
@@ -74,14 +74,14 @@ class TestVariants:
             assert hasattr(variant, verb), f"{class_name} is missing {verb}"
 
     def test_a_conforming_instance_satisfies_the_protocol(self) -> None:
-        from code_sandboxes.eval_sandbox import EvalSandbox
+        from code_sandboxes.sandboxes.eval import EvalSandbox
 
         assert isinstance(EvalSandbox(), SandboxLifecycle)
 
 
 class TestRefusals:
     def test_a_provider_says_what_it_cannot_do_before_being_asked(self) -> None:
-        from code_sandboxes.eval_sandbox import EvalSandbox
+        from code_sandboxes.sandboxes.eval import EvalSandbox
 
         sandbox = EvalSandbox()
 
@@ -92,7 +92,7 @@ class TestRefusals:
         assert sandbox.supports("pause") is False
 
     def test_and_refuses_in_the_same_words(self) -> None:
-        from code_sandboxes.eval_sandbox import EvalSandbox
+        from code_sandboxes.sandboxes.eval import EvalSandbox
 
         sandbox = EvalSandbox()
         with pytest.raises(SandboxOperationNotSupported) as caught:
@@ -108,7 +108,7 @@ class TestRefusals:
         assert error.operation == "snapshot"
 
     def test_an_unknown_verb_is_simply_unsupported(self) -> None:
-        from code_sandboxes.eval_sandbox import EvalSandbox
+        from code_sandboxes.sandboxes.eval import EvalSandbox
 
         assert EvalSandbox().supports("teleport") is False
 
