@@ -6,7 +6,7 @@
 
 from pathlib import Path
 
-from code_sandboxes.eval_sandbox import EvalSandbox
+from code_sandboxes.sandboxes.eval import EvalSandbox
 
 
 class TestIntegration:

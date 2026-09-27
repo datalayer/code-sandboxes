@@ -31,14 +31,14 @@ import math
 import time
 from typing import Any
 
-from .base import Sandbox, marks_execution
-from .exceptions import (
+from ...base import Sandbox, marks_execution
+from ...exceptions import (
     SandboxConfigurationError,
     SandboxExecutionError,
     SandboxNotStartedError,
     VariableNotFoundError,
 )
-from .models import (
+from ...models import (
     CodeError,
     Context,
     ExecutionResult,

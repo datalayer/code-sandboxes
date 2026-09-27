@@ -1,6 +1,1 @@
-#
-# BSD 3-Clause License
-
-"""Code Sandboxes."""
-
-__version__ = "1.9.39"
+__version__ = "1.10.0"

@@ -48,11 +48,14 @@ def variants():
     import pkgutil
 
     import code_sandboxes
+    import code_sandboxes.sandboxes
 
-    for module in pkgutil.iter_modules(code_sandboxes.__path__):
-        if not module.name.endswith("_sandbox"):
+    # One package per provider since 1.10.0, its implementation in
+    # `<provider>/<provider>.py`.
+    for package in pkgutil.iter_modules(code_sandboxes.sandboxes.__path__):
+        if not package.ispkg:
             continue
-        loaded = importlib.import_module(f"code_sandboxes.{module.name}")
+        loaded = importlib.import_module(f"code_sandboxes.sandboxes.{package.name}.{package.name}")
         for name in dir(loaded):
             value = getattr(loaded, name)
             if (
@@ -61,7 +64,7 @@ def variants():
                 and value is not Sandbox
                 and value.__module__ == loaded.__name__
             ):
-                yield module.name, name, value
+                yield package.name, name, value
 
 
 class TestTheWholePackage:
@@ -197,15 +200,15 @@ class TestTheJupyterBackedVariants:
     @pytest.mark.parametrize(
         ("module", "name"),
         [
-            ("docker_sandbox", "DockerSandbox"),
-            ("google_colab_sandbox", "GoogleColabSandbox"),
-            ("kaggle_sandbox", "KaggleSandbox"),
+            ("docker", "DockerSandbox"),
+            ("google_colab", "GoogleColabSandbox"),
+            ("kaggle", "KaggleSandbox"),
         ],
     )
     def test_it_interrupts_through_its_client(self, module, name):
         import importlib
 
-        cls = getattr(importlib.import_module(f"code_sandboxes.{module}"), name)
+        cls = getattr(importlib.import_module(f"code_sandboxes.sandboxes.{module}"), name)
         sandbox = cls.__new__(cls)
         client = self._Client()
         sandbox._client = client
@@ -217,15 +220,15 @@ class TestTheJupyterBackedVariants:
     @pytest.mark.parametrize(
         ("module", "name"),
         [
-            ("docker_sandbox", "DockerSandbox"),
-            ("google_colab_sandbox", "GoogleColabSandbox"),
-            ("kaggle_sandbox", "KaggleSandbox"),
+            ("docker", "DockerSandbox"),
+            ("google_colab", "GoogleColabSandbox"),
+            ("kaggle", "KaggleSandbox"),
         ],
     )
     def test_without_a_client_it_says_no(self, module, name):
         import importlib
 
-        cls = getattr(importlib.import_module(f"code_sandboxes.{module}"), name)
+        cls = getattr(importlib.import_module(f"code_sandboxes.sandboxes.{module}"), name)
         sandbox = cls.__new__(cls)
         sandbox._client = None
         sandbox._server_url = None
@@ -247,16 +250,16 @@ class TestThePorvidersThatCannotBeInterrupted:
     @pytest.mark.parametrize(
         ("module", "name"),
         [
-            ("cloudflare_sandbox", "CloudflareSandbox"),
-            ("coreweave_sandbox", "CoreWeaveSandbox"),
-            ("daytona_sandbox", "DaytonaSandbox"),
-            ("e2b_sandbox", "E2BSandbox"),
-            ("modal_sandbox", "ModalSandbox"),
-            ("monty_sandbox", "MontySandbox"),
+            ("cloudflare", "CloudflareSandbox"),
+            ("coreweave", "CoreWeaveSandbox"),
+            ("daytona", "DaytonaSandbox"),
+            ("e2b", "E2BSandbox"),
+            ("modal", "ModalSandbox"),
+            ("monty", "MontySandbox"),
         ],
     )
     def test_it_refuses_rather_than_pretending(self, module, name):
         import importlib
 
-        cls = getattr(importlib.import_module(f"code_sandboxes.{module}"), name)
+        cls = getattr(importlib.import_module(f"code_sandboxes.sandboxes.{module}"), name)
         assert cls._do_interrupt(cls.__new__(cls)) is False

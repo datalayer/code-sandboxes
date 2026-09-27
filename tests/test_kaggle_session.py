@@ -10,7 +10,7 @@ class TestKaggleBatchSession:
     """The batch session: state carried by replaying the code that ran."""
 
     def _sandbox(self, **kwargs):
-        from code_sandboxes.kaggle_sandbox import KaggleSandbox
+        from code_sandboxes.sandboxes.kaggle import KaggleSandbox
 
         return KaggleSandbox(**kwargs)
 
@@ -63,7 +63,7 @@ class TestKaggleStreamingSession:
     def _sandbox(self, outputs, status="COMPLETE"):
         from types import SimpleNamespace
 
-        from code_sandboxes.kaggle_sandbox import KaggleSandbox
+        from code_sandboxes.sandboxes.kaggle import KaggleSandbox
 
         class _Executor:
             """No `api` and no `output`: no polling, no artifact download."""

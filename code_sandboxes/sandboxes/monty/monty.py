@@ -25,9 +25,9 @@ import time
 import uuid
 from typing import Any
 
-from .base import Sandbox, marks_execution
-from .exceptions import SandboxConfigurationError, SandboxNotStartedError
-from .models import (
+from ...base import Sandbox, marks_execution
+from ...exceptions import SandboxConfigurationError, SandboxNotStartedError
+from ...models import (
     CodeError,
     Context,
     ExecutionResult,

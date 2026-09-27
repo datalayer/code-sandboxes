@@ -73,7 +73,6 @@ from .builds import (
     installed_environment_contents,
 )
 from .client import CodeExecutionOutcome, CodeSandboxClient, execution_result_to_reply
-from .cloudflare_sandbox import CloudflareSandbox
 from .commands import CommandResult, ProcessHandle, SandboxCommands
 from .console import (
     EXIT_COMMANDS,
@@ -95,12 +94,6 @@ from .contents import (
     MaterializeEntry,
     PreparedAttachment,
 )
-from .coreweave_sandbox import CoreWeaveSandbox
-from .datalayer_sandbox import DatalayerSandbox
-from .daytona_sandbox import DaytonaSandbox
-from .docker_sandbox import DockerSandbox
-from .e2b_sandbox import E2BSandbox
-from .eval_sandbox import EvalSandbox
 from .exceptions import (
     ContextNotFoundError,
     SandboxAuthenticationError,
@@ -124,16 +117,7 @@ from .filesystem import (
     SandboxFileHandle,
     SandboxFilesystem,
 )
-from .google_colab import (
-    GoogleColabKernelClient,
-    parse_google_colab_channels_url,
-)
-from .google_colab_sandbox import GoogleColabSandbox
 from .interfaces import ISandboxClient
-from .jupyter_server_sandbox import JupyterServerSandbox
-from .kaggle import KAGGLE_API_TOKEN_ENV, KaggleKernelClient, parse_kaggle_channels_url
-from .kaggle_execute import KaggleExecutionResult, KaggleKernelExecutor
-from .kaggle_sandbox import KaggleSandbox
 from .lifecycle import (
     INSTANCE_OPERATIONS,
     LIFECYCLE_OPERATIONS,
@@ -157,9 +141,6 @@ from .manage import (
     get_manager,
     manageable_variants,
 )
-from .marimo_cells import CellReply, CellsRun, MarimoCells
-from .marimo_sandbox import CellRun, MarimoRun, MarimoSandbox
-from .modal_sandbox import ModalSandbox
 from .models import (
     CodeError,
     Context,
@@ -183,7 +164,6 @@ from .models import (
     TunnelInfo,
     normalize_variant,
 )
-from .monty_sandbox import MontySandbox
 from .provider_ingress import provider_ingress_execution
 from .providers import (
     PROVIDERS,
@@ -192,6 +172,30 @@ from .providers import (
     available_providers,
     get_provider,
 )
+from .sandboxes.cloudflare import CloudflareSandbox
+from .sandboxes.coreweave import CoreWeaveSandbox
+from .sandboxes.datalayer import DatalayerSandbox
+from .sandboxes.daytona import DaytonaSandbox
+from .sandboxes.docker import DockerSandbox
+from .sandboxes.e2b import E2BSandbox
+from .sandboxes.eval import EvalSandbox
+from .sandboxes.google_colab import GoogleColabSandbox
+from .sandboxes.google_colab.client import (
+    GoogleColabKernelClient,
+    parse_google_colab_channels_url,
+)
+from .sandboxes.jupyter_server import JupyterServerSandbox
+from .sandboxes.kaggle import KaggleSandbox
+from .sandboxes.kaggle.client import (
+    KAGGLE_API_TOKEN_ENV,
+    KaggleKernelClient,
+    parse_kaggle_channels_url,
+)
+from .sandboxes.kaggle.execute import KaggleExecutionResult, KaggleKernelExecutor
+from .sandboxes.marimo import CellRun, MarimoRun, MarimoSandbox
+from .sandboxes.marimo.cells import CellReply, CellsRun, MarimoCells
+from .sandboxes.modal import ModalSandbox
+from .sandboxes.monty import MontySandbox
 
 #: Everything this package exports, in one sorted list — the groups it
 #: used to be split into stopped matching what they sat above.

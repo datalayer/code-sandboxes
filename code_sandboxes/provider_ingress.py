@@ -10,8 +10,8 @@ import contextlib
 from collections.abc import Iterator
 
 from .base import Sandbox
-from .jupyter_server_sandbox import JupyterServerSandbox
 from .models import JupyterServerOptions
+from .sandboxes.jupyter_server import JupyterServerSandbox
 
 
 @contextlib.contextmanager

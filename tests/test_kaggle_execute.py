@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from code_sandboxes.kaggle_execute import (
+from code_sandboxes.sandboxes.kaggle.execute import (
     KaggleExecutionResult,
     KaggleKernelExecutor,
     _normalize_accelerator,

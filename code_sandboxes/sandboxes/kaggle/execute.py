@@ -4,7 +4,7 @@
 
 """Run code on Kaggle through the official *kernels* (notebooks) API.
 
-Unlike :class:`~code_sandboxes.kaggle.KaggleKernelClient`, which connects
+Unlike :class:`~code_sandboxes.sandboxes.kaggle.client.KaggleKernelClient`, which connects
 to an **already-running** interactive Kaggle notebook session over websocket,
 this module drives Kaggle's **batch** kernels API: it creates (or updates) a
 Kaggle notebook, runs it end to end on Kaggle's infrastructure, waits for

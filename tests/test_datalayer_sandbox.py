@@ -16,13 +16,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from code_sandboxes.datalayer_sandbox import DatalayerSandbox, _urls_for_run
 from code_sandboxes.exceptions import (
     SandboxConfigurationError,
     SandboxConnectionError,
     SandboxNotFoundError,
 )
 from code_sandboxes.models import SandboxConfig
+from code_sandboxes.sandboxes.datalayer.datalayer import DatalayerSandbox, _urls_for_run
 
 #: Importing the SDK warns — about its coming move to platformdirs, about
 #: pydantic's class-based config. Neither is what these tests are about, and

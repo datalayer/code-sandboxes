@@ -6,9 +6,9 @@
 
 import pytest
 
-from code_sandboxes.eval_sandbox import EvalSandbox
 from code_sandboxes.exceptions import SandboxNotStartedError
 from code_sandboxes.models import SandboxConfig
+from code_sandboxes.sandboxes.eval import EvalSandbox
 
 
 class TestEvalSandbox:

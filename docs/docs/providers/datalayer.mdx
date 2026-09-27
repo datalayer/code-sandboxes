@@ -38,10 +38,11 @@ with Sandbox.create(
     sandbox.run_code("import torch; print(torch.cuda.is_available())")
 ```
 
-The concrete implementation is available from a top-level module:
+The concrete implementation lives in its own subpackage (and is re-exported
+from `code_sandboxes`):
 
 ```python
-from code_sandboxes.datalayer_sandbox import DatalayerSandbox
+from code_sandboxes.sandboxes.datalayer import DatalayerSandbox
 ```
 
 ## Snapshots

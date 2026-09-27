@@ -29,7 +29,7 @@ $ pytest tests/test_a_datalayer_sandbox_can_be_interrupted.py -v
 
 from __future__ import annotations
 
-from code_sandboxes.datalayer_sandbox import DatalayerSandbox
+from code_sandboxes.sandboxes.datalayer import DatalayerSandbox
 
 
 class _Client:
@@ -121,7 +121,7 @@ class TestTheChainReachesAKernel:
     def test_the_far_end_of_the_delegation_implements_it(self):
         """`_do_interrupt` delegating to a variant that has none would be the
         same silence one level down."""
-        from code_sandboxes.jupyter_server_sandbox import JupyterServerSandbox
+        from code_sandboxes.sandboxes.jupyter_server import JupyterServerSandbox
 
         assert "_do_interrupt" in JupyterServerSandbox.__dict__
 
@@ -146,7 +146,7 @@ class TestTheInterruptIsReached:
     def test_run_code_says_that_code_is_running(self):
         import threading
 
-        from code_sandboxes.datalayer_sandbox import DatalayerSandbox
+        from code_sandboxes.sandboxes.datalayer import DatalayerSandbox
 
         seen = []
 

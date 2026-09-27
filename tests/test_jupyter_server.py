@@ -16,8 +16,11 @@ import pytest
 
 from code_sandboxes.client import CodeSandboxClient
 from code_sandboxes.exceptions import SandboxConfigurationError
-from code_sandboxes.jupyter_server_sandbox import JupyterServerSandbox
 from code_sandboxes.models import SandboxConfig
+from code_sandboxes.sandboxes.jupyter_server import JupyterServerSandbox
+
+#: Where the Jupyter Server sandbox posts, patched by the tests below.
+_POST = "code_sandboxes.sandboxes.jupyter_server.jupyter_server.requests.post"
 
 
 def test_explicit_kernel_id_wins_over_reuse(monkeypatch):
@@ -552,7 +555,7 @@ class TestRestartingTheKernelRatherThanTheConnection:
             asked["params"] = params
             return _Response()
 
-        monkeypatch.setattr("code_sandboxes.jupyter_server_sandbox.requests.post", _post)
+        monkeypatch.setattr(_POST, _post)
         try:
             assert sandbox.restart_kernel() is True
             assert asked["url"].endswith("/api/kernels/kernel-1/restart")
@@ -577,7 +580,7 @@ class TestRestartingTheKernelRatherThanTheConnection:
             status_code = 200
 
         monkeypatch.setattr(
-            "code_sandboxes.jupyter_server_sandbox.requests.post",
+            _POST,
             lambda *args, **kwargs: _Response(),
         )
         try:
@@ -595,7 +598,7 @@ class TestRestartingTheKernelRatherThanTheConnection:
             status_code = 503
 
         monkeypatch.setattr(
-            "code_sandboxes.jupyter_server_sandbox.requests.post",
+            _POST,
             lambda *args, **kwargs: _Response(),
         )
         try:
@@ -609,7 +612,7 @@ class TestRestartingTheKernelRatherThanTheConnection:
         def _explode(*args, **kwargs):
             raise OSError("no route to host")
 
-        monkeypatch.setattr("code_sandboxes.jupyter_server_sandbox.requests.post", _explode)
+        monkeypatch.setattr(_POST, _explode)
         try:
             assert sandbox.restart_kernel() is False
         finally:
@@ -621,9 +624,7 @@ class TestRestartingTheKernelRatherThanTheConnection:
         def _should_not_be_called(*args, **kwargs):
             raise AssertionError("the server must not be asked without a kernel id")
 
-        monkeypatch.setattr(
-            "code_sandboxes.jupyter_server_sandbox.requests.post", _should_not_be_called
-        )
+        monkeypatch.setattr(_POST, _should_not_be_called)
         try:
             assert sandbox.restart_kernel() is False
         finally:

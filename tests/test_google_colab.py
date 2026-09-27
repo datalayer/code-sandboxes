@@ -8,7 +8,7 @@ import logging
 
 import pytest
 
-from code_sandboxes.google_colab import (
+from code_sandboxes.sandboxes.google_colab.client import (
     COLAB_CLIENT_AGENT_HEADER,
     COLAB_RUNTIME_PROXY_TOKEN_HEADER,
     COLAB_RUNTIME_PROXY_TOKEN_PARAM,
@@ -35,7 +35,8 @@ def test_colab_kernel_client_injects_headers_and_extra_params(monkeypatch):
         captured.update(kwargs)
 
     monkeypatch.setattr(
-        "code_sandboxes.google_colab.JupyterKernelClient.__init__", fake_kernel_client_init
+        "code_sandboxes.sandboxes.google_colab.client.JupyterKernelClient.__init__",
+        fake_kernel_client_init,
     )
 
     GoogleColabKernelClient(
@@ -68,7 +69,8 @@ def test_colab_kernel_client_drops_any_provided_jupyter_token(monkeypatch):
         captured.update(kwargs)
 
     monkeypatch.setattr(
-        "code_sandboxes.google_colab.JupyterKernelClient.__init__", fake_kernel_client_init
+        "code_sandboxes.sandboxes.google_colab.client.JupyterKernelClient.__init__",
+        fake_kernel_client_init,
     )
 
     GoogleColabKernelClient(
@@ -112,7 +114,8 @@ def test_colab_kernel_client_from_channels_url(monkeypatch):
         captured.update(kwargs)
 
     monkeypatch.setattr(
-        "code_sandboxes.google_colab.JupyterKernelClient.__init__", fake_kernel_client_init
+        "code_sandboxes.sandboxes.google_colab.client.JupyterKernelClient.__init__",
+        fake_kernel_client_init,
     )
 
     GoogleColabKernelClient.from_channels_url(CHANNELS_URL)

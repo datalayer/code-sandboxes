@@ -12,10 +12,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from code_sandboxes.google_colab_sandbox import GoogleColabSandbox
-from code_sandboxes.kaggle_sandbox import KaggleSandbox
-from code_sandboxes.modal_sandbox import ModalSandbox
 from code_sandboxes.models import SandboxConfig
+from code_sandboxes.sandboxes.google_colab import GoogleColabSandbox
+from code_sandboxes.sandboxes.kaggle import KaggleSandbox
+from code_sandboxes.sandboxes.modal import ModalSandbox
 
 
 class _FakeStream:
@@ -148,7 +148,7 @@ def test_kaggle_batch_mode_runs_without_runtime_connection(monkeypatch):
             )
 
     monkeypatch.setattr(
-        "code_sandboxes.kaggle_sandbox.KaggleKernelExecutor",
+        "code_sandboxes.sandboxes.kaggle.kaggle.KaggleKernelExecutor",
         _FakeKaggleExecutor,
     )
 
@@ -190,7 +190,7 @@ def test_kaggle_batch_mode_maps_job_failure_to_code_error(monkeypatch):
             )
 
     monkeypatch.setattr(
-        "code_sandboxes.kaggle_sandbox.KaggleKernelExecutor",
+        "code_sandboxes.sandboxes.kaggle.kaggle.KaggleKernelExecutor",
         _FakeKaggleExecutor,
     )
 
@@ -233,7 +233,7 @@ def test_kaggle_batch_mode_forwards_gpu_as_accelerator(monkeypatch):
             )
 
     monkeypatch.setattr(
-        "code_sandboxes.kaggle_sandbox.KaggleKernelExecutor",
+        "code_sandboxes.sandboxes.kaggle.kaggle.KaggleKernelExecutor",
         _FakeKaggleExecutor,
     )
 
@@ -284,7 +284,7 @@ def test_kaggle_batch_mode_consumes_kernel_like_reply(monkeypatch):
             return _FakeKaggleResult()
 
     monkeypatch.setattr(
-        "code_sandboxes.kaggle_sandbox.KaggleKernelExecutor",
+        "code_sandboxes.sandboxes.kaggle.kaggle.KaggleKernelExecutor",
         _FakeKaggleExecutor,
     )
 
@@ -355,7 +355,7 @@ def test_kaggle_batch_mode_streaming_emits_status_and_stdout(monkeypatch):
             return [str(path)]
 
     monkeypatch.setattr(
-        "code_sandboxes.kaggle_sandbox.KaggleKernelExecutor",
+        "code_sandboxes.sandboxes.kaggle.kaggle.KaggleKernelExecutor",
         _FakeKaggleExecutor,
     )
 

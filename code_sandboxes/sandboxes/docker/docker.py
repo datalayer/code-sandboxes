@@ -18,11 +18,11 @@ import uuid
 
 import requests
 
-from .base import Sandbox, marks_execution
-from .exceptions import SandboxConfigurationError, SandboxNotStartedError
-from .interfaces import ISandboxClient
-from .jupyter_ingress import interrupt_kernel_client
-from .models import (
+from ...base import Sandbox, marks_execution
+from ...exceptions import SandboxConfigurationError, SandboxNotStartedError
+from ...interfaces import ISandboxClient
+from ...jupyter_ingress import interrupt_kernel_client
+from ...models import (
     CodeError,
     Context,
     ExecutionResult,

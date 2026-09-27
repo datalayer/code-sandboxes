@@ -63,11 +63,11 @@ from code_sandboxes.contents import (
     ContentManifest,
     ready,
 )
-from code_sandboxes.datalayer_sandbox import DatalayerSandbox
-from code_sandboxes.daytona_sandbox import DaytonaSandbox
-from code_sandboxes.e2b_sandbox import E2BSandbox
-from code_sandboxes.modal_sandbox import ModalSandbox
 from code_sandboxes.models import SandboxConfig
+from code_sandboxes.sandboxes.datalayer import DatalayerSandbox
+from code_sandboxes.sandboxes.daytona import DaytonaSandbox
+from code_sandboxes.sandboxes.e2b import E2BSandbox
+from code_sandboxes.sandboxes.modal import ModalSandbox
 
 PROVIDERS = ("datalayer", "daytona", "e2b", "modal")
 #: The providers whose SDK mounts a volume of its own, and only at creation.

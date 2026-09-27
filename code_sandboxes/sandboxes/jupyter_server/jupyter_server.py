@@ -29,10 +29,10 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 
 import requests
 
-from .base import Sandbox, marks_execution
-from .exceptions import SandboxConfigurationError, SandboxNotStartedError
-from .interfaces import ISandboxClient
-from .models import (
+from ...base import Sandbox, marks_execution
+from ...exceptions import SandboxConfigurationError, SandboxNotStartedError
+from ...interfaces import ISandboxClient
+from ...models import (
     CodeError,
     Context,
     ExecutionResult,

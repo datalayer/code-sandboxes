@@ -17,9 +17,11 @@ from typing import ClassVar
 
 import pytest
 
-from code_sandboxes import datalayer_sandbox
 from code_sandboxes.manage import DatalayerSandboxManager, SandboxManagementError
 from code_sandboxes.models import SandboxConfig, SandboxInfo, SandboxStatus
+
+# The package `manage` takes the class from, which is where it is patched.
+from code_sandboxes.sandboxes import datalayer as datalayer_sandbox
 
 
 class _Sandbox:

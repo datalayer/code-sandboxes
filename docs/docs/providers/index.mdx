@@ -56,13 +56,14 @@ sandbox = Sandbox.create(
 
 ## Sandbox Variants
 
-Concrete implementations are available from top-level modules:
+Every provider lives in its own subpackage under `code_sandboxes.sandboxes`;
+the classes are also re-exported from `code_sandboxes` itself:
 
 ```python
-from code_sandboxes.jupyter_server_sandbox import JupyterServerSandbox
-from code_sandboxes.docker_sandbox import DockerSandbox
-from code_sandboxes.eval_sandbox import EvalSandbox
-from code_sandboxes.datalayer_sandbox import DatalayerSandbox
+from code_sandboxes.sandboxes.jupyter_server import JupyterServerSandbox
+from code_sandboxes.sandboxes.docker import DockerSandbox
+from code_sandboxes.sandboxes.eval import EvalSandbox
+from code_sandboxes.sandboxes.datalayer import DatalayerSandbox
 ```
 
 Each page below explains how to configure each variant.

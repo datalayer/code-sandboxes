@@ -147,10 +147,11 @@ reply["marimo"]["reactions"][0]["outputs"]       # [{"output_type": "stream", ..
   `register_cell`, `remove_cell`, `plan`, `graph` and `cells` pass through to
   it; on any other variant they raise `TypeError`.
 
-The concrete implementation is available from a top-level module:
+The concrete implementation lives in its own subpackage (and is re-exported
+from `code_sandboxes`):
 
 ```python
-from code_sandboxes.marimo_sandbox import MarimoSandbox
+from code_sandboxes.sandboxes.marimo import MarimoSandbox
 ```
 
 ## Reactive cells on any sandbox: `MarimoCells`
@@ -192,18 +193,24 @@ cells.run_cell("a", "x = 2").reactions[0].cell_id    # "b", re-run
   client whose sandbox *is* a `MarimoSandbox`, both see one graph.
 
 This is what an MCP toolset uses to give an agent reactive cells on the
-sandbox its session already holds (the Datalayer MCP Server's `marimo`
-toolset, code-sandboxes#37).
+sandbox its session already holds: the Datalayer MCP Server serves it as the
+`marimo` toolset (`https://mcp.datalayer.run/mcp?marimo` — five `marimo_*`
+tools, priced as `execute_code`), and the
+[toolsets page](https://datalayer.ai/docs/mcp/toolsets) shows the a/b
+exchange as run against the live gateway (code-sandboxes#37).
 
 ## How it works
 
-- **One helper, sent as source.** `code_sandboxes.marimo_reactive` holds the
-  source of a small class, `_MarimoReactive`, that keeps a Marimo dataflow
-  graph (`marimo._runtime.dataflow.DirectedGraph`) beside the kernel's
-  namespace. A `marimo` sandbox sends it as one execute request at `start()`;
-  a driver sends it at `install()`. It binds itself to `__marimo_reactive__`
-  and is not replaced when it is already there, which is what keeps the
-  graph across drivers.
+- **One helper, sent as source.** `code_sandboxes.sandboxes.marimo.reactive_kernel`
+  is a real, typed module — not code in a string — defining `_MarimoReactive`,
+  the class that keeps a Marimo dataflow graph
+  (`marimo._runtime.dataflow.DirectedGraph`) beside the kernel's namespace.
+  Its *file text* is what `reactive.KERNEL_HELPER_SOURCE` holds: a `marimo`
+  sandbox sends it as one execute request at `start()`, a driver at
+  `install()`. The module is self-contained (marimo imported lazily, nothing
+  from `code_sandboxes`), binds itself to `__marimo_reactive__`, and is not
+  replaced when it is already there — which is what keeps the graph across
+  drivers.
 - **Questions are execute requests; answers are one stdout line.** Every
   graph call — `register`, `remove`, `plan`, `snapshot`, `codes` — is
   `__marimo_reactive__.answer("plan", "a")` sent as code; the helper prints
@@ -214,12 +221,12 @@ toolset, code-sandboxes#37).
   the `jupyter-server` sandbox — the same kernel, the same namespace, the
   same output messages — and a reaction is another one. The order comes from
   the graph; the results come from the kernel.
-- **The same source runs in three places.** The package executes the helper
-  source at import time too, so its tests exercise exactly the code the
-  kernel runs and `local_helper()` answers graph questions without a kernel;
-  and `@datalayer/jupyter-react` carries the source verbatim
-  (`jupyter/marimo/reactive.ts`) for the browser-side components. Keep the
-  copies identical.
+- **The same code runs in three places.** The module imports for the tests
+  and the type-checker, its text executes in the kernel, and
+  `local_helper()` executes the same text here, so graph questions can be
+  answered without a kernel; `@datalayer/jupyter-react` carries the source
+  verbatim (`jupyter/marimo/reactive.ts`) for the browser-side components.
+  Keep the copies identical.
 
 ## Management
 

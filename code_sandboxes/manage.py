@@ -285,7 +285,7 @@ class DockerSandboxManager(SandboxManager):
         raise SandboxManagementError(f"No docker sandbox found: {sandbox_id}")
 
     def create(self, **kwargs: Any) -> SandboxInfo:
-        from .docker_sandbox import DockerSandbox
+        from .sandboxes.docker import DockerSandbox
 
         # auto_remove would erase the container the moment this process lets
         # go of it — the opposite of a detached create.
@@ -417,7 +417,7 @@ class GoogleColabSandboxManager(JupyterServerSandboxManager):
             raise SandboxManagementError(
                 "A Colab runtime URL is required: pass server_url=... or set RUNTIME_URL."
             )
-        from .google_colab import (
+        from .sandboxes.google_colab.client import (
             COLAB_CLIENT_AGENT_HEADER,
             COLAB_RUNTIME_PROXY_TOKEN_HEADER,
             DEFAULT_COLAB_CLIENT_AGENT,
@@ -471,7 +471,7 @@ class KaggleSandboxManager(SandboxManager):
 
     def _get_executor(self) -> Any:
         if self._executor is None:
-            from .kaggle_execute import KaggleKernelExecutor
+            from .sandboxes.kaggle.execute import KaggleKernelExecutor
 
             self._executor = KaggleKernelExecutor(username=self._username)
         return self._executor
@@ -605,7 +605,7 @@ class ModalSandboxManager(SandboxManager):
     capabilities = frozenset({"create", "list", "get", "update", "delete"})
 
     def __init__(self, app_name: str | None = None, **_: Any) -> None:
-        from .modal_sandbox import DEFAULT_APP_NAME
+        from .sandboxes.modal import DEFAULT_APP_NAME
 
         self._app_name = app_name or DEFAULT_APP_NAME
 
@@ -678,7 +678,7 @@ class ModalSandboxManager(SandboxManager):
         return info
 
     def create(self, **kwargs: Any) -> SandboxInfo:
-        from .modal_sandbox import ModalSandbox
+        from .sandboxes.modal import ModalSandbox
 
         self._configure(kwargs)
         sandbox = ModalSandbox(app_name=self._app_name, **kwargs)
@@ -801,7 +801,7 @@ class DaytonaSandboxManager(SandboxManager):
         return info
 
     def create(self, **kwargs: Any) -> SandboxInfo:
-        from .daytona_sandbox import DaytonaSandbox
+        from .sandboxes.daytona import DaytonaSandbox
 
         given = {key: value for key, value in self._settings.items() if value}
         environment = self._configure(kwargs)
@@ -850,7 +850,7 @@ class DatalayerSandboxManager(SandboxManager):
                     "agent_runtimes package is required: pip install code-sandboxes[datalayer]"
                 ) from exc
             if self._run_url:
-                from .datalayer_sandbox import _urls_for_run
+                from .sandboxes.datalayer.datalayer import _urls_for_run
 
                 self._client = AgentClient(urls=_urls_for_run(self._run_url), api_key=self._token)
             else:
@@ -926,8 +926,8 @@ class DatalayerSandboxManager(SandboxManager):
         so both CLIs started every runtime in `ai-agents-env` under a generated
         name: asked for `python-cpu-env`, the platform claimed an agents pod.
         """
-        from .datalayer_sandbox import DatalayerSandbox
         from .models import SandboxConfig
+        from .sandboxes.datalayer import DatalayerSandbox
 
         config = kwargs.pop("config", None) or SandboxConfig()
         chosen = {
@@ -1034,7 +1034,7 @@ class E2BSandboxManager(SandboxManager):
             return False
 
     def create(self, **kwargs: Any) -> SandboxInfo:
-        from .e2b_sandbox import E2BSandbox
+        from .sandboxes.e2b import E2BSandbox
 
         self._configure(kwargs)
         sandbox = E2BSandbox(**self._opts(), **kwargs)
@@ -1129,7 +1129,7 @@ class CoreWeaveSandboxManager(SandboxManager):
         return True
 
     def create(self, **kwargs: Any) -> SandboxInfo:
-        from .coreweave_sandbox import CoreWeaveSandbox
+        from .sandboxes.coreweave import CoreWeaveSandbox
 
         given = {key: value for key, value in self._settings.items() if value}
         # No session process: a sandbox nothing is holding open should not be
@@ -1168,7 +1168,7 @@ class CloudflareSandboxManager(SandboxManager):
         calls to the bridge; creating a container merely to have something to
         make the call with would leave that container running and billed.
         """
-        from .cloudflare_sandbox import CloudflareSandbox
+        from .sandboxes.cloudflare import CloudflareSandbox
 
         given = {key: value for key, value in self._settings.items() if value}
         try:
@@ -1211,7 +1211,7 @@ class CloudflareSandboxManager(SandboxManager):
         return response.status_code < 400
 
     def create(self, **kwargs: Any) -> SandboxInfo:
-        from .cloudflare_sandbox import CloudflareSandbox
+        from .sandboxes.cloudflare import CloudflareSandbox
 
         given = {key: value for key, value in self._settings.items() if value}
         self._configure(kwargs)

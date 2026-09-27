@@ -20,8 +20,8 @@ import time
 
 import pytest
 
-from code_sandboxes.jupyter_server_sandbox import JupyterServerSandbox
 from code_sandboxes.models import CodeError, ExecutionResult, Logs, OutputMessage, Result
+from code_sandboxes.sandboxes.jupyter_server import JupyterServerSandbox
 
 
 class _SlowSandbox(JupyterServerSandbox):

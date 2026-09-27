@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 
 from code_sandboxes.client import CodeSandboxClient
-from code_sandboxes.eval_sandbox import EvalSandbox
 from code_sandboxes.filesystem import FileInfo
+from code_sandboxes.sandboxes.eval import EvalSandbox
 
 
 @pytest.fixture

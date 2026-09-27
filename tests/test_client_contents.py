@@ -33,8 +33,8 @@ from code_sandboxes.contents import (
     ContentManifest,
     PreparedAttachment,
 )
-from code_sandboxes.eval_sandbox import EvalSandbox
 from code_sandboxes.exceptions import SandboxNotStartedError
+from code_sandboxes.sandboxes.eval import EvalSandbox
 
 TOKEN = "short-lived-sandbox-token"
 

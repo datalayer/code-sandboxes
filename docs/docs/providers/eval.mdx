@@ -22,8 +22,9 @@ with Sandbox.create(variant="eval") as sandbox:
     result = sandbox.run_code("print(x)")  # prints 2
 ```
 
-The concrete implementation is available from a top-level module:
+The concrete implementation lives in its own subpackage (and is re-exported
+from `code_sandboxes`):
 
 ```python
-from code_sandboxes.eval_sandbox import EvalSandbox
+from code_sandboxes.sandboxes.eval import EvalSandbox
 ```

@@ -88,7 +88,7 @@ def test_the_sandbox_is_terminated_either_way(monkeypatch):
         stopped.append(True)
         return real_stop(self)
 
-    monkeypatch.setattr("code_sandboxes.eval_sandbox.EvalSandbox.stop", spy)
+    monkeypatch.setattr("code_sandboxes.sandboxes.eval.EvalSandbox.stop", spy)
 
     _exec("print('ok')")
     _exec("raise ValueError('boom')")
@@ -101,7 +101,7 @@ def test_the_variant_and_its_settings_are_forwarded(monkeypatch):
 
     def fake_create(*_args, **kwargs):
         captured.update(kwargs)
-        from code_sandboxes.eval_sandbox import EvalSandbox
+        from code_sandboxes.sandboxes.eval import EvalSandbox
 
         return EvalSandbox()
 

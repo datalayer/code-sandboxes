@@ -22,8 +22,8 @@ import pytest
 
 marimo = pytest.importorskip("marimo")
 
-from code_sandboxes import marimo_reactive  # noqa: E402
-from code_sandboxes.marimo_sandbox import MarimoSandbox  # noqa: E402
+from code_sandboxes.sandboxes.marimo import MarimoSandbox  # noqa: E402
+from code_sandboxes.sandboxes.marimo import reactive as marimo_reactive  # noqa: E402
 
 
 class InProcessKernel:
@@ -281,7 +281,7 @@ def test_a_failing_reaction_is_reported_not_hidden(sandbox):
 
 def test_the_client_offers_the_graph_to_a_reactive_sandbox_only(sandbox):
     from code_sandboxes import CodeSandboxClient
-    from code_sandboxes.eval_sandbox import EvalSandbox
+    from code_sandboxes.sandboxes.eval import EvalSandbox
 
     client = CodeSandboxClient(sandbox)
     assert client.reactive is True

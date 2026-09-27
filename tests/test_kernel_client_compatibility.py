@@ -153,7 +153,7 @@ class TestTheSandboxesExposeTheClient:
         `id`, `get_variable` — with call shapes the real client also accepts,
         so the sandbox code cannot tell the two apart.
         """
-        from code_sandboxes.kaggle_live import KaggleLiveSession
+        from code_sandboxes.sandboxes.kaggle.live import KaggleLiveSession
 
         _binds(KaggleLiveSession.execute, None, "print(1)", timeout=60.0)
         _binds(KaggleLiveSession.stop, None)
