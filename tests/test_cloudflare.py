@@ -437,7 +437,7 @@ def test_the_manager_deletes_by_id_without_creating_a_container_to_do_it():
     """A container made merely to hold a client is a container left billed."""
     import httpx
 
-    from code_sandboxes import cloudflare_sandbox
+    from code_sandboxes.sandboxes.cloudflare import cloudflare as cloudflare_sandbox
 
     bridge = _FakeBridge()
     bridge.sandboxes.append("cf-sbx-existing")
