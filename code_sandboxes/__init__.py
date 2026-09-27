@@ -335,31 +335,35 @@ __all__ = [
 # import …` and `patch("code_sandboxes.datalayer_sandbox.X")` keep working and
 # act on the real module. Deprecated: new code imports from `code_sandboxes`
 # or the new paths, and the aliases go in 2.0.
+#: The 1.9.x flat path of each moved module, and its home since 1.10.0.
+_FLAT_PATHS: dict[str, str] = {
+    "cloudflare_sandbox": "sandboxes.cloudflare.cloudflare",
+    "coreweave_sandbox": "sandboxes.coreweave.coreweave",
+    "datalayer_sandbox": "sandboxes.datalayer.datalayer",
+    "daytona_sandbox": "sandboxes.daytona.daytona",
+    "docker_sandbox": "sandboxes.docker.docker",
+    "e2b_sandbox": "sandboxes.e2b.e2b",
+    "eval_sandbox": "sandboxes.eval.eval",
+    "google_colab": "sandboxes.google_colab.client",
+    "google_colab_sandbox": "sandboxes.google_colab.google_colab",
+    "jupyter_server_sandbox": "sandboxes.jupyter_server.jupyter_server",
+    "kaggle": "sandboxes.kaggle.client",
+    "kaggle_execute": "sandboxes.kaggle.execute",
+    "kaggle_live": "sandboxes.kaggle.live",
+    "kaggle_sandbox": "sandboxes.kaggle.kaggle",
+    "marimo_cells": "sandboxes.marimo.cells",
+    "marimo_reactive": "sandboxes.marimo.reactive",
+    "marimo_sandbox": "sandboxes.marimo.marimo",
+    "modal_sandbox": "sandboxes.modal.modal",
+    "monty_sandbox": "sandboxes.monty.monty",
+}
+
+
 def _alias_the_flat_paths() -> None:
     import importlib
     import sys
 
-    for old, new in {
-        "cloudflare_sandbox": "sandboxes.cloudflare.cloudflare",
-        "coreweave_sandbox": "sandboxes.coreweave.coreweave",
-        "datalayer_sandbox": "sandboxes.datalayer.datalayer",
-        "daytona_sandbox": "sandboxes.daytona.daytona",
-        "docker_sandbox": "sandboxes.docker.docker",
-        "e2b_sandbox": "sandboxes.e2b.e2b",
-        "eval_sandbox": "sandboxes.eval.eval",
-        "google_colab": "sandboxes.google_colab.client",
-        "google_colab_sandbox": "sandboxes.google_colab.google_colab",
-        "jupyter_server_sandbox": "sandboxes.jupyter_server.jupyter_server",
-        "kaggle": "sandboxes.kaggle.client",
-        "kaggle_execute": "sandboxes.kaggle.execute",
-        "kaggle_live": "sandboxes.kaggle.live",
-        "kaggle_sandbox": "sandboxes.kaggle.kaggle",
-        "marimo_cells": "sandboxes.marimo.cells",
-        "marimo_reactive": "sandboxes.marimo.reactive",
-        "marimo_sandbox": "sandboxes.marimo.marimo",
-        "modal_sandbox": "sandboxes.modal.modal",
-        "monty_sandbox": "sandboxes.monty.monty",
-    }.items():
+    for old, new in _FLAT_PATHS.items():
         module = importlib.import_module(f"{__name__}.{new}")
         sys.modules.setdefault(f"{__name__}.{old}", module)
         globals().setdefault(old, module)
