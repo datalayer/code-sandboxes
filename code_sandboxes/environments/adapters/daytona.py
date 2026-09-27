@@ -776,7 +776,7 @@ class Builder(ManagedBuilder):
 
     def _smoke_test_sandbox(self, snapshot: str) -> Any:
         """A sandbox of this build's own snapshot, deleted when it stops."""
-        from ...daytona_sandbox import DaytonaSandbox
+        from ...sandboxes.daytona import DaytonaSandbox
 
         secrets = self._provider_secrets()
         return DaytonaSandbox(

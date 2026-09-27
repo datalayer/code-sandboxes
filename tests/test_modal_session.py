@@ -10,7 +10,7 @@ import sys
 
 
 def _driver_source() -> str:
-    text = open("code_sandboxes/modal_sandbox.py").read()
+    text = open("code_sandboxes/sandboxes/modal/modal.py").read()
     match = re.search(r'_DRIVER_SOURCE = """(.*?)"""', text, re.S)
     assert match
     return match.group(1)

@@ -19,7 +19,9 @@ import pytest
 
 from code_sandboxes.manage import DatalayerSandboxManager, SandboxManagementError
 from code_sandboxes.models import SandboxConfig, SandboxInfo, SandboxStatus
-from code_sandboxes.sandboxes.datalayer import datalayer as datalayer_sandbox
+
+# The package `manage` takes the class from, which is where it is patched.
+from code_sandboxes.sandboxes import datalayer as datalayer_sandbox
 
 
 class _Sandbox:

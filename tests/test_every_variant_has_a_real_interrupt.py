@@ -48,11 +48,14 @@ def variants():
     import pkgutil
 
     import code_sandboxes
+    import code_sandboxes.sandboxes
 
-    for module in pkgutil.iter_modules(code_sandboxes.__path__):
-        if not module.name.endswith("_sandbox"):
+    # One package per provider since 1.10.0, its implementation in
+    # `<provider>/<provider>.py`.
+    for package in pkgutil.iter_modules(code_sandboxes.sandboxes.__path__):
+        if not package.ispkg:
             continue
-        loaded = importlib.import_module(f"code_sandboxes.{module.name}")
+        loaded = importlib.import_module(f"code_sandboxes.sandboxes.{package.name}.{package.name}")
         for name in dir(loaded):
             value = getattr(loaded, name)
             if (
@@ -61,7 +64,7 @@ def variants():
                 and value is not Sandbox
                 and value.__module__ == loaded.__name__
             ):
-                yield module.name, name, value
+                yield package.name, name, value
 
 
 class TestTheWholePackage:

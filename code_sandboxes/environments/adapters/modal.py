@@ -767,8 +767,8 @@ class Builder(ManagedBuilder):
                 "lock pinned, and an artifact carries neither",
                 detail={"variant": self.variant},
             )
-        from ...modal_sandbox import ModalSandbox
         from ...models import SandboxConfig
+        from ...sandboxes.modal import ModalSandbox
         from ..conformance import expected_packages, run_accelerator_check, run_core_tier
 
         sdk = self._modal_sdk()
