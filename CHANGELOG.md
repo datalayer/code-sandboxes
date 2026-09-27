@@ -16,11 +16,9 @@
   modules only it needs beside it (Kaggle's kernel client,
   executors and live session; Marimo's reactive graph and cells driver;
   Google Colab's kernel client). The public names are unchanged: import them
-  from `code_sandboxes` as before. The old flat module paths
+  from `code_sandboxes` as before. **Breaking:** the old flat module paths
   (`code_sandboxes.datalayer_sandbox`, `code_sandboxes.marimo_sandbox`, …)
-  still resolve — each is an alias of the very same module in its new home,
-  so released consumers keep working — but they are deprecated and go in
-  2.0; import from `code_sandboxes` or the new paths.
+  are gone, with no aliases; import from `code_sandboxes` or the new paths.
 - **The Marimo kernel helper is real code.** `sandboxes/marimo/reactive_kernel.py`
   is a typed, importable, self-contained module; what a sandbox sends to the
   kernel is that file's own text (`reactive.KERNEL_HELPER_SOURCE` reads it
