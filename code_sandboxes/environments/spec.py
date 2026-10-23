@@ -850,6 +850,17 @@ def spec_findings(
             findings.append(
                 SpecFinding(f"{field}.path", f"`{entry.path}` is not an absolute, normalized path")
             )
+        # Defense in depth: the build quotes every path it puts in a shell command,
+        # so this is not what stops command injection, but a baked file path has no
+        # business holding a control character or a shell metacharacter, and
+        # rejecting them keeps a hostile path from ever reaching the builders.
+        if any(ord(ch) < 0x20 or ord(ch) == 0x7F or ch in "\"'`$;&|<>()\\" for ch in entry.path):
+            findings.append(
+                SpecFinding(
+                    f"{field}.path",
+                    f"`{entry.path}` contains a control or shell metacharacter",
+                )
+            )
         if normalized == reserved or normalized.startswith(reserved + "/"):
             findings.append(SpecFinding(f"{field}.path", f"`{reserved}` is reserved for Datalayer"))
         if normalized in seen_paths:

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -72,7 +73,8 @@ def test_the_fragment_fetches_and_verifies_every_entry():
 
     for entry in _build().entries:
         assert f"curl -fsSL {entry.source_uri} -o {entry.destination_path}" in fragment
-        assert f'echo "{entry.sha256}  {entry.destination_path}" | sha256sum -c' in fragment
+        check_line = shlex.quote(f"{entry.sha256}  {entry.destination_path}")
+        assert f"echo {check_line} | sha256sum -c" in fragment
     lines = [line for line in fragment.splitlines() if not line.startswith("#")]
     assert all(line.startswith("RUN ") for line in lines)
     assert sum("sha256sum -c" in line for line in lines) == 2
@@ -149,6 +151,35 @@ def test_a_wrong_checksum_fails_the_fetch_in_a_real_shell(tmp_path):
     failed = run(fetch_command(wrong))
     assert failed.returncode != 0
     assert "FAILED" in failed.stdout + failed.stderr
+
+
+def test_a_destination_path_is_quoted_in_the_checksum_line():
+    """GHSA-fvcq-wvhp-pf49: the digest is pattern-checked, the path is not, so the
+    `sha256sum -c` line is a single-quoted literal — a path cannot break out of it."""
+    hostile = '/opt/x"; touch /tmp/pwned; echo "'
+    command = fetch_command(
+        BuildEntry(source_uri="https://x/y", destination_path=hostile, sha256=SHA_A)
+    )
+    # The whole "<digest>  <path>" argument is single-quoted (it contains spaces),
+    # so the metacharacters are inert data rather than a command break-out.
+    assert f"echo {shlex.quote(f'{SHA_A}  {hostile}')} | sha256sum -c" in command
+    assert f"echo '{SHA_A}  " in command
+
+
+@pytest.mark.skipif(
+    shutil.which("sh") is None or shutil.which("sha256sum") is None, reason="needs a shell"
+)
+def test_a_hostile_destination_path_cannot_inject_commands_in_a_real_shell(tmp_path):
+    """The quoting is what a shell sees; a real one is the only judge of it."""
+    marker = tmp_path / "PWNED"
+    hostile = f'{tmp_path}/x"; touch {marker}; echo "'
+    command = fetch_command(
+        BuildEntry(source_uri="https://x/y", destination_path=hostile, sha256=SHA_A)
+    )
+    # Exercise only the checksum segment; curl/mkdir are quoted the same way.
+    segment = "echo " + command.split("&& echo ", 1)[1]
+    subprocess.run(["sh", "-c", segment], capture_output=True, text=True)  # noqa: S603, S607
+    assert not marker.exists()
 
 
 # --- Datalayer: a Dockerfile fragment --------------------------------------------

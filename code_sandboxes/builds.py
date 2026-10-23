@@ -166,10 +166,17 @@ def fetch_command(entry: BuildEntry) -> str:
     """
     destination = _absolute(entry.destination_path)
     directory = posixpath.dirname(destination) or "/"
+    # `destination` is a user-controlled spec field. The digest is pattern-checked,
+    # but the path is not, so the whole `sha256sum -c` line is passed through
+    # shlex.quote — exactly as `directory`, `source_uri` and `destination` already
+    # are — to keep a path with shell metacharacters from breaking out of the
+    # command. The two-space "<digest>  <path>" format sha256sum -c expects is
+    # preserved inside the quoted string.
+    check_line = f"{entry.sha256}  {destination}"
     return (
         f"mkdir -p {shlex.quote(directory)}"
         f" && curl -fsSL {shlex.quote(entry.source_uri)} -o {shlex.quote(destination)}"
-        f' && echo "{entry.sha256}  {destination}" | sha256sum -c'
+        f" && echo {shlex.quote(check_line)} | sha256sum -c"
     )
 
 
