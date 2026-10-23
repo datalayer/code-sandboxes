@@ -304,7 +304,9 @@ def test_the_files_step_bakes_a_contents_build_manifest_from_an_external_source(
         "curl -fsSL https://data.example/iris.csv -o /opt/datalayer/contents/iris.csv"
         in commands[0]
     )
-    assert f'echo "{CONTENTS_SHA}  /opt/datalayer/contents/iris.csv" | sha256sum -c' in commands[0]
+    # The checksum line is shell-quoted as a whole (the path is user-controlled).
+    check_line = shlex.quote(f"{CONTENTS_SHA}  /opt/datalayer/contents/iris.csv")
+    assert f"echo {check_line} | sha256sum -c" in commands[0]
     assert "environment-contents.json" in commands[-1]
 
 

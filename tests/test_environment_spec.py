@@ -227,7 +227,7 @@ UNSUPPORTED = "DL_ENV_CAPABILITY_UNSUPPORTED"
         ("spec.files.0.path", "/opt/datalayer/bin/doctor", "spec.files[0].path", INVALID),
         # A path that is absolute and normalized but carries a shell metacharacter
         # is refused (defense in depth against GHSA-fvcq-wvhp-pf49).
-        ('spec.files.0.path', '/opt/x"; touch /tmp/pwned; echo "', "spec.files[0].path", INVALID),
+        ("spec.files.0.path", '/opt/x"; touch /tmp/pwned; echo "', "spec.files[0].path", INVALID),
         ("spec.files.0.contentRef", "ftp://files/config.py", "spec.files[0].contentRef", INVALID),
         ("spec.files.0.sizeBytes", 2 * 1024 * 1024, "spec.files[0].sizeBytes", INVALID),
         ("spec.env", {"PIP_INDEX_TOKEN": "abc"}, "spec.env.PIP_INDEX_TOKEN", INVALID),
