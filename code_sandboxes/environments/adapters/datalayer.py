@@ -235,12 +235,15 @@ def _contract_layer(request: BuildRequest) -> list[str]:
 def _contract_user() -> list[str]:
     """The contract's user, home and start, after everything is installed. A
     uid 1000 the image already has becomes it; what the image kept in its
-    working directory stays usable by it."""
+    working directory stays usable by it, but for the reserved tree and what
+    holds it, which stay root's wherever that directory is."""
     contract = SANDBOX_CONTRACT_V1
     user, uid, gid, home = contract.user, contract.uid, contract.gid, contract.home
+    reserved, reserved_parent = contract.reserved_path, str(Path(contract.reserved_path).parent)
     return [
         f"RUN pwd > {TASK_WORKDIR_FILE} && chmod 0644 {TASK_WORKDIR_FILE} "
-        f'&& if [ "$(pwd)" != / ]; then chown -R {uid}:{gid} "$(pwd)"; fi',
+        f'&& if [ "$(pwd)" != / ]; then find "$(pwd)" -path {reserved} -prune '
+        f"-o ! -path {reserved_parent} ! -path / -exec chown -h {uid}:{gid} {{}} +; fi",
         f"RUN (getent group {gid} >/dev/null || groupadd -g {gid} users) "
         f"&& if getent passwd {uid} >/dev/null; then "
         f'usermod -l {user} -g {gid} -d {home} "$(getent passwd {uid} | cut -d: -f1)"; '

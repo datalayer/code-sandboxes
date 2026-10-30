@@ -479,6 +479,10 @@ class ResolveOutcome:
     apt_snapshot: str = ""
     """The snapshot id they were pinned against, which the builder installs from."""
 
+    python_version: str = ""
+    """The interpreter the solve found in a foreign image, which the lock is
+    for; empty where the spec's own version was solved for."""
+
 
 class ResolveRunner(Protocol):
     """Where a solve runs."""
@@ -805,10 +809,12 @@ class BuildkitResolveRunner:
         if request.bootstrap_uv:
             find_links = "/solve/wheelhouse"
             # Solved for the interpreter the image has, not the one the spec
-            # names: the layer installs into that one.
-            python_version = '"$(python3 -c \'import sys; print("%d.%d" % sys.version_info[:2])\')"'
+            # names: the layer installs into that one, and the lock says so.
+            python_version = '"$(cat /solve/python-version)"'
             lines += [
                 *foreign_bootstrap_lines(),
+                "RUN python3 -c 'import sys; print(\"%d.%d\" % sys.version_info[:2])' "
+                "> /solve/python-version",
                 "COPY wheelhouse/ ./wheelhouse/",
                 'RUN python3 -m pip install --no-cache-dir "uv==0.12.11"',
             ]
@@ -845,6 +851,8 @@ class BuildkitResolveRunner:
                 "COPY --from=solve /solve/lock.txt /lock.txt",
             ]
         )
+        if request.bootstrap_uv:
+            lines.append("COPY --from=solve /solve/python-version /python-version")
         if request.apt:
             lines.append("COPY --from=solve /solve/apt.txt /apt.txt")
         return "\n".join(lines) + "\n"
@@ -934,8 +942,14 @@ class BuildkitResolveRunner:
                     if snapshot
                     else "the base channel's mirror"
                 )
+            version = out / "python-version"
+            solved_for = version.read_text(encoding="utf-8").strip() if version.exists() else ""
         return ResolveOutcome(
-            lock_text=lock, apt_pins=pins, apt_source=source, apt_snapshot=snapshot
+            lock_text=lock,
+            apt_pins=pins,
+            apt_source=source,
+            apt_snapshot=snapshot,
+            python_version=solved_for,
         )
 
     def _environment(self, request: ResolveRequest) -> dict[str, str] | None:
@@ -1072,9 +1086,15 @@ def foreign_bootstrap_lines() -> list[str]:
         "RUN test -f /etc/debian_version || "
         '{ echo "this image is not Debian-derived, which sandbox-contract/v1 requires" >&2; '
         "exit 1; }",
-        "RUN (command -v python3 >/dev/null && python3 -m pip --version >/dev/null 2>&1) || "
-        "(apt-get update -qq && apt-get install -y --no-install-recommends "
-        "python3 python3-pip ca-certificates && rm -rf /var/lib/apt/lists/*)",
+        # `python3` is what everything after this runs, so pip goes to that one:
+        # its own `ensurepip`, and only a distribution's Python, which turns
+        # that off, or none at all, from the distribution.
+        "RUN python3 -m pip --version >/dev/null 2>&1 || "
+        "python3 -m ensurepip --default-pip >/dev/null 2>&1 || "
+        '{ case "$(command -v python3)" in ""|/usr/bin/python3) '
+        "apt-get update -qq && apt-get install -y --no-install-recommends "
+        "python3 python3-pip ca-certificates && rm -rf /var/lib/apt/lists/*;; "
+        '*) echo "$(command -v python3) has no pip and cannot make one" >&2; exit 1;; esac; }',
         "ENV PIP_BREAK_SYSTEM_PACKAGES=1",
     ]
 
@@ -1590,7 +1610,7 @@ def resolve_environment(
     outcome = (runner or BuildkitResolveRunner()).solve(request, say)
     document = lock_document(
         outcome,
-        python_version=environment.spec.language.version,
+        python_version=outcome.python_version or environment.spec.language.version,
         base_reference=solving_in,
         merged=merged,
         coverage=DOCKERFILE_COVERAGE if dockerfile is not None or foreign else None,

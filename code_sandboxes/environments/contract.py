@@ -702,12 +702,47 @@ def foreign_dockerfile_findings(
                     POLICY_DENIED,
                 )
             )
+    findings += _foreign_stage_findings(text)
     findings += [
         finding
         for finding in dockerfile_findings_for_build(text)
         if finding.instruction in ("COPY", "ADD", "escape")
     ]
     return sorted(findings, key=lambda finding: finding.line)
+
+
+def _foreign_stage_findings(text: str) -> list[DockerfileFinding]:
+    """A `--from=` that names no earlier stage: BuildKit would pull it as an
+    image, past the one base the registries and the digest hold."""
+    findings: list[DockerfileFinding] = []
+    stages: set[str] = set()
+    count = 0
+    for instruction in parse_dockerfile(text):
+        if instruction.keyword == "FROM":
+            _image, alias = _from_image(instruction)
+            stages.update({alias} if alias else set())
+            count += 1
+            continue
+        named: list[str] = []
+        for token in _tokens(instruction.arguments):
+            if not token.startswith("--"):
+                break
+            if instruction.keyword == "COPY" and token.startswith("--from="):
+                named.append(token.split("=", 1)[1])
+            if instruction.keyword == "RUN" and token.startswith("--mount="):
+                named += [_mount_options(token).get("from", "")]
+        for source in filter(None, named):
+            earlier = source.lower() in stages or (source.isdigit() and int(source) < count - 1)
+            if not earlier:
+                findings.append(
+                    DockerfileFinding(
+                        instruction.line,
+                        instruction.keyword,
+                        f"`{source}` is not an earlier stage: the one base is the only image "
+                        "a build on a foreign base pulls",
+                    )
+                )
+    return findings
 
 
 def foreign_dockerfile_base(text: str) -> str:
@@ -718,13 +753,18 @@ def foreign_dockerfile_base(text: str) -> str:
 def pin_foreign_dockerfile_base(text: str, reference: str) -> str:
     """The Dockerfile as it is built: its base pinned to `reference`, directives gone."""
     line, image = _foreign_froms(text)[0]
+    # As a token, from the `FROM` on: a continuation can carry it to a later line.
+    token = re.compile(rf"(?<!\S){re.escape(image)}(?!\S)")
+    pinned = False
     rewritten: list[str] = []
     in_directives = True
     for number, raw in enumerate(text.splitlines(), start=1):
         if in_directives and _DIRECTIVE.match(raw.strip()):
             continue
         in_directives = False
-        rewritten.append(raw.replace(image, reference, 1) if number == line else raw)
+        if number >= line and not pinned and token.search(raw):
+            raw, pinned = token.sub(lambda _match: reference, raw, count=1), True
+        rewritten.append(raw)
     return "\n".join(rewritten) + "\n"
 
 

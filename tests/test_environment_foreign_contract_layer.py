@@ -23,6 +23,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
+import httpx
 import pytest
 
 from code_sandboxes.environments.adapters.datalayer import (
@@ -32,7 +33,10 @@ from code_sandboxes.environments.adapters.datalayer import (
     Builder,
 )
 from code_sandboxes.environments.builders import BuildRequest
-from code_sandboxes.environments.contract import foreign_dockerfile_findings
+from code_sandboxes.environments.contract import (
+    foreign_dockerfile_findings,
+    pin_foreign_dockerfile_base,
+)
 from code_sandboxes.environments.errors import EnvironmentsError
 from code_sandboxes.environments.image_import import DEFAULT_ALLOWED_REGISTRIES
 from code_sandboxes.environments.resolve import (
@@ -41,8 +45,10 @@ from code_sandboxes.environments.resolve import (
     ResolveOutcome,
     ResolveRequest,
     contract_base_in,
+    foreign_bootstrap_lines,
     lock_document,
     merge_requirements,
+    resolve_environment,
 )
 from code_sandboxes.environments.spec import parse_environment, spec_findings
 
@@ -50,8 +56,23 @@ BASE = "datalayer/python-cpu@sha256:" + "a" * 64
 FOREIGN = "docker.io/library/python@sha256:" + "b" * 64
 LOCK = f"# datalayer-contract-base: {BASE}\nipykernel==7.3.0 --hash=sha256:{'c' * 64}\n"
 ENVIRONMENTS = Path(__file__).parents[1] / "code_sandboxes" / "environments"
-PLANE = Path(os.environ.get("PLANE_DOCKERFILES", ""))
+
+
+def plane_of(environ):
+    """The plane's dockerfiles, when the variable names a directory that exists."""
+    named = environ.get("PLANE_DOCKERFILES", "")
+    return Path(named) if named and Path(named).is_dir() else None
+
+
+PLANE = plane_of(os.environ)
 REAL = bool(os.environ.get("DATALAYER_ENVIRONMENT_DOCKER_TESTS"))
+
+
+_TRANSPORT = httpx.MockTransport(
+    lambda request: httpx.Response(
+        200, json={"token": "t"}, headers={"Docker-Content-Digest": "sha256:" + "b" * 64}
+    )
+)
 
 
 def document(build):
@@ -138,6 +159,97 @@ class TestTheLayer:
             contract_base=BASE,
         )
         assert contract_base_in(locked["content"]) == BASE
+
+
+class TestTheReviewsFindings:
+    """Six things a reader found, each pinned here."""
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "FROM python:3.12\nCOPY --from=registry.example.com/team/tool:latest /tool /tool\n",
+            "FROM python:3.12\nRUN --mount=type=bind,from=registry.example.com/t:1,target=/t a\n",
+            "FROM python:3.12\nCOPY --from=later /a /a\nFROM python:3.12 AS later\n",
+        ],
+    )
+    def test_nothing_is_pulled_past_the_base(self, content):
+        said = " ".join(item.message for item in _foreign(content))
+        assert "earlier stage" in said
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "FROM a:1 AS tools\nRUN true\nFROM tools\nCOPY --from=tools /a /a\n",
+            "FROM a:1 AS tools\nFROM tools\nCOPY --from=0 /a /a\n",
+            "FROM a:1 AS tools\nFROM tools\nRUN --mount=type=bind,from=tools,target=/t true\n",
+            "FROM a:1\nRUN --mount=type=cache,target=/c true\n",
+        ],
+    )
+    def test_an_earlier_stage_is_fine(self, content):
+        assert _foreign(content) == []
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "FROM \\\n  python:3.12-slim\nRUN true\n",
+            "FROM --platform=linux/amd64 \\\n  python:3.12-slim \\\n  AS task\nRUN true\n",
+        ],
+    )
+    def test_a_base_on_a_continuation_line_is_pinned(self, content):
+        text = Builder().dockerfile(request_of(dockerfile_source(content)))
+        assert FOREIGN in text
+        assert "python:3.12-slim" not in text
+
+    def test_the_base_is_replaced_as_a_token(self):
+        content = "FROM --platform=linux/amd64 a:1\nRUN echo a:1\n"
+        pinned = pin_foreign_dockerfile_base(content, FOREIGN)
+        assert f"FROM --platform=linux/amd64 {FOREIGN}" in pinned
+        assert "RUN echo a:1" in pinned
+
+    def test_the_reserved_tree_and_what_holds_it_stay_roots(self):
+        text = Builder().dockerfile(request_of(image_source("python:3.12-slim")))
+        assert "-path /opt/datalayer -prune" in text
+        assert "! -path /opt" in text
+        assert 'chown -R 1000:100 "$(pwd)"' not in text
+
+    def test_the_lock_says_the_python_it_was_solved_for(self):
+        class Solved:
+            name = "fake"
+
+            def solve(self, request, log=None):
+                return ResolveOutcome(lock_text="ipykernel==7.3.0\n", python_version="3.12")
+
+        spec = image_source("python:3.12-slim")
+        spec["spec"]["language"]["version"] = "3.13"
+        locked = resolve_environment(
+            spec=spec, variants=["datalayer"], runner=Solved(), image_transport=_TRANSPORT
+        )
+        assert locked["python_version"] == "3.12"
+        assert "# python: 3.12\n" in locked["content"]
+
+    def test_the_solve_exports_the_python_it_saw(self):
+        text = BuildkitResolveRunner(buildctl="/usr/bin/true").dockerfile(
+            ResolveRequest(
+                python_version="3.13",
+                requirements=("ipykernel==7.3.0",),
+                constraints=(),
+                indexes=(),
+                base_reference=FOREIGN,
+                bootstrap_uv=True,
+            )
+        )
+        assert "COPY --from=solve /solve/python-version /python-version" in text
+        assert '--python-version "$(cat /solve/python-version)"' in text
+
+    def test_pip_is_brought_to_the_python_the_image_kept(self):
+        text = "\n".join(foreign_bootstrap_lines())
+        assert "python3 -m ensurepip --default-pip" in text
+        assert text.index("python3 -m ensurepip") < text.index("python3-pip")
+
+    def test_an_unset_plane_is_no_plane(self):
+        assert plane_of({}) is None
+        assert plane_of({"PLANE_DOCKERFILES": ""}) is None
+        assert plane_of({"PLANE_DOCKERFILES": "/no/such/plane"}) is None
 
 
 class TestTheRegistries:
@@ -244,9 +356,10 @@ def solve_and_build(approved, tmp_path, spec, base):
     )
     (solve / "Dockerfile").write_text(runner.dockerfile(request).replace("# syntax=", "# "))
     build(solve, output=tmp_path / "out")
+    solved = (tmp_path / "out" / "python-version").read_text().strip()
     locked = lock_document(
         ResolveOutcome(lock_text=(tmp_path / "out" / "lock.txt").read_text()),
-        python_version="3.12",
+        python_version=solved,
         base_reference=base,
         merged=merged,
         contract_base=approved,
@@ -313,7 +426,7 @@ def served(tag):
         subprocess.run(["docker", "rm", "-f", name], capture_output=True)
 
 
-@pytest.mark.skipif(not (REAL and PLANE.is_dir()), reason="needs Docker, the network and the plane")
+@pytest.mark.skipif(not (REAL and PLANE), reason="needs Docker, the network and the plane")
 class TestARealImage:
     def _digest(self, image):
         docker("pull", "-q", image, timeout=300)
@@ -344,6 +457,28 @@ class TestARealImage:
         assert docker(
             "run", "--rm", tag, "sh", "-c", "id -u; test -w /app/file && echo writable"
         ).split() == ["1000", "writable"]
+
+    def test_a_working_directory_above_the_reserved_tree_leaves_it_alone(self, approved, tmp_path):
+        base = self._digest("python:3.12-slim")
+        spec = dockerfile_source("FROM python:3.12-slim\nWORKDIR /opt\nRUN echo t > /opt/file\n")
+        tag = solve_and_build(approved, tmp_path, spec, base)
+        self._settled(tag)
+        owners = docker(
+            "run", "--rm", tag, "stat", "-c", "%U", "/opt", "/opt/datalayer", "/opt/file"
+        )
+        assert owners.split() == ["root", "root", "datalayer"]
+
+    def test_a_python_that_lost_its_pip_gets_it_back(self, approved, tmp_path):
+        base = self._digest("python:3.12-slim")
+        spec = dockerfile_source("FROM python:3.12-slim\nRUN python3 -m pip uninstall -y pip\n")
+        self._settled(solve_and_build(approved, tmp_path, spec, base))
+
+    def test_a_distribution_python_with_no_pip_gets_its_distributions(self, approved, tmp_path):
+        base = self._digest("ubuntu:24.04")
+        spec = dockerfile_source(
+            "FROM ubuntu:24.04\nRUN apt-get update -qq && apt-get install -y python3\n"
+        )
+        self._settled(solve_and_build(approved, tmp_path, spec, base))
 
     def test_an_image_with_no_python_gets_its_distributions(self, approved, tmp_path):
         base = self._digest("ubuntu:24.04")
