@@ -22,6 +22,7 @@ base digest are the others.
 
 from __future__ import annotations
 
+import base64
 import json
 import posixpath
 import re
@@ -29,7 +30,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_serializer
 from pydantic.alias_generators import to_camel
 
 from .bases import APPROVED_BASES, ApprovedBase
@@ -352,6 +353,14 @@ class DependencyFileSpec(_Model):
     lock_content: str = ""
 
 
+class ContextFile(_Model):
+    """One file of an inline build context."""
+
+    path: str
+    content_base64: str
+    executable: bool = False
+
+
 class DockerfileSpec(_Model):
     """The Dockerfile a `dockerfile`-sourced version builds from (E3-03).
 
@@ -369,6 +378,17 @@ class DockerfileSpec(_Model):
 
     #: The Dockerfile text.
     content: str = ""
+    #: The files its `COPY`s read, for a `foreignDockerfile`: inline, so the
+    #: spec's digest covers them, and bounded for it.
+    context: list[ContextFile] | None = None
+
+    @model_serializer(mode="wrap")
+    def _no_empty_context(self, handler: Any) -> dict[str, Any]:
+        """Leave `context` out when there is none: a spec's digest does not move."""
+        dumped = handler(self)
+        if self.context is None:
+            dumped.pop("context", None)
+        return dumped
 
 
 class ImageSourceSpec(_Model):
@@ -543,6 +563,38 @@ def parse_requirements_txt(text: str) -> list[str]:
     return lines
 
 
+def _context_findings(context: list[ContextFile]) -> list[SpecFinding]:
+    """An inline context: the upload's own rules, and its bound."""
+    from .contract import (
+        MAX_INLINE_CONTEXT_BYTES,
+        RESERVED_CONTEXT_PATHS,
+        BuildContextEntry,
+        validate_build_context,
+    )
+
+    field = "spec.build.dockerfile.context"
+    findings: list[SpecFinding] = []
+    entries: list[BuildContextEntry] = []
+    for item in context:
+        try:
+            size = len(base64.b64decode(item.content_base64, validate=True))
+        except ValueError:
+            findings.append(SpecFinding(field, f"`{item.path}` is not base64"))
+            continue
+        entries.append(BuildContextEntry(path=item.path, size_bytes=size))
+        if item.path in RESERVED_CONTEXT_PATHS:
+            findings.append(SpecFinding(field, f"`{item.path}` is reserved by the build"))
+    findings += [
+        SpecFinding(field, f"`{found.path}` {found.message}")
+        for found in validate_build_context(entries)
+    ]
+    if sum(entry.size_bytes for entry in entries) > MAX_INLINE_CONTEXT_BYTES:
+        findings.append(
+            SpecFinding(field, f"is over the {MAX_INLINE_CONTEXT_BYTES}-byte inline limit")
+        )
+    return findings
+
+
 def _foreign_dockerfile_findings(
     dockerfile: DockerfileSpec | None, *, registries: tuple[str, ...]
 ) -> list[SpecFinding]:
@@ -555,13 +607,19 @@ def _foreign_dockerfile_findings(
         return [SpecFinding(f"{field}.content", "is empty; it is the Dockerfile text")]
     from .contract import foreign_dockerfile_findings
 
-    return [
+    context = dockerfile.context or []
+    problems = _context_findings(context)
+    return problems + [
         SpecFinding(
             f"{field}.content",
             f"line {finding.line}: {finding.message}",
             finding.code or SPEC_INVALID,
         )
-        for finding in foreign_dockerfile_findings(dockerfile.content, registries=registries)
+        for finding in foreign_dockerfile_findings(
+            dockerfile.content,
+            registries=registries,
+            context=[item.path for item in context],
+        )
     ]
 
 
@@ -579,6 +637,8 @@ def _dockerfile_findings(dockerfile: DockerfileSpec | None) -> list[SpecFinding]
         return [SpecFinding(field, "is required when `spec.build.source` is `dockerfile`")]
     if not dockerfile.content.strip():
         return [SpecFinding(f"{field}.content", "is empty; it is the Dockerfile text")]
+    if dockerfile.context is not None:
+        return [SpecFinding(f"{field}.context", "is taken by a `foreignDockerfile` source")]
     from .contract import dockerfile_findings_for_build, validate_dockerfile
 
     # The contract's refusals, then what building it needs on top (E3-03):

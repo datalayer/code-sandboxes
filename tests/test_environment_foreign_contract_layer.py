@@ -16,6 +16,7 @@ and the plane's start script and config, which `PLANE_DOCKERFILES` names.
 # ruff: noqa: S603, S607
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -31,9 +32,11 @@ from code_sandboxes.environments.adapters.datalayer import (
     TASK_WORKDIR_FILE,
     TINI_SHA256,
     Builder,
+    write_build_context,
 )
 from code_sandboxes.environments.builders import BuildRequest
 from code_sandboxes.environments.contract import (
+    MAX_INLINE_CONTEXT_BYTES,
     foreign_dockerfile_findings,
     pin_foreign_dockerfile_base,
 )
@@ -50,7 +53,7 @@ from code_sandboxes.environments.resolve import (
     merge_requirements,
     resolve_environment,
 )
-from code_sandboxes.environments.spec import parse_environment, spec_findings
+from code_sandboxes.environments.spec import parse_environment, spec_digest, spec_findings
 
 BASE = "datalayer/python-cpu@sha256:" + "a" * 64
 FOREIGN = "docker.io/library/python@sha256:" + "b" * 64
@@ -252,6 +255,83 @@ class TestTheReviewsFindings:
         assert plane_of({"PLANE_DOCKERFILES": "/no/such/plane"}) is None
 
 
+def with_context(content, *files):
+    spec = dockerfile_source(content)
+    spec["spec"]["build"]["dockerfile"]["context"] = [
+        {"path": path, "contentBase64": base64.b64encode(data).decode(), **extra}
+        for path, data, extra in files
+    ]
+    return spec
+
+
+class TestABuildContext:
+    """Inline, so the spec's digest covers its bytes, and bounded because of it."""
+
+    COPIES = "FROM python:3.12\nCOPY app/run.sh /run.sh\n"
+
+    def test_a_copy_of_what_it_holds_is_taken(self):
+        assert findings(with_context(self.COPIES, ("app/run.sh", b"x", {}))) == []
+
+    def test_a_copy_of_its_folder_is_taken(self):
+        content = "FROM python:3.12\nCOPY app/ /app/\n"
+        assert findings(with_context(content, ("app/run.sh", b"x", {}))) == []
+
+    def test_a_copy_of_what_it_does_not_hold_is_refused(self):
+        said = findings(with_context(self.COPIES, ("other.txt", b"x", {})))
+        assert "build context" in said[0]
+
+    def test_with_none_a_copy_stays_refused(self):
+        assert "build context" in findings(dockerfile_source(self.COPIES))[0]
+
+    @pytest.mark.parametrize(
+        ("path", "said"),
+        [
+            ("../escape", "escapes the context"),
+            ("/etc/passwd", "absolute path"),
+            ("Dockerfile", "reserved"),
+            ("lock.txt", "reserved"),
+        ],
+    )
+    def test_a_path_that_is_not_a_context_path_is_refused(self, path, said):
+        spec = with_context("FROM python:3.12\n", (path, b"x", {}))
+        assert said in " ".join(findings(spec))
+
+    def test_it_is_bounded(self):
+        spec = with_context(
+            "FROM python:3.12\n", ("big", b"x" * (MAX_INLINE_CONTEXT_BYTES + 1), {})
+        )
+        assert "inline" in " ".join(findings(spec))
+
+    def test_what_is_not_base64_is_refused(self):
+        spec = dockerfile_source("FROM python:3.12\n")
+        spec["spec"]["build"]["dockerfile"]["context"] = [{"path": "a", "contentBase64": "%%"}]
+        assert "base64" in " ".join(findings(spec))
+
+    def test_only_a_foreign_dockerfile_takes_one(self):
+        spec = with_context("FROM datalayer/python-cpu:2026.09\n", ("a", b"x", {}))
+        spec["spec"]["build"]["source"] = "dockerfile"
+        assert "foreignDockerfile" in " ".join(findings(spec))
+
+    def test_its_bytes_are_in_the_digest(self):
+        one = parse_environment(with_context(self.COPIES, ("app/run.sh", b"one", {})))
+        two = parse_environment(with_context(self.COPIES, ("app/run.sh", b"two", {})))
+        assert spec_digest(one) != spec_digest(two)
+
+    def test_a_spec_with_none_keeps_the_digest_it_had(self):
+        parsed = parse_environment(dockerfile_source(self.COPIES))
+        dumped = parsed.spec.model_dump(by_alias=True, mode="json")
+        assert "context" not in dumped["build"]["dockerfile"]
+
+    def test_the_builder_writes_it_beside_the_dockerfile(self, tmp_path):
+        request = request_of(
+            with_context(self.COPIES, ("app/run.sh", b"#!/bin/sh\n", {"executable": True}))
+        )
+        write_build_context(request.environment, tmp_path)
+        written = tmp_path / "app" / "run.sh"
+        assert written.read_bytes() == b"#!/bin/sh\n"
+        assert written.stat().st_mode & 0o111
+
+
 class TestTheRegistries:
     def test_the_list_is_what_it_was(self):
         assert DEFAULT_ALLOWED_REGISTRIES == (
@@ -367,6 +447,7 @@ def solve_and_build(approved, tmp_path, spec, base):
     context = tmp_path / "context"
     context.mkdir()
     (context / "lock.txt").write_text(locked["content"])
+    write_build_context(parse_environment(spec), context)
     rendered = Builder().dockerfile(request_of(spec, lock=locked["content"], base=base))
     (context / "Dockerfile").write_text(rendered)
     tag = f"foreign-layer:{uuid.uuid4().hex[:8]}"
@@ -479,6 +560,15 @@ class TestARealImage:
             "FROM ubuntu:24.04\nRUN apt-get update -qq && apt-get install -y python3\n"
         )
         self._settled(solve_and_build(approved, tmp_path, spec, base))
+
+    def test_a_context_is_copied_into_the_image(self, approved, tmp_path):
+        base = self._digest("python:3.12-slim")
+        spec = with_context(
+            "FROM python:3.12-slim\nCOPY app/ /app/\nRUN /app/run.sh > /built\n",
+            ("app/run.sh", b"#!/bin/sh\necho from-the-context\n", {"executable": True}),
+        )
+        tag = solve_and_build(approved, tmp_path, spec, base)
+        assert docker("run", "--rm", tag, "cat", "/built").strip() == "from-the-context"
 
     def test_an_image_with_no_python_gets_its_distributions(self, approved, tmp_path):
         base = self._digest("ubuntu:24.04")
