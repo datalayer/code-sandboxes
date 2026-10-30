@@ -38,6 +38,7 @@ sandbox is launched through Runtimes' internal route and checked there
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shlex
@@ -208,6 +209,26 @@ def _pip_lock_command(find_links: str, *, authored: bool, foreign: bool = False)
         f"uv pip {verb} --system{managed} --require-hashes --find-links {find_links} "
         f"{target}/opt/datalayer/lock.txt"
     )
+
+
+def write_build_context(environment: Environment, root: Path) -> None:
+    """Write a `foreignDockerfile`'s inline context where its `COPY`s read it.
+
+    Checked again here, against the folder itself, because this is the step
+    that writes to disk: nothing validated elsewhere is taken on trust.
+    """
+    dockerfile = environment.spec.build.dockerfile
+    for item in (dockerfile.context if dockerfile else None) or []:
+        target = (root / item.path).resolve()
+        if not target.is_relative_to(root.resolve()) or target == root.resolve():
+            raise EnvironmentsError(
+                SPEC_INVALID,
+                f"`{item.path}` is not a path inside the build context",
+                detail={"field": "spec.build.dockerfile.context", "path": item.path},
+            )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(base64.b64decode(item.content_base64))
+        target.chmod(0o755 if item.executable else 0o644)
 
 
 def _contract_layer(request: BuildRequest) -> list[str]:
@@ -573,6 +594,7 @@ class Builder:
             root = Path(directory)
             (root / "Dockerfile").write_text(self.dockerfile(request), encoding="utf-8")
             (root / "lock.txt").write_text(request.lock_text, encoding="utf-8")
+            write_build_context(request.environment, root)
             metadata = root / "metadata.json"
             # A secret's value is never written under `root`: that directory
             # is also `--local context=`, sent to `buildkitd` as ordinary

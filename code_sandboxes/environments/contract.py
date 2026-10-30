@@ -40,6 +40,8 @@ __all__ = [
     "MAX_CONTEXT_FILES",
     "MAX_CONTEXT_FILE_BYTES",
     "MAX_CONTEXT_TOTAL_BYTES",
+    "MAX_INLINE_CONTEXT_BYTES",
+    "RESERVED_CONTEXT_PATHS",
     "SANDBOX_CONTRACT_V1",
     "SUPPORTED_CONTRACTS",
     "BuildContextEntry",
@@ -537,8 +539,16 @@ def _approved_froms(text: str, bases: Mapping[str, ApprovedBase]) -> list[_Appro
     return found
 
 
+def _in_context(source: str, context: Sequence[str]) -> bool:
+    """Whether a `COPY` source names a file of the context, or a folder of it."""
+    name = source.strip("/").removeprefix("./")
+    if name in ("", "."):
+        return bool(context)
+    return any(path == name or path.startswith(f"{name}/") for path in context)
+
+
 def dockerfile_findings_for_build(
-    text: str, bases: Mapping[str, ApprovedBase] = APPROVED_BASES
+    text: str, bases: Mapping[str, ApprovedBase] = APPROVED_BASES, *, context: Sequence[str] = ()
 ) -> list[DockerfileFinding]:
     """What a Dockerfile source must also be to be built, beyond what the contract allows.
 
@@ -598,6 +608,7 @@ def dockerfile_findings_for_build(
             continue
         sources = [t for t in tokens if not t.startswith("--")][:-1]
         local = [s for s in sources if not re.match(r"^(https?|git)://|^git@", s, re.IGNORECASE)]
+        local = [s for s in local if not _in_context(s, context)]
         if local:
             findings.append(
                 DockerfileFinding(
@@ -655,7 +666,7 @@ def _foreign_froms(text: str) -> list[tuple[int, str]]:
 
 
 def foreign_dockerfile_findings(
-    text: str, *, registries: tuple[str, ...]
+    text: str, *, registries: tuple[str, ...], context: Sequence[str] = ()
 ) -> list[DockerfileFinding]:
     """What a Dockerfile on a foreign base must be: the contract's refusals, one
     base, in `registries`, and no build context.
@@ -705,7 +716,7 @@ def foreign_dockerfile_findings(
     findings += _foreign_stage_findings(text)
     findings += [
         finding
-        for finding in dockerfile_findings_for_build(text)
+        for finding in dockerfile_findings_for_build(text, context=context)
         if finding.instruction in ("COPY", "ADD", "escape")
     ]
     return sorted(findings, key=lambda finding: finding.line)
@@ -798,6 +809,11 @@ def pin_dockerfile_base(
 MAX_CONTEXT_FILES = 2000
 MAX_CONTEXT_FILE_BYTES = 50 * 1024 * 1024
 MAX_CONTEXT_TOTAL_BYTES = 100 * 1024 * 1024
+#: A context carried inside the spec, as a `foreignDockerfile` does: it is stored
+#: with the version, so it is small, and its bytes are in the spec's digest.
+MAX_INLINE_CONTEXT_BYTES = 1024 * 1024
+#: What the build's own context already holds at its root.
+RESERVED_CONTEXT_PATHS = ("Dockerfile", "lock.txt", "metadata.json", ".dockerignore")
 
 _CONTEXT_SEPARATOR = re.compile(r"[\\/]")
 
