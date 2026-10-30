@@ -27,11 +27,13 @@ import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
 from .bases import APPROVED_BASES, ApprovedBase, is_approved_repository
-from .errors import CAPABILITY_UNSUPPORTED, SPEC_INVALID, EnvironmentsError
+from .errors import CAPABILITY_UNSUPPORTED, POLICY_DENIED, SPEC_INVALID, EnvironmentsError
+from .image_import import image_registry_allowed, parse_image_reference
 
 __all__ = [
     "CONTRACT_V1",
@@ -52,9 +54,12 @@ __all__ = [
     "contract_markdown",
     "dockerfile_base",
     "dockerfile_findings_for_build",
+    "foreign_dockerfile_base",
+    "foreign_dockerfile_findings",
     "get_contract",
     "parse_dockerfile",
     "pin_dockerfile_base",
+    "pin_foreign_dockerfile_base",
     "validate_build_context",
     "validate_dockerfile",
 ]
@@ -263,6 +268,8 @@ class DockerfileFinding:
     line: int
     instruction: str
     message: str
+    #: Set when this is a policy's refusal rather than a problem with the file.
+    code: Any = None
 
     def to_dict(self) -> dict[str, object]:
         return {"line": self.line, "instruction": self.instruction, "message": self.message}
@@ -333,7 +340,11 @@ def _tokens(arguments: str) -> list[str]:
 
 
 def _check_from(
-    instruction: DockerfileInstruction, stages: set[str], contract: SandboxContract
+    instruction: DockerfileInstruction,
+    stages: set[str],
+    contract: SandboxContract,
+    *,
+    foreign: bool = False,
 ) -> list[DockerfileFinding]:
     findings: list[DockerfileFinding] = []
     tokens = _tokens(instruction.arguments)
@@ -372,7 +383,7 @@ def _check_from(
                 "the approved bases; name the base itself",
             )
         )
-    elif not is_approved_repository(image):
+    elif not foreign and not is_approved_repository(image):
         findings.append(
             DockerfileFinding(
                 instruction.line,
@@ -394,14 +405,15 @@ def _mount_options(argument: str) -> dict[str, str]:
 
 
 def validate_dockerfile(
-    text: str, *, contract: SandboxContract = SANDBOX_CONTRACT_V1
+    text: str, *, contract: SandboxContract = SANDBOX_CONTRACT_V1, foreign: bool = False
 ) -> list[DockerfileFinding]:
     """Everything in a Dockerfile the contract refuses, in line order.
 
     Refused: the instructions a provider's builder does not implement, a
     base that is not approved (or cannot be checked), a platform other than
     the contract's, privileged builds, the host network, Docker socket mounts
-    and host bind mounts.
+    and host bind mounts. With `foreign`, a base is not asked to be approved:
+    `foreign_dockerfile_findings` holds it to the registries instead.
     """
     findings: list[DockerfileFinding] = []
     stages: set[str] = set()
@@ -413,7 +425,7 @@ def validate_dockerfile(
                 DockerfileFinding(instruction.line, keyword, f"{keyword} is refused: {reason}")
             )
         if keyword == "FROM":
-            findings.extend(_check_from(instruction, stages, contract))
+            findings.extend(_check_from(instruction, stages, contract, foreign=foreign))
         if "docker.sock" in instruction.arguments:
             findings.append(
                 DockerfileFinding(instruction.line, keyword, "mounts the Docker socket")
@@ -625,6 +637,135 @@ def dockerfile_base(
         channel=found[0].tag,
         lines=tuple(item.line for item in found),
     )
+
+
+def _foreign_froms(text: str) -> list[tuple[int, str]]:
+    """Every `FROM` that names an image rather than an earlier stage: line, image."""
+    stages: set[str] = set()
+    found: list[tuple[int, str]] = []
+    for instruction in parse_dockerfile(text):
+        if instruction.keyword != "FROM":
+            continue
+        image, alias = _from_image(instruction)
+        if image and image.lower() not in stages:
+            found.append((instruction.line, image))
+        if alias:
+            stages.add(alias)
+    return found
+
+
+def foreign_dockerfile_findings(
+    text: str, *, registries: tuple[str, ...]
+) -> list[DockerfileFinding]:
+    """What a Dockerfile on a foreign base must be: the contract's refusals, one
+    base, in `registries`, and no build context.
+
+    One base because one digest is pinned and one image is layered on. Its
+    registry is held to the same list an `image` source is, so this source
+    reaches nothing an `image` cannot; there is no credential here, so a
+    private registry is refused. An approved base has its own source, whose
+    packages the layer would fight.
+    """
+    findings = validate_dockerfile(text, foreign=True)
+    refused = {finding.line for finding in findings}
+    froms = _foreign_froms(text)
+    if not froms:
+        findings.append(DockerfileFinding(1, "FROM", "names no base image"))
+    for line, image in froms[1:]:
+        findings.append(
+            DockerfileFinding(
+                line, "FROM", f"`{image}` is a second base: the build pins and layers one"
+            )
+        )
+    for line, image in froms[:1]:
+        if "$" in image or line in refused:
+            continue
+        if is_approved_repository(image):
+            findings.append(
+                DockerfileFinding(
+                    line, "FROM", f"`{image}` is an approved base: use the `dockerfile` source"
+                )
+            )
+            continue
+        try:
+            parsed = parse_image_reference(image)
+        except EnvironmentsError as error:
+            findings.append(DockerfileFinding(line, "FROM", error.message))
+            continue
+        if not image_registry_allowed(parsed, registries):
+            findings.append(
+                DockerfileFinding(
+                    line,
+                    "FROM",
+                    f"`{parsed.registry}` is not an allowed registry; allowed: "
+                    + ", ".join(registries),
+                    POLICY_DENIED,
+                )
+            )
+    findings += _foreign_stage_findings(text)
+    findings += [
+        finding
+        for finding in dockerfile_findings_for_build(text)
+        if finding.instruction in ("COPY", "ADD", "escape")
+    ]
+    return sorted(findings, key=lambda finding: finding.line)
+
+
+def _foreign_stage_findings(text: str) -> list[DockerfileFinding]:
+    """A `--from=` that names no earlier stage: BuildKit would pull it as an
+    image, past the one base the registries and the digest hold."""
+    findings: list[DockerfileFinding] = []
+    stages: set[str] = set()
+    count = 0
+    for instruction in parse_dockerfile(text):
+        if instruction.keyword == "FROM":
+            _image, alias = _from_image(instruction)
+            stages.update({alias} if alias else set())
+            count += 1
+            continue
+        named: list[str] = []
+        for token in _tokens(instruction.arguments):
+            if not token.startswith("--"):
+                break
+            if instruction.keyword == "COPY" and token.startswith("--from="):
+                named.append(token.split("=", 1)[1])
+            if instruction.keyword == "RUN" and token.startswith("--mount="):
+                named += [_mount_options(token).get("from", "")]
+        for source in filter(None, named):
+            earlier = source.lower() in stages or (source.isdigit() and int(source) < count - 1)
+            if not earlier:
+                findings.append(
+                    DockerfileFinding(
+                        instruction.line,
+                        instruction.keyword,
+                        f"`{source}` is not an earlier stage: the one base is the only image "
+                        "a build on a foreign base pulls",
+                    )
+                )
+    return findings
+
+
+def foreign_dockerfile_base(text: str) -> str:
+    """The one image a foreign Dockerfile builds on."""
+    return _foreign_froms(text)[0][1]
+
+
+def pin_foreign_dockerfile_base(text: str, reference: str) -> str:
+    """The Dockerfile as it is built: its base pinned to `reference`, directives gone."""
+    line, image = _foreign_froms(text)[0]
+    # As a token, from the `FROM` on: a continuation can carry it to a later line.
+    token = re.compile(rf"(?<!\S){re.escape(image)}(?!\S)")
+    pinned = False
+    rewritten: list[str] = []
+    in_directives = True
+    for number, raw in enumerate(text.splitlines(), start=1):
+        if in_directives and _DIRECTIVE.match(raw.strip()):
+            continue
+        in_directives = False
+        if number >= line and not pinned and token.search(raw):
+            raw, pinned = token.sub(lambda _match: reference, raw, count=1), True
+        rewritten.append(raw)
+    return "\n".join(rewritten) + "\n"
 
 
 def pin_dockerfile_base(

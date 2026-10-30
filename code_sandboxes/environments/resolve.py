@@ -54,6 +54,7 @@ from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 from .bases import APPROVED_BASES, ApprovedBase, channel_snapshot, resolve_base
 from .build_secrets import resolve_build_secret
+from .contract import foreign_dockerfile_base
 from .errors import (
     CAPABILITY_UNSUPPORTED,
     PACKAGE_NOT_FOUND,
@@ -70,9 +71,11 @@ from .image_import import (
     resolve_image_digest,
 )
 from .spec import (
+    FOREIGN_SOURCES,
     BuildSecret,
     DependencyFileSpec,
     Environment,
+    ImageSourceSpec,
     parse_environment,
     parse_requirements_txt,
 )
@@ -138,6 +141,10 @@ WHEELHOUSE_PATH = Path(__file__).parent / "constraints" / "wheelhouse"
 APT_PIN_PREFIX = "# datalayer-apt: "
 #: What a lock says it does not cover, as a header line.
 COVERAGE_PREFIX = "# datalayer-coverage: "
+#: The approved base a foreign image's contract comes from when it names none.
+DEFAULT_CONTRACT_BASE = "datalayer/python-cpu"
+#: The approved base a foreign image's contract layer is copied from, pinned.
+CONTRACT_BASE_PREFIX = "# datalayer-contract-base: "
 #: A `dockerfile` source's lock (E3-03): what the resolver saw, and no more.
 DOCKERFILE_COVERAGE = (
     "the declared packages and Datalayer's protected pins only; what the Dockerfile's own "
@@ -472,6 +479,10 @@ class ResolveOutcome:
     apt_snapshot: str = ""
     """The snapshot id they were pinned against, which the builder installs from."""
 
+    python_version: str = ""
+    """The interpreter the solve found in a foreign image, which the lock is
+    for; empty where the spec's own version was solved for."""
+
 
 class ResolveRunner(Protocol):
     """Where a solve runs."""
@@ -794,17 +805,24 @@ class BuildkitResolveRunner:
         # so this changes nothing about a build that already works.
         find_links = WHEELHOUSE_IMAGE_PATH
         lines = [f"FROM {request.base_reference} AS solve", "USER root", "WORKDIR /solve"]
+        python_version = request.python_version
         if request.bootstrap_uv:
             find_links = "/solve/wheelhouse"
+            # Solved for the interpreter the image has, not the one the spec
+            # names: the layer installs into that one, and the lock says so.
+            python_version = '"$(cat /solve/python-version)"'
             lines += [
+                *foreign_bootstrap_lines(),
+                "RUN python3 -c 'import sys; print(\"%d.%d\" % sys.version_info[:2])' "
+                "> /solve/python-version",
                 "COPY wheelhouse/ ./wheelhouse/",
-                'RUN pip install --no-cache-dir "uv==0.12.11"',
+                'RUN python3 -m pip install --no-cache-dir "uv==0.12.11"',
             ]
         lines += [
             "COPY requirements.in constraints.txt ./",
             "RUN --mount=type=cache,target=/root/.cache/uv "
             f"uv pip compile --quiet --no-header --generate-hashes "
-            f"--python-version {request.python_version} --constraint constraints.txt "
+            f"--python-version {python_version} --constraint constraints.txt "
             f"--find-links {find_links} "
             # This whole line is one shell command once BuildKit runs it: an
             # index URL is a spec field a user wrote, checked only for
@@ -833,6 +851,8 @@ class BuildkitResolveRunner:
                 "COPY --from=solve /solve/lock.txt /lock.txt",
             ]
         )
+        if request.bootstrap_uv:
+            lines.append("COPY --from=solve /solve/python-version /python-version")
         if request.apt:
             lines.append("COPY --from=solve /solve/apt.txt /apt.txt")
         return "\n".join(lines) + "\n"
@@ -922,8 +942,14 @@ class BuildkitResolveRunner:
                     if snapshot
                     else "the base channel's mirror"
                 )
+            version = out / "python-version"
+            solved_for = version.read_text(encoding="utf-8").strip() if version.exists() else ""
         return ResolveOutcome(
-            lock_text=lock, apt_pins=pins, apt_source=source, apt_snapshot=snapshot
+            lock_text=lock,
+            apt_pins=pins,
+            apt_source=source,
+            apt_snapshot=snapshot,
+            python_version=solved_for,
         )
 
     def _environment(self, request: ResolveRequest) -> dict[str, str] | None:
@@ -1041,6 +1067,38 @@ def apt_pins_in(lock_text: str) -> dict[str, str]:
     return pins
 
 
+def contract_base_in(lock_text: str) -> str:
+    """The approved base a foreign image's contract layer comes from, or ``""``."""
+    for raw in lock_text.splitlines():
+        line = raw.strip()
+        if line.startswith(CONTRACT_BASE_PREFIX.strip()):
+            return line[len(CONTRACT_BASE_PREFIX.strip()) :].strip()
+    return ""
+
+
+def foreign_bootstrap_lines() -> list[str]:
+    """What a foreign image needs before anything can install: a Debian-derived
+    system, which the contract asks and which is said here rather than as a
+    missing `apt-get`, and a Python with pip, from its own distribution when it
+    has none, so the versions are that image's, and the lock is solved for it.
+    """
+    return [
+        "RUN test -f /etc/debian_version || "
+        '{ echo "this image is not Debian-derived, which sandbox-contract/v1 requires" >&2; '
+        "exit 1; }",
+        # `python3` is what everything after this runs, so pip goes to that one:
+        # its own `ensurepip`, and only a distribution's Python, which turns
+        # that off, or none at all, from the distribution.
+        "RUN python3 -m pip --version >/dev/null 2>&1 || "
+        "python3 -m ensurepip --default-pip >/dev/null 2>&1 || "
+        '{ case "$(command -v python3)" in ""|/usr/bin/python3) '
+        "apt-get update -qq && apt-get install -y --no-install-recommends "
+        "python3 python3-pip ca-certificates && rm -rf /var/lib/apt/lists/*;; "
+        '*) echo "$(command -v python3) has no pip and cannot make one" >&2; exit 1;; esac; }',
+        "ENV PIP_BREAK_SYSTEM_PACKAGES=1",
+    ]
+
+
 def apt_snapshot_in(lock_text: str) -> str:
     """The Ubuntu snapshot a lock's apt pins were taken from, or ``""`` (D-9)."""
     for raw in lock_text.splitlines():
@@ -1058,6 +1116,7 @@ def lock_document(
     base_reference: str,
     merged: MergedRequirements,
     coverage: str | None = None,
+    contract_base: str = "",
 ) -> dict[str, Any]:
     """The stored lock: its text, its digest, and what a reader needs from it.
 
@@ -1091,6 +1150,8 @@ def lock_document(
         header.append(f"# datalayer-apt-source: {outcome.apt_source}")
     if outcome.apt_pins and outcome.apt_snapshot:
         header.append(f"{APT_SNAPSHOT_PREFIX}{outcome.apt_snapshot}")
+    if contract_base:
+        header.append(f"{CONTRACT_BASE_PREFIX}{contract_base}")
     for constraint in merged.constraints:
         header.append(f"{PROTECTED_PIN_PREFIX}{constraint}")
     text = "\n".join(header) + "\n" + outcome.lock_text.lstrip("\n")
@@ -1136,6 +1197,27 @@ def resolve_bases(
     return resolved
 
 
+def contract_base_of(
+    environment: Environment, bases: dict[str, ApprovedBase], *, registry: str | None
+) -> str:
+    """The approved base a foreign image's contract is layered from, pinned.
+
+    The one its spec names, when that is one; a foreign source need not name
+    any (`spec.base` means nothing to it), and then the CPU base, its newest
+    channel. Layering from a base never makes it the image's base: only its
+    contract files are copied, and the kernel stack is the lock's.
+    """
+    named = environment.spec.base
+    if named.ref in bases and named.channel in bases[named.ref].channels:
+        ref, channel = named.ref, named.channel
+    else:
+        ref = DEFAULT_CONTRACT_BASE
+        channel = sorted(bases[ref].channels)[-1]
+    return resolve_bases(
+        environment, ["datalayer"], bases, registry=registry, ref=ref, channel=channel
+    )["datalayer"]
+
+
 def resolve_image_base(
     environment: Environment,
     variants: Sequence[str],
@@ -1165,6 +1247,11 @@ def resolve_image_base(
     needs neither.
     """
     image = environment.spec.build.image
+    if environment.spec.build.source == "foreignDockerfile":
+        dockerfile = environment.spec.build.dockerfile
+        image = ImageSourceSpec(
+            reference=foreign_dockerfile_base(dockerfile.content) if dockerfile else ""
+        )
     if image is None or not image.reference.strip():
         raise EnvironmentsError(
             SPEC_INVALID,
@@ -1437,6 +1524,7 @@ def resolve_environment(
     # A Dockerfile names its own base in `FROM` (E3-03): that is what is
     # pinned and solved in, never `spec.base`, which the schema still asks for.
     dockerfile = environment.spec.build.dockerfile if source == "dockerfile" else None
+    foreign = source in FOREIGN_SOURCES
     base_ref, base_channel = environment.spec.base.ref, environment.spec.base.channel
     if dockerfile is not None:
         from .contract import dockerfile_base
@@ -1459,7 +1547,7 @@ def resolve_environment(
             owner_uid=owner_uid,
             resolve_secret=resolve_secret,
         )
-        if source == "image"
+        if foreign
         else resolve_bases(
             environment,
             wanted,
@@ -1515,17 +1603,22 @@ def resolve_environment(
         apt=tuple(environment.spec.packages.system.apt),
         base_reference=solving_in,
         registry_auth=_registry_auth(credential),
-        bootstrap_uv=(source == "image"),
+        bootstrap_uv=foreign,
         # An imported image is not an approved base, and names no channel.
-        apt_snapshot=("" if source == "image" else channel_snapshot(base_ref, base_channel, bases)),
+        apt_snapshot=("" if foreign else channel_snapshot(base_ref, base_channel, bases)),
     )
     outcome = (runner or BuildkitResolveRunner()).solve(request, say)
     document = lock_document(
         outcome,
-        python_version=environment.spec.language.version,
+        python_version=outcome.python_version or environment.spec.language.version,
         base_reference=solving_in,
         merged=merged,
-        coverage=DOCKERFILE_COVERAGE if dockerfile is not None else None,
+        coverage=DOCKERFILE_COVERAGE if dockerfile is not None or foreign else None,
+        contract_base=(
+            contract_base_of(environment, bases, registry=_registry_of(credential))
+            if foreign and "datalayer" in wanted
+            else ""
+        ),
     )
     say(
         f"Locked {document['package_count']} packages"

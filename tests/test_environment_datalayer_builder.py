@@ -170,6 +170,9 @@ def a_request(**changes) -> BuildRequest:
     return BuildRequest(**fields)
 
 
+CONTRACT_BASE = "datalayer/python-cpu@sha256:" + "a" * 64
+
+
 def a_builder(**changes) -> Builder:
     options = {
         "credential": Credential(),
@@ -384,12 +387,10 @@ class TestTheDockerfileItGenerates:
         dockerfile = a_builder().dockerfile(request)
         assert "--mount=type=secret" not in dockerfile
 
-    def test_an_imported_image_bootstraps_uv_from_its_own_wheelhouse(self) -> None:
+    def test_an_imported_image_bootstraps_uv_from_the_approved_bases_wheelhouse(self) -> None:
         """An imported image (E3-04) is not baked with `uv` or the fork's
-        wheel the way an approved base is (E1-05): both are brought to this
-        stage too, the same as the resolver's own solve. Found on PR #27's
-        Copilot review — the resolve half of this had already been fixed,
-        the actual build's Dockerfile had not."""
+        wheel the way an approved base is (E1-05): the wheel comes with the
+        contract layer, and `uv` is installed for it."""
         request = a_request(
             spec={
                 "packages": {},
@@ -399,12 +400,13 @@ class TestTheDockerfileItGenerates:
                 },
             }
         )
+        request = request.model_copy(
+            update={"lock_text": f"# datalayer-contract-base: {CONTRACT_BASE}\n{request.lock_text}"}
+        )
         dockerfile = a_builder().dockerfile(request)
-        assert "COPY wheelhouse/ /opt/datalayer/wheelhouse-import/" in dockerfile
-        assert 'RUN pip install --no-cache-dir "uv==0.12.11"' in dockerfile
-        assert "--find-links /opt/datalayer/wheelhouse-import" in dockerfile
-        # Never the approved base's own path: that one is not copied in here.
-        assert "--find-links /opt/datalayer/wheelhouse " not in dockerfile
+        assert f"COPY --from={CONTRACT_BASE} /opt/datalayer/wheelhouse/" in dockerfile
+        assert 'RUN python3 -m pip install --no-cache-dir "uv==0.12.11"' in dockerfile
+        assert "--find-links /opt/datalayer/wheelhouse " in dockerfile
 
     def test_a_packages_source_never_copies_a_wheelhouse_in(self) -> None:
         dockerfile = a_builder().dockerfile(a_request())
@@ -473,7 +475,13 @@ class TestWhatItSaysItCannotBuild:
     def test_this_variant_has_no_gpu_yet(self) -> None:
         capabilities = a_builder().capabilities()
         assert capabilities.supports_gpu is False
-        assert capabilities.build_sources == ("packages", "dependencyFile", "image", "dockerfile")
+        assert capabilities.build_sources == (
+            "packages",
+            "dependencyFile",
+            "image",
+            "dockerfile",
+            "foreignDockerfile",
+        )
         assert capabilities.package_managers == ("uv", "pip")
 
 
@@ -499,35 +507,6 @@ class TestBuildingAndPushing:
         assert artifact.region == "r1"
         assert artifact.size_class == "medium"
         assert artifact.contract_version == "sandbox-contract/v1"
-
-    def test_an_imported_image_build_copies_the_wheelhouse_into_the_context(self) -> None:
-        from code_sandboxes.environments.resolve import WHEELHOUSE_PATH
-
-        expected = {wheel.name for wheel in WHEELHOUSE_PATH.glob("*.whl")}
-        assert expected, "the package's own wheelhouse must not be empty"
-        seen: dict[str, set[str]] = {}
-
-        class RecordingBuildctl(Buildctl):
-            def __call__(self, argv, **kwargs):
-                result = super().__call__(argv, **kwargs)
-                assert self.context is not None
-                seen["wheelhouse"] = {
-                    path.name for path in (self.context / "wheelhouse").glob("*.whl")
-                }
-                return result
-
-        request = a_request(
-            spec={
-                "packages": {},
-                "build": {
-                    "source": "image",
-                    "image": {"reference": "python:3.12-slim-bookworm"},
-                },
-            }
-        )
-        buildctl = RecordingBuildctl()
-        a_builder(run=buildctl).build(request)
-        assert seen["wheelhouse"] == expected
 
     def test_a_packages_source_build_has_no_wheelhouse_in_its_context(self) -> None:
         seen: dict[str, bool] = {}

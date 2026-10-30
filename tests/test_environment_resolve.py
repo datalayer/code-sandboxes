@@ -1191,7 +1191,7 @@ class TestTheBuildkitRunner:
                 bootstrap_uv=True,
             )
         )
-        assert 'RUN pip install --no-cache-dir "uv==0.12.11"' in dockerfile
+        assert 'RUN python3 -m pip install --no-cache-dir "uv==0.12.11"' in dockerfile
         assert "COPY wheelhouse/ ./wheelhouse/" in dockerfile
         assert "--find-links /solve/wheelhouse" in dockerfile
         assert "/opt/datalayer/wheelhouse" not in dockerfile

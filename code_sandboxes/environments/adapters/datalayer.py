@@ -61,7 +61,7 @@ from ..builders import (
     owner_cache_repository,
     owner_repository,
 )
-from ..contract import SANDBOX_CONTRACT_V1, pin_dockerfile_base
+from ..contract import SANDBOX_CONTRACT_V1, pin_dockerfile_base, pin_foreign_dockerfile_base
 from ..errors import (
     ARTIFACT_MISSING,
     BUILD_FAILED,
@@ -73,14 +73,15 @@ from ..errors import (
 from ..files import files_step
 from ..resolve import (
     WHEELHOUSE_IMAGE_PATH,
-    WHEELHOUSE_PATH,
     apt_pins_in,
     apt_snapshot_in,
     buildkit_proxy,
     buildkit_proxy_options,
+    contract_base_in,
     egress_findings,
     egress_hosts_text,
     egress_refused_hosts,
+    foreign_bootstrap_lines,
     locked_versions,
 )
 from ..resolve_conda import (
@@ -90,7 +91,7 @@ from ..resolve_conda import (
     micromamba_bootstrap_dockerfile_line,
     micromamba_install_command,
 )
-from ..spec import BuildSecret, Environment, command_names_secret
+from ..spec import FOREIGN_SOURCES, BuildSecret, Environment, command_names_secret
 
 __all__ = [
     "ECR_ENVIRONMENT_PREFIX",
@@ -131,6 +132,22 @@ DEFAULT_MAX_ARTIFACT_BYTES = 20 * 1024**3
 #: Raising this is a change to every Datalayer build, so it is one constant
 #: with one reason, not a literal inside the Dockerfile's own text.
 DOCKERFILE_FRONTEND = "docker/dockerfile:1.10"
+#: PID 1 of a foreign image's sandbox, which reaps and forwards signals as the
+#: contract asks. Static, so it runs on any Debian-derived image, and fetched by
+#: checksum, so the layer is the same every time.
+TINI_URL = "https://github.com/krallin/tini/releases/download/v0.19.0/tini-static-amd64"
+TINI_SHA256 = "c5b0666b4cb676901f90dfcb37106783c5fe2077b04590973b885950611b30ee"
+#: What the sandbox's server needs of the approved base it is not built on.
+CONTRACT_LAYER_FILES = (
+    "/opt/datalayer/bin/datalayer-sandbox",
+    "/opt/datalayer/constraints/",
+    "/opt/datalayer/wheelhouse/",
+    "/usr/local/share/jupyter_config.py",
+    "/usr/local/sbin/start-jupyter.sh",
+)
+#: Where a foreign image's own working directory is kept: a task's commands run
+#: there, while the sandbox's stays the contract's.
+TASK_WORKDIR_FILE = "/opt/datalayer/task-workdir"
 
 #: The first frontend with `--mount=type=secret,env=` (see above).
 SECRET_ENV_FRONTEND = (1, 10)
@@ -164,25 +181,80 @@ def _head(request: BuildRequest, authored: Any) -> list[str]:
         f"# Lock: {request.lock_digest}",
     ]
     if authored is not None:
-        lines.append(pin_dockerfile_base(authored.content, request.resolved_base).rstrip("\n"))
+        pin = (
+            pin_foreign_dockerfile_base
+            if request.environment.spec.build.source == "foreignDockerfile"
+            else pin_dockerfile_base
+        )
+        lines.append(pin(authored.content, request.resolved_base).rstrip("\n"))
     else:
         lines.append(f"FROM {request.resolved_base}")
     return lines
 
 
-def _pip_lock_command(find_links: str, *, authored: bool) -> str:
-    """Install the pip lock: `sync` to it, or `install` it over an authored Dockerfile.
+def _pip_lock_command(find_links: str, *, authored: bool, foreign: bool = False) -> str:
+    """Install the pip lock: `sync` to it, or `install` it over what is already there.
 
     `sync` removes whatever the lock does not name, and a `dockerfile`
     source's lock does not name what the Dockerfile itself installed
-    (`DOCKERFILE_COVERAGE`). The lock's pins, the protected ones included,
-    win either way.
+    (`DOCKERFILE_COVERAGE`), nor does a foreign image's name what the image
+    holds. The lock's pins, the protected ones included, win either way. A
+    distribution's Python calls itself externally managed; a foreign image's
+    is the one the contract's packages go into.
     """
-    verb, target = ("install", "-r ") if authored else ("sync", "")
+    verb, target = ("install", "-r ") if authored or foreign else ("sync", "")
+    managed = " --break-system-packages" if foreign else ""
     return (
-        f"uv pip {verb} --system --require-hashes --find-links {find_links} "
+        f"uv pip {verb} --system{managed} --require-hashes --find-links {find_links} "
         f"{target}/opt/datalayer/lock.txt"
     )
+
+
+def _contract_layer(request: BuildRequest) -> list[str]:
+    """What makes a foreign image a sandbox, before its lock is installed: the
+    contract's files from the approved base it was resolved against, so they
+    are the channel's own, and PID 1."""
+    contract_base = contract_base_in(request.lock_text)
+    if not contract_base:
+        raise EnvironmentsError(
+            SPEC_INVALID,
+            "this lock names no approved base to layer the contract from: resolve again",
+            detail={"field": "lock", "source": request.environment.spec.build.source},
+        )
+    return [
+        *foreign_bootstrap_lines(),
+        *[f"COPY --from={contract_base} {path} {path}" for path in CONTRACT_LAYER_FILES],
+        f"ADD --checksum=sha256:{TINI_SHA256} {TINI_URL} /opt/datalayer/bin/tini",
+        "RUN chmod 0755 /opt/datalayer /opt/datalayer/bin /opt/datalayer/bin/tini "
+        "/opt/datalayer/bin/datalayer-sandbox /opt/datalayer/constraints "
+        "/opt/datalayer/wheelhouse /usr/local/sbin/start-jupyter.sh",
+        'RUN python3 -m pip install --no-cache-dir "uv==0.12.11"',
+    ]
+
+
+def _contract_user() -> list[str]:
+    """The contract's user, home and start, after everything is installed. A
+    uid 1000 the image already has becomes it; what the image kept in its
+    working directory stays usable by it, but for the reserved tree and what
+    holds it, which stay root's wherever that directory is."""
+    contract = SANDBOX_CONTRACT_V1
+    user, uid, gid, home = contract.user, contract.uid, contract.gid, contract.home
+    reserved, reserved_parent = contract.reserved_path, str(Path(contract.reserved_path).parent)
+    return [
+        f"RUN pwd > {TASK_WORKDIR_FILE} && chmod 0644 {TASK_WORKDIR_FILE} "
+        f'&& if [ "$(pwd)" != / ]; then find "$(pwd)" -path {reserved} -prune '
+        f"-o ! -path {reserved_parent} ! -path / -exec chown -h {uid}:{gid} {{}} +; fi",
+        f"RUN (getent group {gid} >/dev/null || groupadd -g {gid} users) "
+        f"&& if getent passwd {uid} >/dev/null; then "
+        f'usermod -l {user} -g {gid} -d {home} "$(getent passwd {uid} | cut -d: -f1)"; '
+        f"else useradd -u {uid} -g {gid} -d {home} -s /bin/bash {user}; fi "
+        f"&& mkdir -p {home}/.local/share/jupyter/runtime/external_kernels "
+        f"&& chown -R {uid}:{gid} {home}",
+        f"ENV HOME={home} LANG={contract.locale} LC_ALL={contract.locale} "
+        f"LANGUAGE={contract.locale} TZ=Etc/UTC PATH=$PATH:/opt/datalayer/bin",
+        'ENTRYPOINT ["/opt/datalayer/bin/tini", "-g", "--"]',
+        'CMD ["/usr/local/sbin/start-jupyter.sh"]',
+    ]
 
 
 class Builder:
@@ -272,7 +344,13 @@ class Builder:
             # `image` resolves from an imported reference instead of an
             # approved base (E3-04). Neither changes how this builder itself
             # builds, once the resolver has done its part.
-            build_sources=("packages", "dependencyFile", "image", "dockerfile"),
+            build_sources=(
+                "packages",
+                "dependencyFile",
+                "image",
+                "dockerfile",
+                "foreignDockerfile",
+            ),
             package_managers=("uv", "pip"),
             # Nothing is forbidden by the builder itself: BuildKit is the
             # reference implementation of a Dockerfile, and what the contract
@@ -352,7 +430,8 @@ class Builder:
         """
         spec = request.environment.spec
         apt = apt_pins_in(request.lock_text)
-        authored = spec.build.dockerfile if spec.build.source == "dockerfile" else None
+        source = spec.build.source
+        authored = spec.build.dockerfile if source in ("dockerfile", "foreignDockerfile") else None
         lines = _head(request, authored)
         lines += [
             f'LABEL io.datalayer.environment="{request.environment.metadata.name}" \\',
@@ -383,20 +462,13 @@ class Builder:
                     "    && rm -rf /var/lib/apt/lists/*",
                 ]
             )
-        # An imported image (E3-04) cannot be assumed to carry `uv` or the
-        # wheelhouse the way an approved base does (E1-05): both are brought
-        # to this stage instead, the same as the resolver's own solve
-        # already does for the same reason. An approved base needs neither,
-        # so this changes nothing about a build that already works.
-        imported = spec.build.source == "image"
-        imported_wheelhouse = f"{WHEELHOUSE_IMAGE_PATH}-import"
-        find_links = imported_wheelhouse if imported else WHEELHOUSE_IMAGE_PATH
+        # A foreign image (E3-04) carries none of what an approved base does
+        # (E1-05): the contract is layered on it, from the approved base it
+        # was resolved against. An approved base needs none of this.
+        foreign = source in FOREIGN_SOURCES
+        find_links = WHEELHOUSE_IMAGE_PATH
         lines.append("USER root")
-        if imported:
-            lines += [
-                f"COPY wheelhouse/ {imported_wheelhouse}/",
-                'RUN pip install --no-cache-dir "uv==0.12.11"',
-            ]
+        lines += _contract_layer(request) if foreign else []
         if is_conda_lock(request.lock_text):
             # A conda source (E3-02): the lock is an `@EXPLICIT` file
             # `micromamba install --file` installs without re-solving, and the
@@ -433,9 +505,10 @@ class Builder:
                     # `--find-links` for what no index has — a protected pin's
                     # own wheel, the fork's local version above all (E1-04).
                     "RUN --mount=type=cache,target=/root/.cache/uv "
-                    + _pip_lock_command(find_links, authored=authored is not None),
+                    + _pip_lock_command(find_links, authored=authored is not None, foreign=foreign),
                 ]
             )
+        lines += _contract_user() if foreign else []
         # A build secret is mounted on the postInstall commands that name it
         # and nowhere else (§4.1, D-11): never an `ARG` or `ENV`, which bakes a
         # value into the image's history, never the package-install or files
@@ -500,11 +573,6 @@ class Builder:
             root = Path(directory)
             (root / "Dockerfile").write_text(self.dockerfile(request), encoding="utf-8")
             (root / "lock.txt").write_text(request.lock_text, encoding="utf-8")
-            if request.environment.spec.build.source == "image":
-                wheelhouse = root / "wheelhouse"
-                wheelhouse.mkdir()
-                for wheel in WHEELHOUSE_PATH.glob("*.whl"):
-                    (wheelhouse / wheel.name).write_bytes(wheel.read_bytes())
             metadata = root / "metadata.json"
             # A secret's value is never written under `root`: that directory
             # is also `--local context=`, sent to `buildkitd` as ordinary

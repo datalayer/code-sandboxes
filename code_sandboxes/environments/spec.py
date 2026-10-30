@@ -106,9 +106,20 @@ VARIANTS: tuple[str, ...] = ("datalayer", "e2b", "daytona", "modal")
 SIZE_CLASSES: tuple[str, ...] = ("small", "medium", "large", "gpu-small", "gpu-large")
 GPU_SIZE_CLASSES: tuple[str, ...] = ("gpu-small", "gpu-large")
 
-BUILD_SOURCES: tuple[str, ...] = ("packages", "dependencyFile", "dockerfile", "image")
-#: What builds today; `dockerfile` is the one source still to come.
-SUPPORTED_BUILD_SOURCES: tuple[str, ...] = ("packages", "dependencyFile", "dockerfile", "image")
+BUILD_SOURCES: tuple[str, ...] = (
+    "packages",
+    "dependencyFile",
+    "dockerfile",
+    "image",
+    "foreignDockerfile",
+)
+#: What builds today.
+SUPPORTED_BUILD_SOURCES: tuple[str, ...] = BUILD_SOURCES
+#: The sources that start from an image Datalayer did not approve, so the
+#: pipeline layers the contract on top of it at build.
+FOREIGN_SOURCES: tuple[str, ...] = ("image", "foreignDockerfile")
+#: The sources whose base is not `spec.base`.
+FOREIGN_OR_AUTHORED_SOURCES: tuple[str, ...] = (*FOREIGN_SOURCES, "dockerfile")
 SUPPORTED_PACKAGE_MANAGERS: tuple[str, ...] = ("uv", "pip")
 #: `requirements.txt` and `pyproject.toml`/`uv.lock` are archived on the
 #: version they resolved (E3-01); this bounds what a spec may carry inline,
@@ -384,7 +395,12 @@ class ImageSourceSpec(_Model):
 
 
 class BuildSpec(_Model):
-    source: Literal["packages", "dependencyFile", "dockerfile", "image"] = "packages"
+    #: `foreignDockerfile` is a Dockerfile `FROM` an image Datalayer did not
+    #: approve, in the registries an `image` source may import from; like an
+    #: `image`, it gets the contract layered on top at build.
+    source: Literal["packages", "dependencyFile", "dockerfile", "image", "foreignDockerfile"] = (
+        "packages"
+    )
     dependency_file: DependencyFileSpec | None = None
     dockerfile: DockerfileSpec | None = None
     image: ImageSourceSpec | None = None
@@ -525,6 +541,28 @@ def parse_requirements_txt(text: str) -> list[str]:
             continue
         lines.append(line)
     return lines
+
+
+def _foreign_dockerfile_findings(
+    dockerfile: DockerfileSpec | None, *, registries: tuple[str, ...]
+) -> list[SpecFinding]:
+    """A Dockerfile on a foreign base: what the contract refuses, its one base
+    held to the list an `image` source is, and no build context."""
+    field = "spec.build.dockerfile"
+    if dockerfile is None:
+        return [SpecFinding(field, "is required when `spec.build.source` is `foreignDockerfile`")]
+    if not dockerfile.content.strip():
+        return [SpecFinding(f"{field}.content", "is empty; it is the Dockerfile text")]
+    from .contract import foreign_dockerfile_findings
+
+    return [
+        SpecFinding(
+            f"{field}.content",
+            f"line {finding.line}: {finding.message}",
+            finding.code or SPEC_INVALID,
+        )
+        for finding in foreign_dockerfile_findings(dockerfile.content, registries=registries)
+    ]
 
 
 def _dockerfile_findings(dockerfile: DockerfileSpec | None) -> list[SpecFinding]:
@@ -682,7 +720,7 @@ def _organization_findings(
     findings: list[SpecFinding] = []
     spec = environment.spec
     if (
-        spec.build.source not in ("image", "dockerfile")
+        spec.build.source not in FOREIGN_OR_AUTHORED_SOURCES
         and policy.allowed_bases is not None
         and not policy.allows("bases", spec.base.ref)
     ):
@@ -764,7 +802,7 @@ def spec_findings(
     # validated against the approved bases by `check_dockerfile`, not here):
     # `spec.base` names nothing Datalayer approved for either, so checking it
     # against the table would refuse every one for the reason they exist.
-    if spec.build.source not in ("image", "dockerfile"):
+    if spec.build.source not in FOREIGN_OR_AUTHORED_SOURCES:
         base = bases.get(spec.base.ref)
         if base is None:
             findings.append(
@@ -796,13 +834,18 @@ def spec_findings(
         findings.extend(_dependency_file_findings(spec.build.dependency_file))
     elif spec.build.source == "dockerfile":
         findings.extend(_dockerfile_findings(spec.build.dockerfile))
-    elif spec.build.source == "image":
+    elif spec.build.source in FOREIGN_SOURCES:
         registries = (
             DEFAULT_ALLOWED_REGISTRIES + policy.allowed_registries
             if policy.allowed_registries
             else DEFAULT_ALLOWED_REGISTRIES
         )
-        findings.extend(_image_findings(spec.build.image, registries=registries))
+        if spec.build.source == "image":
+            findings.extend(_image_findings(spec.build.image, registries=registries))
+        else:
+            findings.extend(
+                _foreign_dockerfile_findings(spec.build.dockerfile, registries=registries)
+            )
 
     python = spec.packages.python
     if python.manager not in SUPPORTED_PACKAGE_MANAGERS:
