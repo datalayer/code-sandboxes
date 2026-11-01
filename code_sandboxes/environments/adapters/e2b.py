@@ -158,7 +158,7 @@ __all__ = ["CODE_INTERPRETER_BASE_TEMPLATE", "Builder"]
 CODE_INTERPRETER_BASE_TEMPLATE = "code-interpreter-v1"
 
 #: `uv`, pinned the same way E1-04/E3-04's bootstrap installs it.
-_UV_VERSION = "0.12.11"
+_UV_VERSION = "0.13.6"
 
 _DOCTOR_PATH = "/opt/datalayer/bin/datalayer-sandbox"
 _WHEELHOUSE_PATH = "/opt/datalayer/wheelhouse"

@@ -405,13 +405,13 @@ class TestTheDockerfileItGenerates:
         )
         dockerfile = a_builder().dockerfile(request)
         assert f"COPY --from={CONTRACT_BASE} /opt/datalayer/wheelhouse/" in dockerfile
-        assert 'RUN python3 -m pip install --no-cache-dir "uv==0.12.11"' in dockerfile
+        assert 'RUN python3 -m pip install --no-cache-dir "uv==0.13.6"' in dockerfile
         assert "--find-links /opt/datalayer/wheelhouse " in dockerfile
 
     def test_a_packages_source_never_copies_a_wheelhouse_in(self) -> None:
         dockerfile = a_builder().dockerfile(a_request())
         assert "COPY wheelhouse/" not in dockerfile
-        assert "uv==0.12.11" not in dockerfile
+        assert "uv==0.13.6" not in dockerfile
         assert "--find-links /opt/datalayer/wheelhouse " in dockerfile
 
     def test_it_ends_by_running_the_contracts_own_check(self) -> None:
