@@ -500,3 +500,12 @@ def test_the_doctor_of_an_older_base_finds_its_working_directory():
     created = next(line for line in _contract_user() if "external_kernels" in line)
     assert "/home/datalayer/content" in created
     assert created.index("/home/datalayer/content") < created.index("chown -R")
+
+
+def test_the_kernel_runs_in_the_contracts_working_directory():
+    """`/usr/local/share/jupyter_config.py` is the channel's own, and a channel's
+    may start a kernel elsewhere: conformance:2 reads the kernel's cwd."""
+    from code_sandboxes.environments.adapters.datalayer import _contract_user
+
+    pinned = next(line for line in _contract_user() if "MappingKernelManager.root_dir" in line)
+    assert "/home/datalayer" in pinned and "/usr/local/share/jupyter_config.py" in pinned
