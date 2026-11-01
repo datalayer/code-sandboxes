@@ -250,6 +250,10 @@ def _contract_user() -> list[str]:
         f"else useradd -u {uid} -g {gid} -d {home} -s /bin/bash {user}; fi "
         f"&& mkdir -p {home}/content {home}/.local/share/jupyter/runtime/external_kernels "
         f"&& chown -R {uid}:{gid} {home}",
+        # The config comes from the base's channel, which may start a kernel
+        # elsewhere; conformance:2 reads the kernel's cwd.
+        f"RUN echo \"c.MappingKernelManager.root_dir = '{contract.workdir}'\" "
+        ">> /usr/local/share/jupyter_config.py",
         f"ENV HOME={home} LANG={contract.locale} LC_ALL={contract.locale} "
         f"LANGUAGE={contract.locale} TZ=Etc/UTC PATH=$PATH:/opt/datalayer/bin",
         'ENTRYPOINT ["/opt/datalayer/bin/tini", "-g", "--"]',
