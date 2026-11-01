@@ -5,7 +5,7 @@
 """Resolution: one lock, Datalayer's pins over the user's, and uv's refusals read (E1-04).
 
 The refusals below are **recorded**: each one is what `uv pip compile`
-(0.12.11) actually wrote for that input, box drawing and wrapping included, so
+(0.13.6) actually wrote for that input, box drawing and wrapping included, so
 the parser is tested against the resolver's own words rather than against a
 paraphrase of them that cannot go out of date.
 """
@@ -1191,7 +1191,7 @@ class TestTheBuildkitRunner:
                 bootstrap_uv=True,
             )
         )
-        assert 'RUN python3 -m pip install --no-cache-dir "uv==0.12.11"' in dockerfile
+        assert 'RUN python3 -m pip install --no-cache-dir "uv==0.13.6"' in dockerfile
         assert "COPY wheelhouse/ ./wheelhouse/" in dockerfile
         assert "--find-links /solve/wheelhouse" in dockerfile
         assert "/opt/datalayer/wheelhouse" not in dockerfile
@@ -1211,7 +1211,7 @@ class TestTheBuildkitRunner:
             )
         )
         assert "wheelhouse/ ./wheelhouse/" not in dockerfile
-        assert "uv==0.12.11" not in dockerfile
+        assert "uv==0.13.6" not in dockerfile
 
     def test_the_solve_copies_the_wheelhouse_into_the_build_context_when_asked(
         self, monkeypatch

@@ -193,7 +193,7 @@ def modal_gpu(accelerator_type: str, count: int = 1) -> str | None:
 
 
 #: `uv`, pinned the same way every other builder's bootstrap is (E1-04/E3-04).
-_UV_VERSION = "0.12.11"
+_UV_VERSION = "0.13.6"
 
 _LOCK_PATH = "/opt/datalayer/lock.txt"
 _CONTENT_DIR = "/home/datalayer"

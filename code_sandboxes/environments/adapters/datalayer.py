@@ -228,7 +228,7 @@ def _contract_layer(request: BuildRequest) -> list[str]:
         "RUN chmod 0755 /opt/datalayer /opt/datalayer/bin /opt/datalayer/bin/tini "
         "/opt/datalayer/bin/datalayer-sandbox /opt/datalayer/constraints "
         "/opt/datalayer/wheelhouse /usr/local/sbin/start-jupyter.sh",
-        'RUN python3 -m pip install --no-cache-dir "uv==0.12.11"',
+        'RUN python3 -m pip install --no-cache-dir "uv==0.13.6"',
     ]
 
 

@@ -816,7 +816,7 @@ class BuildkitResolveRunner:
                 "RUN python3 -c 'import sys; print(\"%d.%d\" % sys.version_info[:2])' "
                 "> /solve/python-version",
                 "COPY wheelhouse/ ./wheelhouse/",
-                'RUN python3 -m pip install --no-cache-dir "uv==0.12.11"',
+                'RUN python3 -m pip install --no-cache-dir "uv==0.13.6"',
             ]
         lines += [
             "COPY requirements.in constraints.txt ./",
