@@ -509,3 +509,11 @@ def test_the_kernel_runs_in_the_contracts_working_directory():
 
     pinned = next(line for line in _contract_user() if "MappingKernelManager.root_dir" in line)
     assert "/home/datalayer" in pinned and "/usr/local/share/jupyter_config.py" in pinned
+
+
+def test_a_foreign_image_keeps_no_jupyterlab():
+    """A sandbox starts `jupyter server`. JupyterLab, which `datalayer` brings, is
+    taken out once the lock is installed, its bundle and staging lock with it."""
+    from code_sandboxes.environments.adapters.datalayer import _contract_user
+
+    assert "RUN uv pip uninstall --system jupyterlab" in _contract_user()

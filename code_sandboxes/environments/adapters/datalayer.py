@@ -241,6 +241,10 @@ def _contract_user() -> list[str]:
     user, uid, gid, home = contract.user, contract.uid, contract.gid, contract.home
     reserved, reserved_parent = contract.reserved_path, str(Path(contract.reserved_path).parent)
     return [
+        # `datalayer` brings JupyterLab, which a sandbox never serves: it starts
+        # `jupyter server`. Out, and with it Lab's bundle and staging lock,
+        # whose pins can block the scan with no fixed release to move to.
+        "RUN uv pip uninstall --system jupyterlab",
         f"RUN pwd > {TASK_WORKDIR_FILE} && chmod 0644 {TASK_WORKDIR_FILE} "
         f'&& if [ "$(pwd)" != / ]; then find "$(pwd)" -path {reserved} -prune '
         f"-o ! -path {reserved_parent} ! -path / -exec chown -h {uid}:{gid} {{}} +; fi",
