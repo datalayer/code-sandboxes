@@ -248,7 +248,7 @@ def _contract_user() -> list[str]:
         f"&& if getent passwd {uid} >/dev/null; then "
         f'usermod -l {user} -g {gid} -d {home} "$(getent passwd {uid} | cut -d: -f1)"; '
         f"else useradd -u {uid} -g {gid} -d {home} -s /bin/bash {user}; fi "
-        f"&& mkdir -p {home}/.local/share/jupyter/runtime/external_kernels "
+        f"&& mkdir -p {home}/content {home}/.local/share/jupyter/runtime/external_kernels "
         f"&& chown -R {uid}:{gid} {home}",
         f"ENV HOME={home} LANG={contract.locale} LC_ALL={contract.locale} "
         f"LANGUAGE={contract.locale} TZ=Etc/UTC PATH=$PATH:/opt/datalayer/bin",

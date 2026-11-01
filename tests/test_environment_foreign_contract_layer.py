@@ -489,3 +489,14 @@ class TestARealImage:
         base = self._digest("alpine:3.20")
         with pytest.raises(AssertionError, match="not Debian-derived"):
             solve_and_build(approved, tmp_path, image_source("alpine:3.20"), base)
+
+
+def test_the_doctor_of_an_older_base_finds_its_working_directory():
+    """The doctor is copied from the approved base, and a channel's may still
+    check `/home/datalayer/content`: an image of another make has to hold it,
+    the contract's user owning it, before that doctor runs."""
+    from code_sandboxes.environments.adapters.datalayer import _contract_user
+
+    created = next(line for line in _contract_user() if "external_kernels" in line)
+    assert "/home/datalayer/content" in created
+    assert created.index("/home/datalayer/content") < created.index("chown -R")
