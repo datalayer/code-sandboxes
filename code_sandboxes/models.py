@@ -53,6 +53,17 @@ class SandboxEnvironment(BaseModel):
     gpu_count: Optional[int] = None
     gpu_memory: Optional[str] = None
 
+    #: Whether the environment is withheld from the platform's pickers.
+    #:
+    #: A disabled environment keeps its definition — it is still listed, still
+    #: named, and a caller that asks for it by name still gets it — but a
+    #: surface that offers environments to choose from shows it only on
+    #: request, greyed, and does not let it be picked. This is where an
+    #: environment is switched off for everyone: `provider_catalog` carries
+    #: it, the operator's `/v1/environments` serves it, and the pickers read
+    #: it from there, so no surface keeps its own list of what is off.
+    disabled: bool = False
+
     @property
     def features(self) -> list[str]:
         """What the environment is known to allow, beyond running code.

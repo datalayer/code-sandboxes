@@ -424,6 +424,9 @@ class DaytonaSandbox(Sandbox):
         expose `/dev/fuse`, so a local folder cannot be bridged in as a
         filesystem on any of them — a snapshot built to expose FUSE, with
         fusepy and the bridge client preinstalled, is what would carry it.
+
+        `daytona-gpu` is disabled on the platform (2 November 2026): kept,
+        and still startable by name, but no longer offered in the pickers.
         """
         return [
             SandboxEnvironment(
@@ -446,6 +449,7 @@ class DaytonaSandbox(Sandbox):
                 gpu_count=1,
                 gpu_memory=gpu_memory("H100"),
                 metadata={"variant": "daytona", "gpu": "H100", "spot": False, "features": []},
+                disabled=True,
             ),
             SandboxEnvironment(
                 name="daytona-gpu-spot",
