@@ -426,6 +426,10 @@ def provider_catalog(
                             "gpu_count": environment.gpu_count,
                             "gpu_memory": environment.gpu_memory,
                             "features": environment.features,
+                            # Always said, like `features`: an environment
+                            # is offered or it is not, and a picker must not
+                            # have to guess which.
+                            "disabled": environment.disabled,
                         }.items()
                         if value is not None
                     }

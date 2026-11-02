@@ -147,3 +147,27 @@ def test_a_provider_carries_the_mark_it_is_drawn_with():
     # No mark for it in the set yet, which is said as nothing rather than as
     # a slug that resolves to whatever the reader keeps for the unknown.
     assert catalog["cloudflare"]["icon"] is None
+
+
+def test_kaggle_and_daytona_gpu_are_disabled_and_kept():
+    """Disabled on the platform, not removed: the catalogue still serves them.
+
+    The pickers hide a disabled environment behind "Show disabled
+    environments" and refuse to pick it; the flag is set here, on the
+    definition, and nowhere else.
+    """
+    secrets = {"KAGGLE_API_TOKEN": "t", "DAYTONA_API_KEY": "t"}
+    catalog = {entry["name"]: entry for entry in provider_catalog(secrets, ("kaggle", "daytona"))}
+
+    kaggle = {env["name"]: env for env in catalog["kaggle"]["environments"]}
+    daytona = {env["name"]: env for env in catalog["daytona"]["environments"]}
+
+    assert set(kaggle) == {"kaggle-cpu", "kaggle-gpu"}
+    assert all(env["disabled"] for env in kaggle.values())
+    assert daytona["daytona-gpu"]["disabled"] is True
+    assert daytona["daytona-default"]["disabled"] is False
+    assert daytona["daytona-gpu-spot"]["disabled"] is False
+
+
+def test_an_environment_is_offered_unless_it_says_otherwise():
+    assert _environment("plain").disabled is False

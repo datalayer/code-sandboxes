@@ -109,6 +109,9 @@ class KaggleSandbox(Sandbox):
         named machine to run in, not a free-form choice of hardware. Kaggle
         gives a notebook session either on CPU alone or with an accelerator
         attached, so it ships one of each and nothing in between.
+
+        Both are disabled on the platform (2 November 2026): kept, and still
+        startable by name, but no longer offered in the environment pickers.
         """
         return [
             SandboxEnvironment(
@@ -119,6 +122,7 @@ class KaggleSandbox(Sandbox):
                 visibility="cloud",
                 burning_rate=0.0,
                 metadata={"variant": "kaggle", "accelerator": None},
+                disabled=True,
             ),
             SandboxEnvironment(
                 name="kaggle-gpu",
@@ -131,6 +135,7 @@ class KaggleSandbox(Sandbox):
                 gpu_count=1,
                 gpu_memory=gpu_memory("T4"),
                 metadata={"variant": "kaggle", "accelerator": "T4"},
+                disabled=True,
             ),
         ]
 
