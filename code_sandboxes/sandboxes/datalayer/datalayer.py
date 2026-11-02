@@ -412,6 +412,8 @@ class DatalayerSandbox(Sandbox):
                     visibility=env.visibility,
                     burning_rate=float(env.burning_rate),
                     metadata=env.metadata,
+                    # The platform's word on whether it may be picked.
+                    disabled=bool(getattr(env, "disabled", False)),
                 )
                 for env in environments
             ]

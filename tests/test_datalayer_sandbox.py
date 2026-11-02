@@ -439,3 +439,52 @@ def test_connecting_twice_is_connecting_once(one_runtime):
     sandbox.run_code("print(2)")
 
     assert sandbox._runtime.starts == 1
+
+
+def test_the_platform_listing_keeps_a_disabled_environment_disabled(monkeypatch):
+    """An environment the platform serves disabled stays disabled here."""
+    import sys
+
+    served = [
+        SimpleNamespace(
+            name=name,
+            title=name,
+            language="python",
+            owner="platform",
+            visibility="public",
+            burning_rate=1,
+            metadata={},
+            **extra,
+        )
+        for name, extra in (
+            ("kaggle-gpu", {"disabled": True}),
+            ("python-cpu", {"disabled": False}),
+            ("older-service", {}),
+        )
+    ]
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def list_environments(self):
+            return served
+
+    urls = SimpleNamespace()
+    monkeypatch.setitem(
+        sys.modules, "datalayer_core", SimpleNamespace(utils=SimpleNamespace(urls=urls))
+    )
+    monkeypatch.setitem(sys.modules, "datalayer_core.utils", SimpleNamespace(urls=urls))
+    monkeypatch.setitem(sys.modules, "datalayer_core.utils.urls", urls)
+    monkeypatch.setitem(sys.modules, "agent_runtimes", SimpleNamespace())
+    monkeypatch.setitem(
+        sys.modules, "agent_runtimes.client", SimpleNamespace(AgentClient=FakeClient)
+    )
+
+    listed = DatalayerSandbox.list_environments(token="t")
+
+    assert {env.name: env.disabled for env in listed} == {
+        "kaggle-gpu": True,
+        "python-cpu": False,
+        "older-service": False,
+    }
