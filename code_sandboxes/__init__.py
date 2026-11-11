@@ -25,6 +25,8 @@ Cloud container sandboxes:
     - E2BSandbox: E2B microVMs, stateful Python kernel and rich outputs
     - CoreWeaveSandbox: CoreWeave containers, stateful Python session
     - CloudflareSandbox: Cloudflare containers, through a sandbox bridge Worker
+    - AgentCoreSandbox: an Amazon Bedrock AgentCore code interpreter session
+      (AgentCoreBrowser: an AgentCore browser session, driven over CDP)
 
 Features:
 - Code execution with streaming support
@@ -172,6 +174,7 @@ from .providers import (
     available_providers,
     get_provider,
 )
+from .sandboxes.agentcore import AgentCoreBrowser, AgentCoreSandbox
 from .sandboxes.cloudflare import CloudflareSandbox
 from .sandboxes.coreweave import CoreWeaveSandbox
 from .sandboxes.datalayer import DatalayerSandbox
@@ -208,6 +211,8 @@ __all__ = [
     "MANAGER_OPERATIONS",
     "PROVIDERS",
     "RUNTIMES_API_PREFIX",
+    "AgentCoreBrowser",
+    "AgentCoreSandbox",
     "BuildEntry",
     "BuiltArtifact",
     "CellReply",

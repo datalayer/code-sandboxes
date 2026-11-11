@@ -1,0 +1,104 @@
+---
+sidebar_position: 2
+title: AgentCore
+---
+
+# AgentCore
+
+Runs code in a session of an [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/)
+**code interpreter**, in your own AWS account and with your own credentials.
+By default the session runs on the AWS-managed `aws.codeinterpreter.v1`.
+
+A session keeps one Python kernel, so state **persists** between calls:
+
+```python
+from code_sandboxes import Sandbox
+
+with Sandbox.create(variant="agentcore", region="us-east-1") as sandbox:
+    sandbox.run_code("x = 40")
+    print(sandbox.run_code("x + 2").stdout)  # "42"
+```
+
+- **Requirements:** `code-sandboxes[agentcore]` (installs `boto3`).
+- **Parameters:** `region`, `code_interpreter_id`, `session_timeout`, `client`.
+
+## Credentials
+
+The variant calls AgentCore's data plane (`bedrock-agentcore`) with the AWS
+credentials boto3 finds: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, a
+profile in `~/.aws/credentials`, or a role. The region is `region=`, else
+`AWS_REGION`, else `AWS_DEFAULT_REGION`; with none, the sandbox refuses to
+start. The identity needs `bedrock-agentcore:StartCodeInterpreterSession`,
+`InvokeCodeInterpreter`, `StopCodeInterpreterSession` and
+`ListCodeInterpreterSessions` on the code interpreter.
+
+## What It Runs
+
+- **Languages:** `python` (the default), `javascript` and `typescript`, through
+  `run_code(code, language=...)`.
+- **Output:** AgentCore answers each call with its standard output, standard
+  error and exit code. The value of a last expression is printed into
+  `stdout` — AgentCore has no separate channel for it — so `x + 2` comes back
+  as `result.stdout == "42"`. An image the interpreter returns comes back as a
+  result keyed by its MIME type.
+- **Errors:** a run that fails is a `code_error` named from its traceback
+  (`ZeroDivisionError`, …). An exception AgentCore sends itself (throttling, a
+  quota) is `execution_ok=False` with its message.
+- **Files:** `sandbox.files.write` and `read` go through the interpreter's
+  `writeFiles` and `readFiles` tools, not through code.
+- **Timeout:** `session_timeout=` (seconds, at most eight hours) is how long
+  AgentCore keeps the session; its own default is 15 minutes. AgentCore takes
+  no timeout per call.
+
+## What Is Refused
+
+Before a session starts, never after:
+
+- a GPU (`gpu=`): AgentCore's interpreter has none;
+- `network_policy="allowlist"`: the network is the code interpreter's own mode;
+- `network_policy="all"` on `aws.codeinterpreter.v1`, which runs in SANDBOX
+  network mode and reaches no internet. Create a code interpreter in PUBLIC
+  network mode (`CreateCodeInterpreter`) and pass its id as
+  `code_interpreter_id`;
+- a second context (`create_context("other")`): a session has one kernel;
+- environment variables per call (`envs=`).
+
+There is no interrupt: `sandbox.interrupt()` answers `False`.
+
+## Managing Sessions
+
+`code-sandboxes list -v agentcore` lists the READY sessions of the code
+interpreter, and `delete` stops one:
+
+```python
+from code_sandboxes.manage import get_manager
+
+manager = get_manager("agentcore", region="us-east-1")
+for info in manager.list():
+    manager.delete(info.id)
+```
+
+## The Browser
+
+AgentCore's **Browser** is a headless Chrome AWS runs. It runs no code of
+yours, so it is not a variant: `AgentCoreBrowser` starts a session (on the
+AWS-managed `aws.browser.v1` by default), hands out what a client needs to
+drive and watch it, and stops it.
+
+```python
+from code_sandboxes import AgentCoreBrowser
+
+with AgentCoreBrowser(region="us-east-1", session_timeout=600) as browser:
+    endpoint = browser.automation_endpoint        # wss://…/automation
+    headers = browser.automation_headers()        # SigV4-signed, sign right before connecting
+    watch = browser.live_view_url(expires=300)    # a presigned live view
+
+    # With Playwright:
+    # page = (await p.chromium.connect_over_cdp(endpoint, headers=headers)).contexts[0].pages[0]
+```
+
+The automation stream speaks the Chrome DevTools Protocol. `viewport=(width,
+height)` sets the page size, `browser_id=` names a browser of your own. The
+identity needs `StartBrowserSession`, `StopBrowserSession` and
+`ConnectBrowserAutomationStream` (and `ConnectBrowserLiveViewStream` for the
+live view).
