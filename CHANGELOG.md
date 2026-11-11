@@ -8,6 +8,24 @@
 
 ## Unreleased
 
+## 1.12.0
+
+- **The `agentcore` variant.** A session of an Amazon Bedrock AgentCore code
+  interpreter — the AWS-managed `aws.codeinterpreter.v1` unless
+  `code_interpreter_id=` names one of your own — in your own AWS account,
+  with your own credentials (`code-sandboxes[agentcore]`, boto3). One Python
+  kernel per session; JavaScript and TypeScript run too. Files go through the
+  interpreter's `writeFiles` and `readFiles`; a failed run is a `code_error`
+  named from its traceback; a GPU, a host allowlist, or the internet on the
+  managed interpreter (SANDBOX network mode) are refused before a session
+  starts. `code-sandboxes list -v agentcore` lists the READY sessions,
+  `delete` stops one.
+- **`AgentCoreBrowser`.** A session of an AgentCore browser
+  (`aws.browser.v1` by default): started, driven over its automation stream
+  — the Chrome DevTools Protocol on a WebSocket opened with the SigV4-signed
+  headers `automation_headers()` returns (Playwright's `connect_over_cdp`
+  takes them) — watched through a presigned `live_view_url()`, and stopped.
+
 ## 1.10.0
 
 - **One subpackage per provider.** Every sandbox moved under

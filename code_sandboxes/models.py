@@ -110,6 +110,7 @@ class SandboxStatus(str, Enum):
 class SandboxVariant(str, Enum):
     """Supported sandbox variants."""
 
+    AGENTCORE = "agentcore"
     CLOUDFLARE = "cloudflare"
     COREWEAVE = "coreweave"
     DATALAYER = "datalayer"

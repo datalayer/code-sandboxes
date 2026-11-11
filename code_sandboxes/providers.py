@@ -317,6 +317,30 @@ PROVIDERS: tuple[SandboxProvider, ...] = (
         list_environments=_environments_of(SandboxVariant.CLOUDFLARE),
     ),
     SandboxProvider(
+        variant=SandboxVariant.AGENTCORE,
+        title="AgentCore",
+        description=(
+            "Sessions of an Amazon Bedrock AgentCore code interpreter, with a "
+            "stateful Python kernel, in your own AWS account."
+        ),
+        extra="agentcore",
+        requirements=(
+            ProviderRequirement(
+                env_vars=("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"),
+                hint=(
+                    "Give AWS credentials allowed to call bedrock-agentcore "
+                    "(AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, or a profile "
+                    "in ~/.aws/credentials), and set AWS_REGION."
+                ),
+            ),
+            ProviderRequirement(
+                file="~/.aws/credentials",
+                hint="A profile in ~/.aws/credentials, and AWS_REGION.",
+            ),
+        ),
+        list_environments=_environments_of(SandboxVariant.AGENTCORE),
+    ),
+    SandboxProvider(
         variant=SandboxVariant.DOCKER,
         title="Docker",
         description="Containers on the Docker daemon of this machine.",

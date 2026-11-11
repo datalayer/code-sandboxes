@@ -250,6 +250,7 @@ class TestThePorvidersThatCannotBeInterrupted:
     @pytest.mark.parametrize(
         ("module", "name"),
         [
+            ("agentcore", "AgentCoreSandbox"),
             ("cloudflare", "CloudflareSandbox"),
             ("coreweave", "CoreWeaveSandbox"),
             ("daytona", "DaytonaSandbox"),

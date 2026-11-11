@@ -33,6 +33,7 @@ def test_every_variant_of_the_enum_has_a_manager_in_any_spelling():
 
 def test_every_variant_has_a_manager():
     assert manageable_variants() == [
+        "agentcore",
         "cloudflare",
         "coreweave",
         "datalayer",

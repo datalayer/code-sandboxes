@@ -664,6 +664,10 @@ class Sandbox(ABC):
             from .sandboxes.cloudflare import CloudflareSandbox
 
             sandbox = CloudflareSandbox(config=config, **kwargs)
+        elif variant_value == "agentcore":
+            from .sandboxes.agentcore import AgentCoreSandbox
+
+            sandbox = AgentCoreSandbox(config=config, **kwargs)
         else:
             raise ValueError(
                 f"Unknown sandbox variant: {variant}. "
@@ -754,6 +758,10 @@ class Sandbox(ABC):
             from .sandboxes.cloudflare import CloudflareSandbox
 
             return CloudflareSandbox.list_environments()
+        if variant_value == "agentcore":
+            from .sandboxes.agentcore import AgentCoreSandbox
+
+            return AgentCoreSandbox.list_environments()
         if variant_value == "kaggle":
             from .sandboxes.kaggle import KaggleSandbox
 

@@ -15,6 +15,7 @@ Code Sandboxes (`code_sandboxes`) is a Python package for running code in isolat
 
 Canonical variant names:
 
+- `agentcore`
 - `cloudflare`
 - `coreweave`
 - `datalayer`

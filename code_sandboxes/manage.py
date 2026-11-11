@@ -1226,6 +1226,86 @@ class CloudflareSandboxManager(SandboxManager):
         return info
 
 
+class AgentCoreSandboxManager(SandboxManager):
+    """Sessions of an Amazon Bedrock AgentCore code interpreter.
+
+    A session is what this variant calls a sandbox: `list` answers the
+    sessions AgentCore holds READY on the code interpreter, `delete` stops one.
+    """
+
+    variant = "agentcore"
+    capabilities = frozenset({"create", "list", "get", "delete"})
+
+    def __init__(
+        self,
+        region: str | None = None,
+        code_interpreter_id: str | None = None,
+        client: Any | None = None,
+        **_: Any,
+    ) -> None:
+        from .sandboxes.agentcore import DEFAULT_CODE_INTERPRETER
+
+        self._region = region
+        self._code_interpreter_id = code_interpreter_id or DEFAULT_CODE_INTERPRETER
+        self._client = client
+
+    def _data_plane(self) -> Any:
+        if self._client is None:
+            from .sandboxes.agentcore.agentcore import data_plane_client
+
+            try:
+                self._client = data_plane_client(self._region)
+            except Exception as exc:
+                raise SandboxManagementError(str(exc)) from exc
+        return self._client
+
+    def _info(self, item: dict[str, Any]) -> SandboxInfo:
+        from .sandboxes.agentcore.agentcore import SESSION_STATES
+
+        created = item.get("createdAt")
+        return SandboxInfo(
+            id=item["sessionId"],
+            variant=self.variant,
+            status=SESSION_STATES.get(str(item.get("status")), SandboxStatus.PENDING),
+            name=item.get("name"),
+            created_at=created.timestamp() if hasattr(created, "timestamp") else 0.0,
+            metadata={"code_interpreter_id": item.get("codeInterpreterIdentifier")},
+        )
+
+    def list(self) -> list[SandboxInfo]:
+        from .sandboxes.agentcore import list_sessions
+
+        items = list_sessions("code-interpreter", self._code_interpreter_id, self._data_plane())
+        return [self._info(item) for item in items]
+
+    def delete(self, sandbox_id: str) -> bool:
+        if self.get(sandbox_id) is None:
+            return False
+        self._data_plane().stop_code_interpreter_session(
+            codeInterpreterIdentifier=self._code_interpreter_id, sessionId=sandbox_id
+        )
+        return True
+
+    def create(self, **kwargs: Any) -> SandboxInfo:
+        from .sandboxes.agentcore import AgentCoreSandbox
+
+        self._configure(kwargs)
+        sandbox = AgentCoreSandbox(
+            region=self._region,
+            code_interpreter_id=self._code_interpreter_id,
+            client=self._data_plane(),
+            **kwargs,
+        )
+        sandbox.start()
+        info = sandbox.info
+        if info is None:
+            raise SandboxManagementError("The session started without an identity.")
+        # Detached, so it outlives this call: stopping it is `delete`.
+        sandbox._session_id = None
+        sandbox._started = False
+        return info
+
+
 _MANAGERS: dict[str, type[SandboxManager]] = {
     "eval": EvalSandboxManager,
     "monty": MontySandboxManager,
@@ -1240,6 +1320,7 @@ _MANAGERS: dict[str, type[SandboxManager]] = {
     "e2b": E2BSandboxManager,
     "coreweave": CoreWeaveSandboxManager,
     "cloudflare": CloudflareSandboxManager,
+    "agentcore": AgentCoreSandboxManager,
 }
 
 
