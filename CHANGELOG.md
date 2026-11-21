@@ -8,6 +8,12 @@
 
 ## Unreleased
 
+## 1.12.2
+
+- Requires `jupyter-kernel-client>=1.0.3`: its websocket thread is a daemon
+  and `stop_channels` joins it cleanly, so closing a sandbox leaves no thread
+  behind.
+
 ## 1.12.0
 
 - **The `agentcore` variant.** A session of an Amazon Bedrock AgentCore code
