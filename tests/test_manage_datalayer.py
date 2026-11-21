@@ -56,7 +56,7 @@ def test_create_starts_the_environment_asked_for_under_its_name():
     sandbox = _Sandbox.started[-1]
     assert sandbox.config.environment == "python-cpu-env"
     assert sandbox.config.name == "e0-11-check"
-    assert sandbox.kwargs == {}
+    assert sandbox.kwargs == {"connect": False}
 
 
 def test_create_with_nothing_asked_keeps_the_defaults():
@@ -101,3 +101,13 @@ def test_delete_answers_false_when_the_platform_did_not_stop_it():
 def test_a_failed_delete_says_why():
     with pytest.raises(SandboxManagementError, match="did not stop runtime 01x: unreachable"):
         _manager_with(_Client(error=RuntimeError("unreachable"))).delete("01x")
+
+
+def test_create_starts_the_runtime_without_connecting_to_its_kernel():
+    """A manager's create asks for the runtime only.
+
+    The kernel connection it used to open held a non-daemon websocket thread
+    nothing closed, so `datalayer sandboxes create` did not exit.
+    """
+    DatalayerSandboxManager(token="t").create(environment="ai-agents-env")
+    assert _Sandbox.started[-1].kwargs["connect"] is False
