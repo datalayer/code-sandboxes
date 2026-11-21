@@ -488,3 +488,54 @@ def test_the_platform_listing_keeps_a_disabled_environment_disabled(monkeypatch)
         "python-cpu": False,
         "older-service": False,
     }
+
+
+# ---------------------------------------------------------------------------
+# Starting the runtime only (`connect=False`)
+# ---------------------------------------------------------------------------
+
+
+class _CreatingClient(_Client):
+    """A client whose `create_runtime` answers a fresh, unconnected runtime."""
+
+    def create_runtime(self, **kwargs) -> _Runtime:
+        runtime = _Runtime(uid="01NEW", runtime_name="sb-01new", name=kwargs["name"])
+        self.runtimes.append(runtime)
+        return runtime
+
+
+@pytest.fixture
+def creating_client(monkeypatch):
+    import agent_runtimes.client as client_module
+
+    client = _CreatingClient([])
+    monkeypatch.setattr(client_module, "AgentClient", lambda **kwargs: client)
+    return client
+
+
+def test_start_without_connect_starts_the_runtime_and_opens_no_kernel(creating_client):
+    """What a manager's `create` asks for: the runtime, under its uid, and no
+    kernel connection — whose websocket thread kept the CLI from exiting."""
+    sandbox = DatalayerSandbox(SandboxConfig(name="speed"), connect=False)
+    sandbox.start()
+
+    assert sandbox.info is not None and sandbox.info.id == "01NEW"
+    assert sandbox._runtime.starts == 0
+    assert sandbox._runtime.sandbox_client is None
+
+
+def test_start_connects_by_default(creating_client):
+    sandbox = DatalayerSandbox(SandboxConfig(name="speed"))
+    sandbox.start()
+
+    assert sandbox._runtime.starts == 1
+
+
+def test_a_sandbox_started_without_connect_connects_when_first_run(creating_client):
+    sandbox = DatalayerSandbox(SandboxConfig(name="speed"), connect=False)
+    sandbox.start()
+
+    result = sandbox.run_code("print(6*7)")
+
+    assert sandbox._runtime.starts == 1
+    assert result.execution_ok, result.execution_error

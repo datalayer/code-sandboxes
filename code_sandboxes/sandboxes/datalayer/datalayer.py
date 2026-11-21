@@ -103,6 +103,7 @@ class DatalayerSandbox(Sandbox):
         token: Optional[str] = None,
         run_url: Optional[str] = None,
         snapshot_name: Optional[str] = None,
+        connect: bool = True,
         **kwargs,
     ):
         """Initialize the Datalayer sandbox.
@@ -113,12 +114,17 @@ class DatalayerSandbox(Sandbox):
                 environment variable.
             run_url: Datalayer server URL. If not provided, uses default.
             snapshot_name: Name of snapshot to restore from (optional).
+            connect: Whether `start` also connects to the runtime's kernel
+                (its status, its kernel, a websocket held open). `False`
+                starts the runtime and nothing more: what a manager's
+                `create` needs, the code being run later by whoever opens it.
             **kwargs: Additional arguments passed to DatalayerClient.
         """
         super().__init__(config)
         self._token = token
         self._run_url = run_url
         self._snapshot_name = snapshot_name
+        self._connect_on_start = connect
         self._client = None
         self._runtime = None
         self._sandbox_id = str(uuid.uuid4())
@@ -512,8 +518,11 @@ class DatalayerSandbox(Sandbox):
                 or self._sandbox_id
             )
 
-            # Start the runtime
-            if hasattr(self._runtime, "start"):
+            # Connect to the runtime's kernel, unless only the runtime was
+            # asked for (`connect=False`).
+            if not self._connect_on_start:
+                pass
+            elif hasattr(self._runtime, "start"):
                 self._runtime.start()
             else:  # pragma: no cover - compatibility fallback
                 self._runtime._start()

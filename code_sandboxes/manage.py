@@ -943,8 +943,14 @@ class DatalayerSandboxManager(SandboxManager):
         updates = {key: value for key, value in chosen.items() if value}
         if updates:
             config = config.model_copy(update=updates)
+        # The runtime, not a connection to its kernel: the kernel connection
+        # cost three requests and a websocket (about a second), and nothing
+        # closed that websocket — its thread is not a daemon, so a CLI that
+        # created a sandbox stayed alive until a garbage collection happened
+        # to free the client, and never exited once its imports were lazy
+        # enough that none did.
         sandbox = DatalayerSandbox(
-            config=config, token=self._token, run_url=self._run_url, **kwargs
+            config=config, token=self._token, run_url=self._run_url, connect=False, **kwargs
         )
         sandbox.start()
         info = sandbox.info
