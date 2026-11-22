@@ -8,6 +8,16 @@
 
 ## Unreleased
 
+## 1.12.4
+
+- **An explicit empty egress clears the config's allowed hosts.** The
+  Datalayer manager's `create(config=SandboxConfig(allowed_hosts=[...]), egress=[])` launched with the config's hosts still allowed: the overrides
+  were filtered by truth, so `[]` counted as omitted. Only an omitted (`None`)
+  keyword keeps the config's value now, for every override (`environment`,
+  `environment_version`, `name`, `gpu`, `egress`): environment version `0`
+  is applied rather than dropped, and an egress given as a string is refused
+  instead of being read as its characters.
+
 ## 1.12.3
 
 - **A Datalayer sandbox's network.** It reaches any public host on ports 80
