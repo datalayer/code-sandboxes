@@ -867,6 +867,8 @@ class DatalayerSandboxManager(SandboxManager):
             metadata={
                 "environment": getattr(runtime, "environment_name", "") or "",
                 "pod": getattr(runtime, "runtime_name", "") or "",
+                # The extra host:port its launch allowed it beyond the web.
+                "egress": list(getattr(runtime, "egress", None) or []),
             },
         )
 
@@ -939,6 +941,10 @@ class DatalayerSandboxManager(SandboxManager):
             "environment_version": kwargs.pop("environment_version", None),
             "name": kwargs.pop("name", None),
             "gpu": kwargs.pop("gpu", None),
+            # The extra host:port the sandbox may reach beyond the web (the
+            # CLI's `--egress`), which the sandbox sends as the launch's
+            # `egress`; left in the extra arguments it would be dropped.
+            "allowed_hosts": list(kwargs.pop("egress", None) or []),
         }
         updates = {key: value for key, value in chosen.items() if value}
         if updates:

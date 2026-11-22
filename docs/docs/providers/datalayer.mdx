@@ -38,6 +38,34 @@ with Sandbox.create(
     sandbox.run_code("import torch; print(torch.cuda.is_available())")
 ```
 
+## Network
+
+A Datalayer sandbox reaches **any public host on ports 80 and 443 only**: pip,
+npm, `git` over https and web APIs work; SSH, SMTP, raw TCP and any other port
+are refused. The platform's own services stay reachable as before.
+
+To reach a host on another port, name it with its port in `allowed_hosts`, for
+that one sandbox (at most 20):
+
+```python
+with Sandbox.create(
+    variant="datalayer",
+    allowed_hosts=["github.com:22", "db.example.com:5432"],
+) as sandbox:
+    sandbox.run_code("import socket; socket.create_connection(('github.com', 22), 5)")
+```
+
+Each entry is `host:port` or `address:port`: an exact public host name or a
+public IPv4 address. The platform refuses the launch, saying why, for an entry
+without a port, a wildcard (`*`, `*.example.com`), a CIDR, an IPv6 address, a
+private, loopback or link-local address (the cloud metadata address
+`169.254.169.254` among them), a cluster or private name (`*.svc`,
+`*.cluster.local`, `localhost`, `*.internal`), or a name that resolves to such
+an address. The hosts are recorded on the runtime and shown by `list`.
+
+`network_policy` stays at `inherit`: `none`, `allowlist` and `all` cannot be
+honoured by a Datalayer sandbox and are refused before anything is launched.
+
 The concrete implementation lives in its own subpackage (and is re-exported
 from `code_sandboxes`):
 

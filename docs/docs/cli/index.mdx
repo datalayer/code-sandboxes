@@ -239,6 +239,10 @@ code-sandboxes create -v modal
 code-sandboxes create -v docker
 code-sandboxes create -v jupyter-server --server-url http://localhost:8888
 
+# A Datalayer sandbox reaches public hosts on ports 80 and 443 only;
+# name any other host:port it needs (repeatable)
+code-sandboxes create -v datalayer --egress github.com:22
+
 # The environments sandboxes can be created in
 code-sandboxes environments
 ```
