@@ -8,6 +8,18 @@
 
 ## Unreleased
 
+## 1.12.3
+
+- **A Datalayer sandbox's network.** It reaches any public host on ports 80
+  and 443 only; `allowed_hosts` (each `host:port`) names the other hosts one
+  sandbox may reach, sent as the launch's `egress` and shown in its metadata
+  and in `list`. `code-sandboxes create -v datalayer --egress host:port`
+  (repeatable) and the manager's `create(egress=[...])` ask for them.
+  `network_policy` `none`, `allowlist` and `all` are refused for a Datalayer
+  sandbox, which cannot honour them. Needs agent-runtimes 1.7.4 or later when
+  `allowed_hosts` is not empty.
+- The CLI's Details column leaves empty lists out and says a list as its items.
+
 ## 1.12.2
 
 - Requires `jupyter-kernel-client>=1.0.3`: its websocket thread is a daemon

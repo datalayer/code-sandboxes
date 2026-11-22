@@ -344,6 +344,7 @@ class DatalayerSandbox(Sandbox):
             metadata={
                 "network_policy": sandbox.config.network_policy,
                 "allowed_hosts": sandbox.config.allowed_hosts,
+                "egress": list(getattr(runtime, "egress", None) or []),
             },
         )
         return sandbox
@@ -426,6 +427,26 @@ class DatalayerSandbox(Sandbox):
         except Exception:
             return []
 
+    def _egress(self) -> list[str]:
+        """The extra ``host:port`` this sandbox may reach, from ``allowed_hosts``.
+
+        A Datalayer sandbox reaches any public host on ports 80 and 443 only;
+        ``allowed_hosts`` (each ``host:port``, e.g. ``github.com:22``) are
+        added for this sandbox by its firewall, and the platform refuses, in a
+        sentence, what it may not have. A policy it cannot honour is refused
+        here rather than silently ignored: ``none`` (the web always stays
+        reachable), ``allowlist`` (the web is never narrowed to the hosts
+        alone), ``all`` (other ports are reached only when named).
+        """
+        policy = self.config.network_policy
+        if policy in ("none", "allowlist", "all"):
+            raise SandboxConfigurationError(
+                f"A Datalayer sandbox cannot honour network_policy={policy!r}: it reaches any "
+                "public host on ports 80 and 443, plus each host:port named in allowed_hosts. "
+                "Leave the policy at 'inherit' and name the extra hosts in allowed_hosts."
+            )
+        return list(self.config.allowed_hosts)
+
     def start(self) -> None:
         """Start the sandbox by creating a Datalayer runtime.
 
@@ -435,6 +456,8 @@ class DatalayerSandbox(Sandbox):
         """
         if self._started:
             return
+
+        egress = self._egress()
 
         try:
             # Import here to avoid hard dependency
@@ -489,6 +512,10 @@ class DatalayerSandbox(Sandbox):
             # The GPU rewrite above is left exactly as it is until E4-11 (D-20).
             environment_version = self.config.environment_version
 
+            # The extra hosts, named only when there are some: a client that
+            # predates them is never told of a list it cannot pass on.
+            network = {"egress": egress} if egress else {}
+
             # Create the runtime (optionally from snapshot)
             if self._snapshot_name:
                 self._runtime = self._client.create_runtime(
@@ -497,6 +524,7 @@ class DatalayerSandbox(Sandbox):
                     version=environment_version,
                     time_reservation=time_reservation,
                     snapshot_name=self._snapshot_name,
+                    **network,
                 )
             else:
                 self._runtime = self._client.create_runtime(
@@ -504,6 +532,7 @@ class DatalayerSandbox(Sandbox):
                     environment=environment,
                     version=environment_version,
                     time_reservation=time_reservation,
+                    **network,
                 )
 
             # The runtime's own uid: what Runtimes' routes and a grantee's
@@ -554,6 +583,7 @@ class DatalayerSandbox(Sandbox):
                 metadata={
                     "network_policy": self.config.network_policy,
                     "allowed_hosts": self.config.allowed_hosts,
+                    "egress": list(getattr(self._runtime, "egress", None) or egress),
                 },
                 name=sandbox_name,
                 resources=resources,

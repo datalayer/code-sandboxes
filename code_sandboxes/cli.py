@@ -424,17 +424,32 @@ def _sandbox_table(title: str) -> Table:
     return table
 
 
+def _detail(value: Any) -> str:
+    """A metadata value as the Details cell says it: a list as its items."""
+    if isinstance(value, (list, tuple)):
+        return " ".join(str(item) for item in value)
+    return str(value)
+
+
 def _add_sandbox_row(table: Table, info: Any) -> None:
     details = ", ".join(
-        f"{key}={value}"
+        f"{key}={_detail(value)}"
         for key, value in (info.metadata or {}).items()
-        if value not in (None, "", 0)
+        if value not in (None, "", 0) and value != []
     )
     status = info.status.value if hasattr(info.status, "value") else str(info.status)
     table.add_row(info.id, info.variant, info.name or "", status, details)
 
 
 # The options shared by the management commands, declared once.
+_EGRESS_OPTION = typer.Option(
+    None,
+    "--egress",
+    help=(
+        "An extra host:port the sandbox may reach, repeatable (datalayer): a Datalayer "
+        "sandbox reaches any public host on ports 80 and 443 only, plus these."
+    ),
+)
 _VARIANT_OPTION = typer.Option(
     None,
     "--variant",
@@ -599,10 +614,19 @@ def create(
     run_url: str | None = _RUN_URL_OPTION,
     app_name: str | None = _APP_NAME_OPTION,
     username: str | None = _USERNAME_OPTION,
+    egress: list[str] | None = _EGRESS_OPTION,
 ) -> None:
     """Create a sandbox and leave it running, detached from this process."""
     manager_kwargs = _manager_kwargs(server_url, token, proxy_token, run_url, app_name, username)
     create_kwargs: dict[str, Any] = {}
+    if egress:
+        if variant.strip().lower() != "datalayer":
+            console.print(
+                f"[red]--egress is a Datalayer sandbox's: {variant} sandboxes say their network "
+                "through network_policy and allowed_hosts.[/red]"
+            )
+            raise typer.Exit(code=1)
+        create_kwargs["egress"] = list(egress)
     if gpu:
         create_kwargs["gpu"] = gpu
     if variant.strip().lower().replace("-", "_") == "jupyter_server":
