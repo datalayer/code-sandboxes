@@ -111,3 +111,42 @@ def test_create_starts_the_runtime_without_connecting_to_its_kernel():
     """
     DatalayerSandboxManager(token="t").create(environment="ai-agents-env")
     assert _Sandbox.started[-1].kwargs["connect"] is False
+
+
+def test_an_explicit_empty_egress_clears_the_configs_allowed_hosts():
+    config = SandboxConfig(allowed_hosts=["github.com:22"])
+    DatalayerSandboxManager(token="t").create(config=config, egress=[])
+    assert _Sandbox.started[-1].config.allowed_hosts == []
+
+
+def test_an_omitted_egress_keeps_the_configs_allowed_hosts():
+    config = SandboxConfig(allowed_hosts=["github.com:22"])
+    DatalayerSandboxManager(token="t").create(config=config)
+    assert _Sandbox.started[-1].config.allowed_hosts == ["github.com:22"]
+    DatalayerSandboxManager(token="t").create(config=config, egress=None)
+    assert _Sandbox.started[-1].config.allowed_hosts == ["github.com:22"]
+
+
+def test_an_egress_replaces_the_configs_allowed_hosts():
+    config = SandboxConfig(allowed_hosts=["github.com:22"])
+    DatalayerSandboxManager(token="t").create(config=config, egress=("1.1.1.1:53",))
+    assert _Sandbox.started[-1].config.allowed_hosts == ["1.1.1.1:53"]
+
+
+def test_an_egress_given_as_a_string_is_refused():
+    with pytest.raises(SandboxManagementError, match="list of host:port"):
+        DatalayerSandboxManager(token="t").create(egress="github.com:22")
+    assert _Sandbox.started == []
+
+
+def test_environment_version_zero_is_applied_not_dropped():
+    config = SandboxConfig(environment_version=3)
+    DatalayerSandboxManager(token="t").create(config=config, environment_version=0)
+    assert _Sandbox.started[-1].config.environment_version == 0
+
+
+def test_an_explicit_empty_name_or_gpu_overrides_the_config():
+    config = SandboxConfig(name="kept", gpu="T4")
+    DatalayerSandboxManager(token="t").create(config=config, name="", gpu="")
+    assert _Sandbox.started[-1].config.name == ""
+    assert _Sandbox.started[-1].config.gpu == ""

@@ -944,9 +944,18 @@ class DatalayerSandboxManager(SandboxManager):
             # The extra host:port the sandbox may reach beyond the web (the
             # CLI's `--egress`), which the sandbox sends as the launch's
             # `egress`; left in the extra arguments it would be dropped.
-            "allowed_hosts": list(kwargs.pop("egress", None) or []),
+            "allowed_hosts": kwargs.pop("egress", None),
         }
-        updates = {key: value for key, value in chosen.items() if value}
+        if isinstance(chosen["allowed_hosts"], str):
+            raise SandboxManagementError(
+                f"egress is a list of host:port, not the string {chosen['allowed_hosts']!r}."
+            )
+        if chosen["allowed_hosts"] is not None:
+            chosen["allowed_hosts"] = list(chosen["allowed_hosts"])
+        # Only what was omitted (None) keeps the config's value: an explicit
+        # empty egress (`egress=[]`) clears the config's allowed hosts, and a
+        # falsy value such as environment version 0 is applied, not dropped.
+        updates = {key: value for key, value in chosen.items() if value is not None}
         if updates:
             config = config.model_copy(update=updates)
         # The runtime, not a connection to its kernel: the kernel connection
